@@ -59,7 +59,7 @@ def create_schedule_response(meal_schedule: dict):
                     {
                         "action": "webLink",
                         "label": "식단 보기",
-                        "webLinkUrl": "https://37f3-116-43-183-242.ngrok-free.app/cafeteria/images/hall_1_menu.png",
+                        "webLinkUrl": f"{common.SERVER_URL}/cafeteria/images/hall_1_menu.png",
                     }
                     if cafeteria["place"] == "hall_1"
                     else {
