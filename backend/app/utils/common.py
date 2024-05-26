@@ -5,7 +5,7 @@ import aiofiles
 import pytz
 from app.utils import kakao_json_response
 
-SERVER_URL = "http://15.164.169.110"
+SERVER_URL = "http://13.125.200.177"
 
 DAYS_OF_WEEK_KOREAN = ["월", "화", "수", "목", "금", "토", "일"]
 
