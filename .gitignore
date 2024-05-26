@@ -1,0 +1,7 @@
+.env
+__pycache__
+
+# etl
+etl/logs
+etl/plugins
+etl/dags/webserver_config.py

@@ -1,0 +1,299 @@
+{
+    "place": "hall_2",
+    "menu": [
+        {
+            "day": "월",
+            "breakfast": [
+                {
+                    "type": "직원",
+                    "menu": [
+                        "해물볶음밥",
+                        "맑은우동국물",
+                        "만두강정(pork included)",
+                        "배추김치"
+                    ]
+                },
+                {
+                    "type": "학생",
+                    "menu": [
+                        "해물볶음밥",
+                        "맑은우동국물",
+                        "만두강정(pork included)",
+                        "배추김치"
+                    ]
+                }
+            ],
+            "lunch": [
+                {
+                    "type": "직원",
+                    "menu": [
+                        "콩나물밥/양념간장(beef included)",
+                        "어묵무국",
+                        "닭불고기(chicken included)",
+                        "양배추찜",
+                        "배추김치"
+                    ]
+                },
+                {
+                    "type": "학생",
+                    "menu": [
+                        "안동찜닭덮밥(chicken included)",
+                        "맑은우동국물",
+                        "감자고로케",
+                        "요쿠르트",
+                        "배추김치"
+                    ]
+                }
+            ],
+            "dinner": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": []
+                }
+            ]
+        },
+        {
+            "day": "화",
+            "breakfast": [
+                {
+                    "type": "직원",
+                    "menu": [
+                        "참치김치덮밥",
+                        "맑은우동국물",
+                        "미니돈까스(pork included)",
+                        "단무지"
+                    ]
+                },
+                {
+                    "type": "학생",
+                    "menu": [
+                        "참치김치덮밥",
+                        "맑은우동국물",
+                        "미니돈까스(pork included)",
+                        "단무지"
+                    ]
+                }
+            ],
+            "lunch": [
+                {
+                    "type": "직원",
+                    "menu": [
+                        "청국장찌개(beef included)",
+                        "고등어무조림",
+                        "비엔나브로콜리볶음(pork included)",
+                        "단호박범벅",
+                        "깍두기"
+                    ]
+                },
+                {
+                    "type": "학생",
+                    "menu": [
+                        "치킨마요덮밥(chicken included)",
+                        "맑은우동국물",
+                        "떡볶이",
+                        "요쿠르트",
+                        "깍두기"
+                    ]
+                }
+            ],
+            "dinner": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": []
+                }
+            ]
+        },
+        {
+            "day": "수",
+            "breakfast": [
+                {
+                    "type": "직원",
+                    "menu": [
+                        "소고기야채죽(beef included)",
+                        "볼어묵조림",
+                        "깍두기"
+                    ]
+                },
+                {
+                    "type": "학생",
+                    "menu": [
+                        "소고기야채죽(beef included)",
+                        "볼어묵조림",
+                        "깍두기"
+                    ]
+                }
+            ],
+            "lunch": [
+                {
+                    "type": "직원",
+                    "menu": [
+                        "꼬막비빔밥",
+                        "건새우아욱국",
+                        "새우교자만두(pork included)",
+                        "꽃맛살샐러드",
+                        "배추김치"
+                    ]
+                },
+                {
+                    "type": "학생",
+                    "menu": [
+                        "목살필라프&계란후라이(pork included)"
+                    ]
+                }
+            ],
+            "dinner": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": []
+                }
+            ]
+        },
+        {
+            "day": "목",
+            "breakfast": [
+                {
+                    "type": "직원",
+                    "menu": [
+                        "어묵무국",
+                        "돈탕수육(pork included)",
+                        "치커리무침",
+                        "배추김치"
+                    ]
+                },
+                {
+                    "type": "학생",
+                    "menu": [
+                        "어묵무국",
+                        "돈탕수육(pork included)",
+                        "치커리무침",
+                        "배추김치"
+                    ]
+                }
+            ],
+            "lunch": [
+                {
+                    "type": "직원",
+                    "menu": [
+                        "제육볶음(pork included)",
+                        "연두부&양념장",
+                        "모듬쌈",
+                        "식혜",
+                        "배추김치"
+                    ]
+                },
+                {
+                    "type": "학생",
+                    "menu": [
+                        "함박스파게티(pork included)"
+                    ]
+                }
+            ],
+            "dinner": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": []
+                }
+            ]
+        },
+        {
+            "day": "금",
+            "breakfast": [
+                {
+                    "type": "직원",
+                    "menu": [
+                        "소고기무우국(beef included)",
+                        "떡잡채(beef included)",
+                        "도시락김",
+                        "배추김치"
+                    ]
+                },
+                {
+                    "type": "학생",
+                    "menu": [
+                        "소고기무우국(beef included)",
+                        "떡잡채(beef included)",
+                        "도시락김",
+                        "배추김치"
+                    ]
+                }
+            ],
+            "lunch": [
+                {
+                    "type": "직원",
+                    "menu": [
+                        "소고기해장국(beef included)",
+                        "계란말이(pork included)",
+                        "고구마맛탕",
+                        "미역초무침",
+                        "깍두기"
+                    ]
+                },
+                {
+                    "type": "학생",
+                    "menu": [
+                        "어니언치킨까스(chicken included)"
+                    ]
+                }
+            ],
+            "dinner": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": []
+                }
+            ]
+        },
+        {
+            "day": "토",
+            "breakfast": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": []
+                }
+            ],
+            "lunch": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": []
+                }
+            ],
+            "dinner": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": []
+                }
+            ]
+        }
+    ]
+}

@@ -1,0 +1,235 @@
+{
+    "place": "life_science",
+    "menu": [
+        {
+            "day": "월",
+            "breakfast": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": []
+                }
+            ],
+            "lunch": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": [
+                        "쌀밥",
+                        "부대찌개(pork included)",
+                        "맛쵸킹탕수육(pork included)",
+                        "어묵볶음",
+                        "콩나물무침",
+                        "깍두기"
+                    ]
+                }
+            ],
+            "dinner": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": []
+                }
+            ]
+        },
+        {
+            "day": "화",
+            "breakfast": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": []
+                }
+            ],
+            "lunch": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": [
+                        "스팸김치볶음밥(pork included)",
+                        "맑은장국",
+                        "치킨너겟(chicken included)",
+                        "천사채샐러드",
+                        "단무지"
+                    ]
+                }
+            ],
+            "dinner": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": []
+                }
+            ]
+        },
+        {
+            "day": "수",
+            "breakfast": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": []
+                }
+            ],
+            "lunch": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": [
+                        "쌀밥",
+                        "물만두국(pork included)",
+                        "돼지고기김치볶음(pork included)",
+                        "온두부&양념장",
+                        "메추리알장조림",
+                        "깍두기"
+                    ]
+                }
+            ],
+            "dinner": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": []
+                }
+            ]
+        },
+        {
+            "day": "목",
+            "breakfast": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": []
+                }
+            ],
+            "lunch": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": [
+                        "비빔밥&계란후라이(beef included)",
+                        "두부된장국",
+                        "갈릭마요미트볼(chicken included)",
+                        "백김치",
+                        "밤만쥬"
+                    ]
+                }
+            ],
+            "dinner": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": []
+                }
+            ]
+        },
+        {
+            "day": "금",
+            "breakfast": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": []
+                }
+            ],
+            "lunch": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": [
+                        "우삼겹우동전골(beef included)",
+                        "추가밥",
+                        "새우카츠",
+                        "파인애플샐러드",
+                        "단무지"
+                    ]
+                }
+            ],
+            "dinner": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": []
+                }
+            ]
+        },
+        {
+            "day": "토",
+            "breakfast": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": []
+                }
+            ],
+            "lunch": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": []
+                }
+            ],
+            "dinner": [
+                {
+                    "type": "직원",
+                    "menu": []
+                },
+                {
+                    "type": "학생",
+                    "menu": []
+                }
+            ]
+        }
+    ]
+}
