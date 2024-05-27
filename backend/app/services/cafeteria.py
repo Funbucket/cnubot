@@ -29,7 +29,8 @@ def create_schedule_response(meal_schedule: dict):
         return (
             "\n".join(
                 [
-                    f"{'🟢 ' if time['open'] <= current_time_kst <= time['close'] else ''}{get_kor_meal_time(meal)}: {time['open']}~{time['close']}\n"
+                    # f"{'🟢 ' if time['open'] <= current_time_kst <= time['close'] else ''}{get_kor_meal_time(meal)}: {time['open']}~{time['close']}\n"  # 현재 시간에 이용 가능한 식당 시간
+                    f"{get_kor_meal_time(meal)}: {time['open']}~{time['close']}\n"
                     + (f"  {time['extra']}\n" if "extra" in time else "")
                     for meal, time in times.items()
                 ]
