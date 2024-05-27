@@ -94,7 +94,9 @@ def create_menu_response(day: str, menu_data: dict, place: str):
         items = [
             kakao_response.create_text_card(
                 title=f"{day_label} • {get_kor_meal_time(meal_time)} • {meal['type']}",
-                description="\n".join(meal["menu"]),
+                description="칼로리: {} kcal\n\n{}".format(
+                    meal.get("calorie", "정보 없음"), "\n".join(meal["menu"])
+                ),
                 buttons=[{"label": "식단 공유하기", "action": "share"}],
             )
             for meal in menu_data[meal_time]
