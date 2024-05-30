@@ -6,10 +6,21 @@ CNU_SHUTTLE_URL = "https://plus.cnu.ac.kr/html/kr/sub05/sub05_050403.html"
 
 
 def parse_times(schedule):
+    current_date = common.get_current_kr_time().date()
     return {
         route: [
-            {"bus": key, "time": t}
+            {
+                "bus": key,
+                "time": t,
+                "operating_period": data["times"][key].get("operating_period"),
+            }
             for key, value in data["times"].items()
+            if not value.get("operating_period")
+            or (
+                datetime.strptime(value["operating_period"][0], "%Y-%m-%d").date()
+                <= current_date
+                <= datetime.strptime(value["operating_period"][1], "%Y-%m-%d").date()
+            )
             for period in ["first", "morning", "afternoon", "last"]
             for t in (
                 value[period] if isinstance(value[period], list) else [value[period]]
