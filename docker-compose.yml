@@ -26,7 +26,7 @@ x-airflow-common:
     - ${AIRFLOW_PROJ_DIR}/config:/opt/airflow/config
     - ${AIRFLOW_PROJ_DIR}/plugins:/opt/airflow/plugins
     - ${AIRFLOW_PROJ_DIR}/data:/opt/airflow/data
-  user: "${AIRFLOW_UID}:${AIRFLOW_UID}"
+  user: "${AIRFLOW_UID}:0"
   depends_on:
     &airflow-common-depends-on
     redis:
