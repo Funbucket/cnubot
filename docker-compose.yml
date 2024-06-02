@@ -177,7 +177,7 @@ services:
           echo "   https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html#before-you-begin"
           echo
         fi
-        mkdir -p /sources/logs /sources/dags /sources/plugins /sources/data
+        mkdir -p /sources/logs /sources/dags /sources/plugins
         chown -R "${AIRFLOW_UID}:0" /sources/{logs,dags,plugins,data}
         exec /entrypoint airflow version
 
@@ -201,4 +201,34 @@ services:
       - -c
       - airflow
 
- 
+  flower:
+    <<: *airflow-common
+    command: celery flower
+    profiles:
+      - flower
+    ports:
+      - "5555:5555"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:5555/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  backend:
+    build:
+      context: ./backend
+    command: [ "--host", "0.0.0.0", "--port", "80" ]
+    ports:
+      - "80:80"
+    volumes:
+      - ./backend/app:/code/app/
+      - ${AIRFLOW_PROJ_DIR?}/data:/opt/airflow/data
+
+volumes:
+  postgres-db-volume:
