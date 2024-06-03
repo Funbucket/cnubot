@@ -10,7 +10,7 @@ router = APIRouter()
 
 @router.post("/nearby")
 async def get_nearby_shuttles():
-    data = await common.load_data("/app/static/data/shuttle_schedule.json")
+    data = await common.load_data("/code/app/static/data/shuttle_schedule.json")
     response = shuttle.create_nearby_shuttles_response(data)
 
     return JSONResponse(response)
