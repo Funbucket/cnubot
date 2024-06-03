@@ -44,7 +44,7 @@ def create_seats_response():
         kakao_response.add_output_to_response(
             {
                 "textCard": kakao_response.create_text_card(
-                    title="자석현황",
+                    title="좌석현황",
                     description="\n".join(descriptions),
                     buttons=[
                         {
