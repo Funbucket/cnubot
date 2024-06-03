@@ -14,7 +14,7 @@ async def get_schedule():
     """
     return: 식당 시간표
     """
-    schedule_data = await common.load_data("/app/static/data/meal_schedule.json")
+    schedule_data = await common.load_data("/code/app/static/data/meal_schedule.json")
     response = cafeteria.create_schedule_response(schedule_data)
     return JSONResponse(response)
 
