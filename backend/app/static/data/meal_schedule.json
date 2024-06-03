@@ -1,0 +1,69 @@
+[ 
+  {
+    "place": "hall_3",
+    "extra": "*주말 및 공휴일 미운영",
+    "hours": {
+      "lunch": {"open": "11:30", "close": "14:00"},
+      "dinner": {"open": "17:30", "close": "19:00"}
+    }
+  },
+  {
+    "place": "sangrok",
+    "extra": "*주말 및 공휴일 미운영",
+    "hours": {
+      "lunch": {"open": "11:30", "close": "14:00"}
+    }
+  },
+  {
+    "place": "life_science",
+    "extra": "*주말 및 공휴일 미운영",
+    "hours": {
+      "lunch": {"open": "11:30", "close": "14:00"}
+    }
+  },
+  {
+    "place": "dorm",
+    "hours": {
+      "breakfast": {"open": "07:30", "close": "09:00"},
+      "lunch": {"open": "11:30", "close": "13:30"},
+      "dinner": {
+        "open": "17:00", "close": "19:00",
+        "extra": "*주말 및 공휴일: 17:30~19:00"
+      }
+    }
+  },
+  {
+    "place": "hall_1",
+    "extra": "*주말 및 공휴일 미운영",
+    "hours": {
+      "ramen": {
+        "lunch": {"open": "10:00", "close": "14:00"}
+      },
+      "western": {
+        "lunch": {"open": "10:00", "close": "14:00"}
+      },
+      "snack": {
+        "lunch": {"open": "11:00", "close": "14:30"}
+      },
+      "korean": {
+        "lunch": {"open": "11:00", "close": "14:00"},
+        "dinner": {"open": "17:00", "close": "19:00"}
+      },
+      "japanese": {
+        "lunch_dinner": {"open": "11:00", "close": "19:00"}
+      },
+      "chinese": {
+        "lunch": {"open": "11:00", "close": "14:00"},
+        "dinner": {"open": "16:00", "close": "19:00"}
+      }
+    }
+  },
+  {
+    "place": "hall_2",
+    "extra": "*주말 및 공휴일 미운영",
+    "hours": {
+      "breakfast": {"open": "08:00", "close": "09:00"},
+      "lunch": {"open": "11:30", "close": "14:00"}
+    }
+  }
+]
