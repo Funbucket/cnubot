@@ -1,11 +1,16 @@
 import json
+import os
 from datetime import datetime
 
 import aiofiles
 import pytz
 from app.utils import kakao_json_response
+from dotenv import load_dotenv
 
-SERVER_URL = "http://144.24.86.85"
+load_dotenv()
+
+SERVER_URL = os.getenv("SERVER_URL")
+
 
 DAYS_OF_WEEK_KOREAN = ["월", "화", "수", "목", "금", "토", "일"]
 

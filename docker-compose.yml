@@ -224,6 +224,8 @@ services:
     build:
       context: ./backend
     command: [ "--host", "0.0.0.0", "--port", "80" ]
+    environment:
+      SERVER_URL: ${SERVER_URL}
     ports:
       - "80:80"
     volumes:
