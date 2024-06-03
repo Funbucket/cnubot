@@ -5,3 +5,4 @@ __pycache__
 etl/logs
 etl/plugins
 etl/dags/webserver_config.py
+etl/data
