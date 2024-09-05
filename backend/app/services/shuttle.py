@@ -145,7 +145,7 @@ def create_nearby_shuttles_response(data):
                     {
                         "action": "webLink",
                         "label": "노선표 보기",
-                        "webLinkUrl": f"{common.SERVER_URL}/shuttle/images/{route}_routes.jpg",
+                        "webLinkUrl": f"{common.SERVER_URL}/shuttle/images/{route}_routes.png",
                     },
                     {
                         "action": "webLink",
