@@ -43,7 +43,28 @@ def scrap_menu(dorm_url: str) -> str:
     response = requests.get(dorm_url)
     soup = bs(response.content.decode("utf8", "replace"), "html.parser")
 
-    data = {"place": "dorm", "menu": []}
+    # 날짜 범위 추출 및 형식 변환
+    date_range_element = soup.select_one(".diet_table_top strong")
+    date_range_raw = (
+        date_range_element.text.strip() if date_range_element else "날짜 정보 없음"
+    )
+    if date_range_raw != "날짜 정보 없음":
+        try:
+            parts = date_range_raw.split("~")
+            start_date = parts[0].strip()  # 예: "2025-03-03"
+            end_date = parts[1].strip()  # 예: "2025-03-09"
+            start_parts = start_date.split("-")  # ["2025", "03", "03"]
+            end_parts = end_date.split("-")  # ["2025", "03", "09"]
+            date_range = (
+                f"{start_parts[1]}/{start_parts[2]} ~ {end_parts[1]}/{end_parts[2]}"
+            )
+        except Exception as e:
+            date_range = date_range_raw
+    else:
+        date_range = date_range_raw
+
+    data = {"place": "dorm", "date": date_range, "menu": []}
+
     for row in soup.select("table.default_view.diet_table tbody tr"):
         day = row.select_one("td").text.strip().split("(")[1][:-1]
         breakfast_cell = row.select_one("td:nth-of-type(2)")
