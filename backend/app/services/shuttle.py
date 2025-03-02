@@ -6,62 +6,49 @@ CNU_SHUTTLE_URL = "https://plus.cnu.ac.kr/html/kr/sub05/sub05_050403.html"
 
 
 def parse_times(schedule):
-    current_date = common.get_current_kr_time().date()
+    """
+    수정된 시간표 구조에 맞게, 단일 노선의 출발 시각 리스트를 반환합니다.
+    """
     return {
-        route: [
-            {
-                "bus": key,
-                "time": t,
-                "operating_period": data["times"][key].get("operating_period"),
-            }
-            for key, value in data["times"].items()
-            if not value.get("operating_period")
-            or (
-                datetime.strptime(value["operating_period"][0], "%Y-%m-%d").date()
-                <= current_date
-                <= datetime.strptime(value["operating_period"][1], "%Y-%m-%d").date()
-            )
-            for period in ["first", "morning", "afternoon", "last"]
-            for t in (
-                value[period] if isinstance(value[period], list) else [value[period]]
-            )
-        ]
+        route: [{"time": t} for t in data["times"]]
         for route, data in schedule["bus_schedule"].items()
     }
 
 
 def calculate_bus_times(times, current_kst):
-    def get_bus_time(bus):
-        return datetime.strptime(bus["time"], "%H:%M").replace(
+    """
+    주어진 출발 시각 리스트에서 현재 기준으로 지난(운행중) 버스와 앞으로 올(대기중) 버스를 계산합니다.
+    """
+
+    def get_bus_time(t_str):
+        return datetime.strptime(t_str, "%H:%M").replace(
             year=current_kst.year,
             month=current_kst.month,
             day=current_kst.day,
             tzinfo=current_kst.tzinfo,
         )
 
-    times_with_bus_time = [
-        {"bus": bus["bus"], "time": get_bus_time(bus)} for bus in times
-    ]
+    times_with_bus_time = [{"time": get_bus_time(bus["time"])} for bus in times]
     first_bus_time = times_with_bus_time[0]["time"]
     last_bus_time = times_with_bus_time[-1]["time"]
 
-    if current_kst < first_bus_time or current_kst > last_bus_time:
+    if current_kst < first_bus_time or current_kst > last_bus_time + timedelta(
+        minutes=16
+    ):
         return "운행 종료", []
 
     past_buses = [
         {
-            "bus": bus["bus"],
             "time": bus["time"].strftime("%H:%M"),
             "minutes_ago": (current_kst - bus["time"]).seconds // 60,
         }
         for bus in times_with_bus_time
-        if current_kst - timedelta(minutes=10) <= bus["time"] <= current_kst
+        if current_kst - timedelta(minutes=16) <= bus["time"] <= current_kst
     ][:2]
 
     future_buses = sorted(
         [
             {
-                "bus": bus["bus"],
                 "time": bus["time"].strftime("%H:%M"),
                 "minutes_left": (bus["time"] - current_kst).seconds // 60,
             }
@@ -76,7 +63,7 @@ def calculate_bus_times(times, current_kst):
 
 def create_nearby_shuttles_response(data):
     current_kst = common.get_current_kr_time()
-    # current_kst = datetime(2024, 5, 22, 16, 16, tzinfo=current_kst.tzinfo)  # test time
+    # current_kst = datetime(2025, 3, 4, 17, 31, tzinfo=current_kst.tzinfo)  # test time
 
     if current_kst.weekday() >= 5:
         kakao_response = kakao_json_response.KakaoJsonResponse()
@@ -88,7 +75,7 @@ def create_nearby_shuttles_response(data):
                     buttons=[
                         {
                             "action": "webLink",
-                            "label": "자세히 보기",
+                            "label": "학교 공지 보기",
                             "webLinkUrl": f"{CNU_SHUTTLE_URL}",
                         }
                     ],
@@ -114,7 +101,7 @@ def create_nearby_shuttles_response(data):
                     buttons=[
                         {
                             "action": "webLink",
-                            "label": "자세히 보기",
+                            "label": "학교 공지 보기",
                             "webLinkUrl": f"{CNU_SHUTTLE_URL}",
                         }
                     ],
@@ -126,17 +113,17 @@ def create_nearby_shuttles_response(data):
             kakao_response.create_text_card(
                 title=f"{route} 노선",
                 description=(
-                    f"🚌 운행중\n"
+                    f"🚌 운행중 ({len(buses[0])}대)\n"
                     + "\n".join(
                         [
                             f"{bus['time']} 출발 ({bus['minutes_ago']}분 전)"
                             for bus in buses[0]
                         ]
                     )
-                    + "\n\n💤 대기중\n"
+                    + f"\n\n💤 대기중 ({len(buses[1])}대)\n"
                     + "\n".join(
                         [
-                            f"{bus['time']} 출발 (앞으로 {bus['minutes_left']}분)"
+                            f"{bus['time']} 출발 ({bus['minutes_left']}분 후)"
                             for bus in buses[1]
                         ]
                     )
@@ -144,12 +131,17 @@ def create_nearby_shuttles_response(data):
                 buttons=[
                     {
                         "action": "webLink",
-                        "label": "노선표 보기",
-                        "webLinkUrl": f"{common.SERVER_URL}/shuttle/images/{route}_routes.png",
+                        "label": "노선도 보기",
+                        "webLinkUrl": f"{common.SERVER_URL}/shuttle/images/shuttle_route.png",
                     },
                     {
                         "action": "webLink",
-                        "label": "자세히 보기",
+                        "label": "노선 지도 보기",
+                        "webLinkUrl": f"{common.SERVER_URL}/shuttle/images/shuttle_map.png",
+                    },
+                    {
+                        "action": "webLink",
+                        "label": "학교 공지 보기",
                         "webLinkUrl": f"{CNU_SHUTTLE_URL}",
                     },
                 ],
