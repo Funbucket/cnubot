@@ -54,7 +54,7 @@ def create_schedule_response(meal_schedule: dict):
     items = [
         kakao_response.create_text_card(
             title=f"{common.get_kor_place(cafeteria.get('place', ''))}"
-            f"{(' (' + cafeteria['date'] + ')') if cafeteria.get('date') else ''}",
+            + f"{(' (' + cafeteria['date'] + ')') if cafeteria.get('date') else ''}",
             description=format_description(cafeteria).strip(),
             buttons=[
                 (
