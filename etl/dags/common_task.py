@@ -9,9 +9,38 @@ def scrap_menu(url: str, place: str) -> str:
     soup = bs(response.content, "html.parser")
 
     menu_data = {"place": place, "menu": []}
-    days = ["월", "화", "수", "목", "금", "토"]
 
     table = soup.find("table", class_="menu-tbl")
+
+    # 운영일자 추출
+    ths = table.find_all("th")
+    if len(ths) >= 2:
+        # 두번째 th에서 시작일, 마지막 th에서 종료일 추출 (childNodes[2]에 해당)
+        start_th = ths[1]
+        end_th = ths[-1]
+        start_date_raw = (
+            start_th.contents[2].strip() if len(start_th.contents) >= 3 else ""
+        )
+        end_date_raw = end_th.contents[2].strip() if len(end_th.contents) >= 3 else ""
+        if start_date_raw and end_date_raw:
+            start_parts = start_date_raw.split(".")
+            end_parts = end_date_raw.split(".")
+            if len(start_parts) == 3 and len(end_parts) == 3:
+                # "YYYY.MM.DD" -> "MM/DD"
+                menu_date = (
+                    f"{start_parts[1]}/{start_parts[2]} ~ {end_parts[1]}/{end_parts[2]}"
+                )
+            else:
+                menu_date = ""
+        else:
+            menu_date = ""
+    else:
+        menu_date = ""
+
+    menu_data["date"] = menu_date
+
+    days = ["월", "화", "수", "목", "금", "토"]
+
     tbody = table.find("tbody")
     trs = tbody.find_all("tr")
 
