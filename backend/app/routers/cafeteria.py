@@ -12,9 +12,21 @@ router = APIRouter()
 @router.post("/schedule")
 async def get_schedule():
     """
-    return: 식당 시간표
+    return: 식당 시간표 (static meal_schedule.json + 동적 운영 날짜 추가)
     """
+    # static meal_schedule.json 불러오기
     schedule_data = await common.load_data("/code/app/static/data/meal_schedule.json")
+
+    # schedule_data가 리스트 형태라고 가정 (각 항목은 cafeteria 데이터)
+    # 각 항목의 place 값을 기준으로 동적 운영 날짜를 가져와 추가
+    for cafeteria_data in schedule_data:
+        place = cafeteria_data.get("place")
+        # 이미 date 값이 있다면 그대로 사용, 없으면 동적 파일에서 불러옴
+        if not cafeteria_data.get("date"):
+            operating_date = await common.get_operating_date_for_place(place)
+            if operating_date:
+                cafeteria_data["date"] = operating_date
+
     response = cafeteria.create_schedule_response(schedule_data)
     return JSONResponse(response)
 

@@ -70,3 +70,22 @@ def create_no_menu_response():
     simple_text = kakao_response.create_simple_text("운영 중인 메뉴가 없어요 🥲")
     kakao_response.add_output_to_response(simple_text)
     return kakao_response.get_response()
+
+
+async def get_operating_date_for_place(place: str) -> str:
+    # 각 메뉴 파일의 경로 매핑 (Airflow 또는 동적 파일 저장 경로)
+    dynamic_file_mapping = {
+        "dorm": "/opt/airflow/data/dorm_menu.json",
+        "hall_2": "/opt/airflow/data/hall_2_menu.json",
+        "hall_3": "/opt/airflow/data/hall_3_menu.json",
+        "life_science": "/opt/airflow/data/life_science_menu.json",
+        "sangrok": "/opt/airflow/data/sangrok_menu.json",
+    }
+    file_path = dynamic_file_mapping.get(place)
+    if file_path:
+        try:
+            data = await load_data(file_path)
+            return data.get("date", "")
+        except Exception:
+            return ""
+    return ""
