@@ -34,7 +34,12 @@ def extract_menus_from_cell(cell):
                 else:
                     current_type = None
         elif current_type:
-            current_type["menu"].append(line)
+            # 숫자, 쉼표만 단독으로 존재하는 부분 제거
+            cleaned_line = re.sub(r"(?<=\s|^)(\d+(,\d+)*)(?=\s|$)", "", line).strip(
+                " ,"
+            )
+            if cleaned_line:
+                current_type["menu"].append(cleaned_line)
     return menu_data
 
 
