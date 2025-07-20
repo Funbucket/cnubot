@@ -9,7 +9,7 @@ from settings import CURRENT_KR_TIME, DORM_URL, START_KR_DATE
 
 # '메인X' 또는 'MainX' 헤더를 매칭 (대소문자 구분 없이)
 MENU_HEADER_PATTERN = re.compile(
-    r"((?:메인|Main)\w+)\((\d+)kcal\)", flags=re.IGNORECASE
+    r"((?:메인|Main|MAIN)\w*)\((\d+)kcal\)", flags=re.IGNORECASE
 )
 
 
