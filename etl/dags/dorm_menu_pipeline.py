@@ -7,9 +7,9 @@ from airflow.models import Param
 from bs4 import BeautifulSoup as bs
 from settings import CURRENT_KR_TIME, DORM_URL, START_KR_DATE
 
-# '메인X' 또는 'MainX' 헤더를 매칭 (대소문자 구분 없이)
+# '메인X', 'MainX', 'MAIN X' 등 공백 포함 및 대소문자 무시하고 매칭
 MENU_HEADER_PATTERN = re.compile(
-    r"((?:메인|Main|MAIN)\w*)\((\d+)kcal\)", flags=re.IGNORECASE
+    r"((?:메인|main)\s*\w*)\s*\((\d+)kcal\)", flags=re.IGNORECASE
 )
 
 
@@ -25,19 +25,19 @@ def extract_menus_from_cell(cell):
     for line in cell.stripped_strings:
         match = MENU_HEADER_PATTERN.match(line)
         if match:
-            raw_type = match.group(1)  # e.g. "메인A" or "MainA"
-            calorie = match.group(2)  # e.g. "780"
+            raw_type = match.group(1).strip()  # e.g. "메인 A", "MAIN A"
+            calorie = match.group(2)
 
-            # 영어 'MainX' → 한국어 '메인X' 로 통일
-            if re.match(r"^Main", raw_type, flags=re.IGNORECASE):
-                menu_type = re.sub(r"^Main", "메인", raw_type, flags=re.IGNORECASE)
+            # 영어 'MainX' 또는 'Main X' → 한국어 '메인X'로 통일
+            if re.match(r"^main", raw_type, flags=re.IGNORECASE):
+                menu_type = re.sub(r"^main\s*", "메인", raw_type, flags=re.IGNORECASE)
             else:
                 menu_type = raw_type  # 이미 '메인X' 형태
 
             # 중복된 타입 한 번만 추가
             if menu_type not in found_types:
                 current_type = {
-                    "type": menu_type,  # e.g. "메인A", "메인C"
+                    "type": menu_type,  # e.g. "메인A", "메인 C"
                     "calorie": calorie,
                     "menu": [],
                 }
