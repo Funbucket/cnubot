@@ -117,7 +117,7 @@ def save_menu(data: str) -> None:
         ),
     },
     start_date=START_KR_DATE,
-    schedule_interval="0 0 * * 0",  # 매주 일요일 자정 실행
+    schedule_interval="0 23 * * 0",  # 매주 일요일 23:00 KST 실행
     catchup=True,
 )
 def pipeline():
