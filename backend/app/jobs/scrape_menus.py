@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -25,6 +26,7 @@ def save_menu(data: dict, data_dir: Path) -> Path:
     validate_menu_data(data)
     place = data["place"]
     path = data_dir / f"{place}_menu.json"
+    current_stat = path.stat() if path.exists() else None
     payload = json.dumps(data, ensure_ascii=False, indent=4)
 
     with tempfile.NamedTemporaryFile(
@@ -41,6 +43,12 @@ def save_menu(data: dict, data_dir: Path) -> Path:
 
     try:
         json.loads(tmp_path.read_text(encoding="utf-8"))
+        if current_stat:
+            shutil.copystat(path, tmp_path)
+            try:
+                os.chown(tmp_path, current_stat.st_uid, current_stat.st_gid)
+            except PermissionError:
+                pass
         os.replace(tmp_path, path)
     finally:
         if tmp_path.exists():
