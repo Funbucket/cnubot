@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 
 from app.database import get_pool
@@ -124,7 +125,7 @@ def create_reaction_response(extra: dict, result: ReactionResult):
     kakao_response = kakao_json_response.KakaoJsonResponse()
     meal_label = "{} {} {}".format(
         extra.get("dayLabel") or extra.get("day", ""),
-        extra.get("mealTimeLabel", ""),
+        _without_emoji(extra.get("mealTimeLabel", "")),
         extra.get("mealType", ""),
     ).strip()
     prefix = "투표를 바꿨어요." if result.changed else "투표했어요."
@@ -140,3 +141,7 @@ def create_reaction_response(extra: dict, result: ReactionResult):
         buttons=[{"label": "투표결과 공유하기", "action": "share"}],
     )
     return kakao_response.add_output_to_response({"textCard": card}).get_response()
+
+
+def _without_emoji(text: str) -> str:
+    return re.sub(r"^[^\w가-힣]+\s*", "", text).strip()
