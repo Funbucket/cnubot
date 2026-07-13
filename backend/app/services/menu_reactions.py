@@ -137,6 +137,6 @@ def create_reaction_response(extra: dict, result: ReactionResult):
             f"{REACTION_LABELS['negative']} {result.negative_percent}%\n\n"
             f"총 {result.total_count}명 참여"
         ),
-        buttons=[{"label": "식단 공유하기", "action": "share"}],
+        buttons=[{"label": "투표결과 공유하기", "action": "share"}],
     )
     return kakao_response.add_output_to_response({"textCard": card}).get_response()
