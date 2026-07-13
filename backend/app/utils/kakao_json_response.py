@@ -22,13 +22,18 @@ class KakaoJsonResponse:
         }
 
     @staticmethod
-    def create_text_card(title: str, description: str, buttons: list):
+    def create_text_card(
+        title: str, description: str, buttons: list, button_layout: str = None
+    ):
         # https://kakaobusiness.gitbook.io/main/tool/chatbot/skill_guide/answer_json_format#textcard
-        return {
+        text_card = {
             "title": title,
             "description": description,
             "buttons": buttons,
         }
+        if button_layout:
+            text_card["buttonLayout"] = button_layout
+        return text_card
 
     @staticmethod
     def create_carousel(items: list, type: str = "textCard"):

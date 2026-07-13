@@ -1,7 +1,7 @@
 import os
 
 from app.schemas.kakao_request import KakaoRequest
-from app.services import cafeteria
+from app.services import cafeteria, menu_reactions
 from app.utils import common, kakao_json_response
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
@@ -50,6 +50,31 @@ async def get_today_menu(req: KakaoRequest):
         raise HTTPException(status_code=404, detail="해당 요일에 메뉴가 없습니다.")
 
     response = cafeteria.create_menu_response(kor_day, menu_data, place)
+    return JSONResponse(response)
+
+
+@router.post("/menu/reaction")
+async def create_menu_reaction(req: KakaoRequest):
+    """
+    식단 카드의 반응 버튼 extra를 받아 사용자별 투표를 저장하고 집계 결과를 반환합니다.
+    """
+    extra = req.action.clientExtra if req.action and req.action.clientExtra else None
+    user = req.userRequest.user
+    user_id = user.id if user and user.id else None
+
+    if not extra:
+        raise HTTPException(status_code=400, detail="반응 정보가 없습니다.")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="사용자 정보가 없습니다.")
+
+    try:
+        result = await menu_reactions.record_reaction(extra, user_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail="DB 연결이 준비되지 않았습니다.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    response = menu_reactions.create_reaction_response(extra, result)
     return JSONResponse(response)
 
 

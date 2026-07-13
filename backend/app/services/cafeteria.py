@@ -1,3 +1,4 @@
+from app.services import menu_reactions
 from app.utils import common, kakao_json_response
 
 CUISINE_KOREAN = {
@@ -90,6 +91,46 @@ def create_menu_response(day: str, menu_data: dict, place: str):
 
     today_kor = common.get_today_in_korean()
     day_label = "오늘" if day == today_kor else day
+    place_key = common.get_eng_place(place)
+
+    def create_reaction_button(
+        label: str, reaction: str, meal_time: str, meal: dict
+    ) -> dict:
+        menu_items = meal.get("menu", [])
+        calorie = meal.get("calorie", "")
+        meal_id = menu_reactions.create_meal_id(
+            place_key=place_key,
+            day=day,
+            meal_time=meal_time,
+            meal_type=meal.get("type", ""),
+            calorie=calorie,
+            menu_items=menu_items,
+        )
+        extra = {
+            "mealId": meal_id,
+            "place": place_key,
+            "placeName": place,
+            "day": day,
+            "dayLabel": day_label,
+            "mealTime": meal_time,
+            "mealTimeLabel": get_kor_meal_time(meal_time),
+            "mealType": meal.get("type", ""),
+            "calorie": calorie,
+            "menuItems": menu_items,
+            "reaction": reaction,
+        }
+        button = {
+            "label": label,
+            "messageText": f"식단 {label}",
+            "extra": extra,
+        }
+        if common.KAKAO_REACTION_BLOCK_ID:
+            button.update(
+                {"action": "block", "blockId": common.KAKAO_REACTION_BLOCK_ID}
+            )
+        else:
+            button["action"] = "message"
+        return button
 
     for meal_time in ["breakfast", "lunch", "dinner"]:
         items = [
@@ -103,7 +144,16 @@ def create_menu_response(day: str, menu_data: dict, place: str):
                     ),
                     "\n".join(meal["menu"]),
                 ),
-                buttons=[{"label": "식단 공유하기", "action": "share"}],
+                buttons=[
+                    create_reaction_button(
+                        "👍 괜찮아요", "positive", meal_time, meal
+                    ),
+                    create_reaction_button(
+                        "👎 아쉬워요", "negative", meal_time, meal
+                    ),
+                    {"label": "식단 공유하기", "action": "share"},
+                ],
+                button_layout="vertical",
             )
             for meal in menu_data[meal_time]
             if meal["menu"]
