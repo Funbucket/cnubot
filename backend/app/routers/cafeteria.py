@@ -37,7 +37,11 @@ async def get_today_menu(req: KakaoRequest):
     req: ex) "기숙사", "제2학생회관", "제3학생회관", "상록회관", "생활과학대학"
     return: 오늘의 메뉴, 요일 퀵리플라이
     """
-    place = req.userRequest.utterance.strip()
+    utterance = req.userRequest.utterance.strip()
+    if _is_favorite_utterance(utterance):
+        return await _handle_favorite_fallback(req, utterance)
+
+    place = utterance
     current_kst = common.get_current_kr_time()
     today_weekday = current_kst.weekday()  # 0: 월요일, 1: 화요일, ..., 6: 일요일
     kor_day = common.get_kor_day(today_weekday)
@@ -161,3 +165,13 @@ def _get_user_id(req: KakaoRequest | None) -> str | None:
     if not req or not req.userRequest.user:
         return None
     return req.userRequest.user.id
+
+
+def _is_favorite_utterance(utterance: str) -> bool:
+    return "즐겨찾기" in utterance.replace(" ", "")
+
+
+async def _handle_favorite_fallback(req: KakaoRequest, utterance: str):
+    if cafeteria_favorites.parse_favorite_place(utterance):
+        return await update_favorite(req)
+    return await get_favorites(req)
