@@ -1,7 +1,7 @@
 # cnubot
 
 충남대학교 학생을 위한 카카오톡 챗봇 기반 캠퍼스 정보 서비스입니다.  
-학식, 셔틀버스, 도서관 좌석, 고객센터 연결 기능을 제공하며, FastAPI 백엔드와 Airflow 기반 ETL 파이프라인으로 구성되어 있습니다.
+학식, 셔틀버스, 도서관 좌석, 고객센터 연결 기능을 제공하며, FastAPI 백엔드와 Postgres 기반 투표 저장소로 구성되어 있습니다.
 
 ## Features
 
@@ -10,7 +10,8 @@
 - 실시간 기준 셔틀 운행 상태 조회
 - 도서관 좌석 현황 조회
 - 카카오 상담원 연결용 고객센터 응답 제공
-- Airflow DAG를 통한 교내 식단 데이터 수집 및 JSON 저장
+- backend job을 통한 교내 식단 데이터 수집 및 JSON 저장
+- 식단 반응 투표 및 결과 집계
 
 ## Architecture
 
@@ -26,15 +27,15 @@ KakaoTalk Chatbot
         |
         +--> static JSON / image assets
         |
-        +--> /opt/airflow/data/*.json
-                ^
-                |
-        Apache Airflow ETL
-   - dorm menu
-   - hall 2 menu
-   - hall 3 menu
-   - sangrok menu
-   - life science menu
+        +--> /data/menus/*.json
+        |
+        +--> backend Postgres
+             - meal snapshots
+             - meal reactions
+
+Host scheduler
+        |
+        +--> docker compose exec backend python -m app.jobs.scrape_menus ...
 ```
 
 ## Project Structure
@@ -44,14 +45,14 @@ cnubot/
 ├── backend/
 │   ├── app/
 │   │   ├── routers/      FastAPI route definitions
+│   │   ├── jobs/         scheduled command entrypoints
+│   │   ├── scrapers/     menu scraping/parsing logic
 │   │   ├── services/     Kakao response builders and domain logic
 │   │   ├── utils/        common helpers and Kakao JSON formatter
 │   │   └── static/       static data and image assets
 │   ├── Dockerfile
 │   └── pyproject.toml
-├── etl/
-│   ├── dags/            Airflow menu scraping pipelines
-│   └── Dockerfile
+├── data/                generated menu JSON files
 └── docker-compose.yml
 ```
 
@@ -65,6 +66,8 @@ cnubot/
   - 오늘의 메뉴 조회
 - `POST /cafeteria/menu/day`
   - 특정 요일 메뉴 조회
+- `POST /cafeteria/menu/reaction`
+  - 식단 반응 저장 및 투표 결과 반환
 - `POST /shuttle/nearby`
   - 현재 시각 기준 셔틀 운행/대기 정보 조회
 - `POST /library/seats`
@@ -74,15 +77,17 @@ cnubot/
 - `GET /cafeteria/images/{image_name}`
 - `GET /shuttle/images/{image_name}`
 
-### ETL
+### Menu Scraping
 
-Airflow DAG가 교내 식당 페이지를 스크래핑해 `/opt/airflow/data/*.json` 파일을 생성합니다.
+backend job이 교내 식당 페이지를 스크래핑해 `/data/menus/*.json` 파일을 생성합니다.
 
-- `ETL_dorm_menu`
-- `ETL_second_student_hall_menu`
-- `ETL_third_student_hall_menu`
-- `ETL_sangrok_hall_menu`
-- `ETL_life_science_hall_menu`
+```bash
+docker compose exec -T backend python -m app.jobs.scrape_menus dorm
+docker compose exec -T backend python -m app.jobs.scrape_menus hall_2 hall_3 sangrok life_science
+docker compose exec -T backend python -m app.jobs.scrape_menus all
+```
+
+운영 서버에서는 host cron 또는 systemd timer에서 위 명령을 실행합니다.
 
 기숙사 메뉴는 별도 HTML 구조를 파싱하고, 나머지 식당은 공통 스크래핑 로직을 사용합니다.
 
@@ -91,9 +96,6 @@ Airflow DAG가 교내 식당 페이지를 스크래핑해 `/opt/airflow/data/*.j
 - Python 3.10
 - FastAPI
 - Uvicorn
-- Apache Airflow 2.9
-- Celery
-- Redis
 - PostgreSQL
 - BeautifulSoup4
 - Docker Compose
@@ -112,7 +114,7 @@ Airflow DAG가 교내 식당 페이지를 스크래핑해 `/opt/airflow/data/*.j
 
 - 시간대는 `Asia/Seoul` 기준입니다.
 - 셔틀 정보는 정적 시간표 JSON을 기반으로 현재 시각에 맞춰 운행 상태를 계산합니다.
-- 학식 정보는 정적 운영 시간표와 Airflow가 수집한 동적 메뉴 JSON을 함께 사용합니다.
+- 학식 정보는 정적 운영 시간표와 backend job이 수집한 동적 메뉴 JSON을 함께 사용합니다.
 - 일부 백엔드 환경 변수는 현재 코드상 직접 사용되지 않더라도 `docker-compose.yml`에서 주입됩니다.
 
 ## License

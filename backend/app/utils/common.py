@@ -1,6 +1,7 @@
 import json
 import os
 from datetime import datetime
+from pathlib import Path
 
 import aiofiles
 import pytz
@@ -11,6 +12,7 @@ load_dotenv()
 
 SERVER_URL = os.getenv("SERVER_URL")
 KAKAO_REACTION_BLOCK_ID = os.getenv("KAKAO_REACTION_BLOCK_ID")
+MENU_DATA_DIR = Path(os.getenv("MENU_DATA_DIR", "/data/menus"))
 
 
 DAYS_OF_WEEK_KOREAN = ["월", "화", "수", "목", "금", "토", "일"]
@@ -66,6 +68,10 @@ async def load_data(file_path: str):
     return data
 
 
+def get_menu_data_path(place: str) -> Path:
+    return MENU_DATA_DIR / f"{place}_menu.json"
+
+
 def create_no_menu_response():
     kakao_response = kakao_json_response.KakaoJsonResponse()
     simple_text = kakao_response.create_simple_text("운영 중인 메뉴가 없어요 🥲")
@@ -74,18 +80,9 @@ def create_no_menu_response():
 
 
 async def get_operating_date_for_place(place: str) -> str:
-    # 각 메뉴 파일의 경로 매핑 (Airflow 또는 동적 파일 저장 경로)
-    dynamic_file_mapping = {
-        "dorm": "/opt/airflow/data/dorm_menu.json",
-        "hall_2": "/opt/airflow/data/hall_2_menu.json",
-        "hall_3": "/opt/airflow/data/hall_3_menu.json",
-        "life_science": "/opt/airflow/data/life_science_menu.json",
-        "sangrok": "/opt/airflow/data/sangrok_menu.json",
-    }
-    file_path = dynamic_file_mapping.get(place)
-    if file_path:
+    if place in {"dorm", "hall_2", "hall_3", "life_science", "sangrok"}:
         try:
-            data = await load_data(file_path)
+            data = await load_data(str(get_menu_data_path(place)))
             return data.get("date", "")
         except Exception:
             return ""
