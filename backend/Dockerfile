@@ -1,10 +1,10 @@
-FROM python:3.10 as requirements-stage
+FROM python:3.10-bookworm as requirements-stage
 WORKDIR /tmp
 RUN pip install --no-cache-dir poetry==1.8.2
 COPY ./pyproject.toml ./poetry.lock /tmp/
 RUN poetry export -f requirements.txt --output requirements.txt
 
-FROM python:3.10
+FROM python:3.10-bookworm
 WORKDIR /code
 
 RUN apt-get update \
