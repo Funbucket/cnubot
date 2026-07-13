@@ -1,5 +1,7 @@
 import argparse
 import json
+import os
+import tempfile
 from pathlib import Path
 
 from app.scrapers.cnu_food import scrape_mobile_food_menu
@@ -20,13 +22,56 @@ def scrape_place(place: str) -> dict:
 
 def save_menu(data: dict, data_dir: Path) -> Path:
     data_dir.mkdir(parents=True, exist_ok=True)
+    validate_menu_data(data)
     place = data["place"]
     path = data_dir / f"{place}_menu.json"
-    path.write_text(
-        json.dumps(data, ensure_ascii=False, indent=4),
+    payload = json.dumps(data, ensure_ascii=False, indent=4)
+
+    with tempfile.NamedTemporaryFile(
+        "w",
         encoding="utf-8",
-    )
+        dir=data_dir,
+        prefix=f".{place}_menu.",
+        suffix=".tmp",
+        delete=False,
+    ) as tmp:
+        tmp.write(payload)
+        tmp.write("\n")
+        tmp_path = Path(tmp.name)
+
+    try:
+        json.loads(tmp_path.read_text(encoding="utf-8"))
+        os.replace(tmp_path, path)
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
+
     return path
+
+
+def validate_menu_data(data: dict) -> None:
+    place = data.get("place")
+    if not place:
+        raise ValueError("Menu data is missing place")
+
+    menus = data.get("menu")
+    if not isinstance(menus, list) or not menus:
+        raise ValueError(f"Menu data for {place} has no menu rows")
+
+    has_items = False
+    for day_menu in menus:
+        for meal_time in ("breakfast", "lunch", "dinner"):
+            for meal in day_menu.get(meal_time, []):
+                if meal.get("menu"):
+                    has_items = True
+                    break
+            if has_items:
+                break
+        if has_items:
+            break
+
+    if not has_items:
+        raise ValueError(f"Menu data for {place} has no menu items")
 
 
 def parse_args() -> argparse.Namespace:

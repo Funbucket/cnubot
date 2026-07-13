@@ -110,6 +110,21 @@ docker compose exec -T backend python -m app.jobs.scrape_menus all
 - `backend/app/utils/kakao_json_response.py`
 - `backend/app/services/`
 
+식단 반응 버튼을 카카오 블록 연결로 고정하려면 운영 환경에 반응 블록 ID를 설정합니다.
+
+```env
+KAKAO_REACTION_BLOCK_ID=<카카오 반응 블록 ID>
+```
+
+값이 없으면 반응 버튼은 `message` action으로 동작합니다.
+
+## Tests
+
+```bash
+cd backend
+PYTHONPATH=app python -m unittest discover -s tests
+```
+
 ## Notes
 
 - 시간대는 `Asia/Seoul` 기준입니다.
