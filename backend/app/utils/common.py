@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 SERVER_URL = os.getenv("SERVER_URL")
+KAKAO_REACTION_BLOCK_ID = os.getenv("KAKAO_REACTION_BLOCK_ID")
 
 
 DAYS_OF_WEEK_KOREAN = ["월", "화", "수", "목", "금", "토", "일"]

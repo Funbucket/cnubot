@@ -243,6 +243,7 @@ services:
     command: [ "--host", "0.0.0.0", "--port", "80" ]
     environment:
       SERVER_URL: ${SERVER_URL}
+      KAKAO_REACTION_BLOCK_ID: ${KAKAO_REACTION_BLOCK_ID:-}
       DATABASE_URL: postgresql://${BACKEND_POSTGRES_USER}:${BACKEND_POSTGRES_PASSWORD}@${BACKEND_POSTGRES_HOST}:${BACKEND_POSTGRES_PORT}/${BACKEND_POSTGRES_DB}
     ports:
       - "80:80"
