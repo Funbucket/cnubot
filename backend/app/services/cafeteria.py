@@ -21,8 +21,9 @@ def get_kor_cuisine(cuisine: str):
     return CUISINE_KOREAN.get(cuisine)
 
 
-def create_schedule_response(meal_schedule: dict):
+def create_schedule_response(meal_schedule: dict, favorite_places: set[str] | None = None):
     kakao_response = kakao_json_response.KakaoJsonResponse()
+    favorite_places = favorite_places or set()
 
     current_time_kst = common.get_current_kr_time().strftime("%H:%M")
 
@@ -52,26 +53,50 @@ def create_schedule_response(meal_schedule: dict):
 
         return description if len(description) <= 100 else description[:97] + " ..."
 
+    def create_schedule_buttons(cafeteria):
+        place = cafeteria["place"]
+        place_name = common.get_kor_place(place)
+        buttons = [
+            (
+                {
+                    "action": "webLink",
+                    "label": "식단 보기",
+                    "webLinkUrl": f"{common.SERVER_URL}/cafeteria/images/hall_1_menu.png",
+                }
+                if place == "hall_1"
+                else {
+                    "action": "message",
+                    "label": "식단 보기",
+                    "messageText": f"{common.get_today_in_korean()}{place_name}",
+                }
+            )
+        ]
+        if place in favorite_places:
+            buttons.append(
+                {
+                    "action": "message",
+                    "label": "★ 해제하기",
+                    "messageText": f"{place_name} 즐겨찾기 해제",
+                    "extra": {"place": place},
+                }
+            )
+        else:
+            buttons.append(
+                {
+                    "action": "message",
+                    "label": "⭐ 즐겨찾기",
+                    "messageText": f"{place_name} 즐겨찾기",
+                    "extra": {"place": place},
+                }
+            )
+        return buttons
+
     items = [
         kakao_response.create_text_card(
             title=f"{common.get_kor_place(cafeteria.get('place', ''))}"
             + f"{(' (' + cafeteria['date'] + ')') if cafeteria.get('date') else ''}",
             description=format_description(cafeteria).strip(),
-            buttons=[
-                (
-                    {
-                        "action": "webLink",
-                        "label": "식단 보기",
-                        "webLinkUrl": f"{common.SERVER_URL}/cafeteria/images/hall_1_menu.png",
-                    }
-                    if cafeteria["place"] == "hall_1"
-                    else {
-                        "action": "message",
-                        "label": "식단 보기",
-                        "messageText": f"{common.get_today_in_korean()}{common.get_kor_place(cafeteria['place'])}",
-                    }
-                ),
-            ],
+            buttons=create_schedule_buttons(cafeteria),
         )
         for cafeteria in meal_schedule
     ]

@@ -68,6 +68,10 @@ cnubot/
   - 특정 요일 메뉴 조회
 - `POST /cafeteria/menu/reaction`
   - 식단 반응 저장 및 투표 결과 반환
+- `POST /cafeteria/favorites`
+  - 사용자의 즐겨찾기 식당 목록 조회
+- `POST /cafeteria/favorites/toggle`
+  - 식당 즐겨찾기 추가/해제
 - `POST /shuttle/nearby`
   - 현재 시각 기준 셔틀 운행/대기 정보 조회
 - `POST /library/seats`
@@ -117,6 +121,14 @@ KAKAO_REACTION_BLOCK_ID=<카카오 반응 블록 ID>
 ```
 
 값이 없으면 반응 버튼은 `message` action으로 동작합니다.
+
+즐겨찾기는 message action 기반으로 동작합니다. 카카오 관리자에서 다음 발화를 즐겨찾기 블록에 연결합니다.
+
+```text
+즐겨찾기
+기숙사 즐겨찾기
+기숙사 즐겨찾기 해제
+```
 
 ## Tests
 
