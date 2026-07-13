@@ -121,7 +121,7 @@ def create_menu_response(day: str, menu_data: dict, place: str):
         }
         button = {
             "label": label,
-            "messageText": f"식단 {label}",
+            "messageText": label,
             "extra": extra,
         }
         if common.KAKAO_REACTION_BLOCK_ID:
