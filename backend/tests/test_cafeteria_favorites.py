@@ -29,6 +29,30 @@ class CafeteriaFavoritesTest(unittest.TestCase):
         self.assertEqual(card["title"], "즐겨찾기한 식당이 없어요")
         self.assertEqual(card["buttons"][0]["messageText"], "학식")
 
+    def test_toggle_response_uses_korean_object_particle(self):
+        dorm_result = cafeteria_favorites.FavoriteToggleResult(
+            place="dorm",
+            place_name="기숙사",
+            added=True,
+            remaining_count=1,
+        )
+        hall_result = cafeteria_favorites.FavoriteToggleResult(
+            place="hall_3",
+            place_name="3학생회관",
+            added=False,
+            remaining_count=0,
+        )
+
+        dorm_card = cafeteria_favorites.create_toggle_response(dorm_result)[
+            "template"
+        ]["outputs"][0]["textCard"]
+        hall_card = cafeteria_favorites.create_toggle_response(hall_result)[
+            "template"
+        ]["outputs"][0]["textCard"]
+
+        self.assertEqual(dorm_card["title"], "기숙사를 즐겨찾기에 추가했어요")
+        self.assertEqual(hall_card["title"], "3학생회관을 즐겨찾기에서 해제했어요")
+
 
 if __name__ == "__main__":
     unittest.main()
