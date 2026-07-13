@@ -28,6 +28,7 @@ services:
       - "80:80"
     volumes:
       - ./backend/app:/code/app/
+      - ./backend/tests:/code/tests/
       - ./data:/data/menus
     depends_on:
       backend-postgres:

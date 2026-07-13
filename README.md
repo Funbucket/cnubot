@@ -125,6 +125,12 @@ cd backend
 PYTHONPATH=app python -m unittest discover -s tests
 ```
 
+운영 컨테이너에서는 다음처럼 실행합니다.
+
+```bash
+docker compose exec -T backend sh -lc "PYTHONPATH=/code/app python -m unittest discover -s /code/tests"
+```
+
 ## Notes
 
 - 시간대는 `Asia/Seoul` 기준입니다.
