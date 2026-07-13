@@ -1,33 +1,33 @@
 import os
 
 from app.schemas.kakao_request import KakaoRequest
-from app.services import cafeteria, menu_reactions
+from app.services import cafeteria, cafeteria_favorites, menu_reactions
 from app.utils import common, kakao_json_response
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Body, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 
 router = APIRouter()
 
 
 @router.post("/schedule")
-async def get_schedule():
+async def get_schedule(req: KakaoRequest | None = Body(default=None)):
     """
     return: 식당 시간표 (static meal_schedule.json + 동적 운영 날짜 추가)
     """
-    # static meal_schedule.json 불러오기
     schedule_data = await common.load_data("/code/app/static/data/meal_schedule.json")
+    user_id = _get_user_id(req)
+    favorite_places = (
+        await cafeteria_favorites.get_favorite_places(user_id) if user_id else set()
+    )
 
-    # schedule_data가 리스트 형태라고 가정 (각 항목은 cafeteria 데이터)
-    # 각 항목의 place 값을 기준으로 동적 운영 날짜를 가져와 추가
     for cafeteria_data in schedule_data:
         place = cafeteria_data.get("place")
-        # 이미 date 값이 있다면 그대로 사용, 없으면 동적 파일에서 불러옴
         if not cafeteria_data.get("date"):
             operating_date = await common.get_operating_date_for_place(place)
             if operating_date:
                 cafeteria_data["date"] = operating_date
 
-    response = cafeteria.create_schedule_response(schedule_data)
+    response = cafeteria.create_schedule_response(schedule_data, favorite_places)
     return JSONResponse(response)
 
 
@@ -77,6 +77,45 @@ async def create_menu_reaction(req: KakaoRequest):
     return JSONResponse(response)
 
 
+@router.post("/favorites")
+async def get_favorites(req: KakaoRequest):
+    user_id = _get_user_id(req)
+    if not user_id:
+        raise HTTPException(status_code=400, detail="사용자 정보가 없습니다.")
+
+    schedule_data = await common.load_data("/code/app/static/data/meal_schedule.json")
+    for cafeteria_data in schedule_data:
+        place = cafeteria_data.get("place")
+        if not cafeteria_data.get("date"):
+            operating_date = await common.get_operating_date_for_place(place)
+            if operating_date:
+                cafeteria_data["date"] = operating_date
+
+    favorites = await cafeteria_favorites.get_favorite_places(user_id)
+    response = await cafeteria_favorites.create_favorites_response(
+        schedule_data, favorites
+    )
+    return JSONResponse(response)
+
+
+@router.post("/favorites/toggle")
+async def update_favorite(req: KakaoRequest):
+    user_id = _get_user_id(req)
+    if not user_id:
+        raise HTTPException(status_code=400, detail="사용자 정보가 없습니다.")
+
+    extra = req.action.clientExtra if req.action and req.action.clientExtra else {}
+    utterance = req.userRequest.utterance.strip()
+    place = extra.get("place") or cafeteria_favorites.parse_favorite_place(utterance)
+    if not place:
+        raise HTTPException(status_code=400, detail="식당 정보를 찾을 수 없습니다.")
+
+    enabled = "해제" not in utterance
+    result = await cafeteria_favorites.set_favorite(user_id, place, enabled)
+    response = cafeteria_favorites.create_toggle_response(result)
+    return JSONResponse(response)
+
+
 @router.post("/menu/day")
 async def get_menu_by_day(req: KakaoRequest):
     """
@@ -116,3 +155,9 @@ async def get_image(image_name: str):
     if os.path.exists(file_path):
         return FileResponse(file_path)
     raise HTTPException(status_code=404, detail="이미지를 찾을 수 없습니다.")
+
+
+def _get_user_id(req: KakaoRequest | None) -> str | None:
+    if not req or not req.userRequest.user:
+        return None
+    return req.userRequest.user.id
