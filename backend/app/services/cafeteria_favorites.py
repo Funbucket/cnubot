@@ -88,8 +88,9 @@ async def create_favorites_response(schedule_data: list[dict], favorites: set[st
 
 def create_toggle_response(result: FavoriteToggleResult):
     kakao_response = kakao_json_response.KakaoJsonResponse()
+    place_with_object_particle = _with_object_particle(result.place_name)
     if result.added:
-        title = f"{result.place_name}을 즐겨찾기에 추가했어요"
+        title = f"{place_with_object_particle} 즐겨찾기에 추가했어요"
         buttons = [
             {
                 "label": "내 즐겨찾기",
@@ -99,7 +100,7 @@ def create_toggle_response(result: FavoriteToggleResult):
             _create_menu_button(result.place, result.place_name),
         ]
     else:
-        title = f"{result.place_name}을 즐겨찾기에서 해제했어요"
+        title = f"{place_with_object_particle} 즐겨찾기에서 해제했어요"
         description = (
             "이제 즐겨찾기한 식당이 없어요."
             if result.remaining_count == 0
@@ -169,3 +170,14 @@ def _create_menu_button(place: str, place_name: str) -> dict:
         "label": "식단 보기",
         "messageText": f"{common.get_today_in_korean()}{place_name}",
     }
+
+
+def _with_object_particle(text: str) -> str:
+    if not text:
+        return text
+    last = text[-1]
+    if not ("가" <= last <= "힣"):
+        return f"{text}을"
+    has_final_consonant = (ord(last) - ord("가")) % 28 != 0
+    particle = "을" if has_final_consonant else "를"
+    return f"{text}{particle}"
