@@ -43,8 +43,7 @@ async def get_today_menu(req: KakaoRequest):
     kor_day = common.get_kor_day(today_weekday)
 
     place_key = common.get_eng_place(place)
-    data_path = f"/opt/airflow/data/{place_key}_menu.json"
-    data = await common.load_data(data_path)
+    data = await common.load_data(str(common.get_menu_data_path(place_key)))
     menu_data = common.get_menu_by_day(data, kor_day)
     if not menu_data:
         raise HTTPException(status_code=404, detail="해당 요일에 메뉴가 없습니다.")
@@ -89,10 +88,9 @@ async def get_menu_by_day(req: KakaoRequest):
     place = utterance[3:]  # 예: "기숙사"
 
     place_key = common.get_eng_place(place)
-    data_path = f"/opt/airflow/data/{place_key}_menu.json"
 
     try:
-        data = await common.load_data(data_path)
+        data = await common.load_data(str(common.get_menu_data_path(place_key)))
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="데이터 파일을 찾을 수 없습니다.")
 
