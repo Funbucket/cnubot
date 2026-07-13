@@ -7,12 +7,6 @@ RUN poetry export -f requirements.txt --output requirements.txt
 FROM python:3.10-bookworm
 WORKDIR /code
 
-RUN apt-get update \
-    && apt-get install -y tzdata \
-    && ln -snf /usr/share/zoneinfo/Asia/Seoul /etc/localtime \
-    && echo "Asia/Seoul" > /etc/timezone \
-    && apt-get clean
-
 COPY --from=requirements-stage /tmp/requirements.txt /code/requirements.txt
 RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt \
     && rm -f requirements.txt
