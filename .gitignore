@@ -1,3 +1,5 @@
 .env
+.env.bak
 __pycache__
 data/
+logs/
