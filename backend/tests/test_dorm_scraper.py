@@ -2,7 +2,7 @@ import unittest
 
 from bs4 import BeautifulSoup
 
-from app.scrapers.dorm import extract_menus_from_cell
+from app.scrapers.dorm import _parse_chart_data, _parse_inwon, extract_menus_from_cell
 
 
 class DormScraperTest(unittest.TestCase):
@@ -66,6 +66,12 @@ class DormScraperTest(unittest.TestCase):
             menus[0]["menu"],
             ["*이벤트식*", "반계탕", "[계육:국내산]", "방울토마토"],
         )
+
+    def test_parse_crowding_current_and_available_counts(self):
+        self.assertEqual(_parse_inwon("12|308"), (12, 308))
+
+    def test_parse_crowding_chart_data(self):
+        self.assertEqual(_parse_chart_data("1,2,3,4,5,6,7,8,9"), list(range(1, 10)))
 
 
 if __name__ == "__main__":

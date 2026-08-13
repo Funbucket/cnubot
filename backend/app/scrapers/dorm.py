@@ -4,6 +4,7 @@ import re
 import requests
 from bs4 import BeautifulSoup as bs
 
+DORM_CROWDING_URL = "https://dorm.cnu.ac.kr/intranet/public/ajax_cafe_inwon.php"
 MENU_HEADER_PATTERN = re.compile(
     r"((?:메인|menu|main)\s*\w*)\s*\((?:(\d+)kcal|([^)]*))\)",
     flags=re.IGNORECASE,
@@ -36,6 +37,24 @@ def scrape_dorm_menu(url: str) -> dict:
 
 def scrape_dorm_menu_json(url: str) -> str:
     return json.dumps(scrape_dorm_menu(url), ensure_ascii=False)
+
+
+def scrape_dorm_crowding(url: str = DORM_CROWDING_URL) -> dict:
+    inwon_response = requests.get(url, params={"mode": "inwon"}, timeout=10)
+    inwon_response.raise_for_status()
+    chart_response = requests.get(url, params={"mode": "chart_data"}, timeout=10)
+    chart_response.raise_for_status()
+
+    current, available = _parse_inwon(inwon_response.text)
+    chart = _parse_chart_data(chart_response.text)
+    capacity = current + available
+
+    return {
+        "current": current,
+        "available": available,
+        "capacity": capacity,
+        "chart": chart,
+    }
 
 
 def extract_menus_from_cell(cell) -> list[dict]:
@@ -93,3 +112,16 @@ def _extract_date_range(soup) -> str:
         return f"{m1}/{d1} ~ {m2}/{d2}"
     except Exception:
         return date_range_raw
+
+
+def _parse_inwon(text: str) -> tuple[int, int]:
+    values = text.strip().split("|")
+    if len(values) != 2:
+        raise ValueError("기숙사 혼잡도 인원 형식이 올바르지 않습니다.")
+    return int(values[0]), int(values[1])
+
+
+def _parse_chart_data(text: str) -> list[int]:
+    if not text.strip():
+        return []
+    return [int(value) for value in text.strip().split(",") if value.strip()]

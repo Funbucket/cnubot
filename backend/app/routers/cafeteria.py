@@ -4,6 +4,7 @@ from app.schemas.kakao_request import KakaoRequest
 from app.services import cafeteria, cafeteria_favorites, menu_reactions
 from app.utils import common, kakao_json_response
 from fastapi import APIRouter, Body, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
 
 router = APIRouter()
@@ -14,6 +15,10 @@ async def get_schedule(req: KakaoRequest | None = Body(default=None)):
     """
     return: 식당 시간표 (static meal_schedule.json + 동적 운영 날짜 추가)
     """
+    utterance = req.userRequest.utterance.strip() if req else ""
+    if _is_dorm_crowding_utterance(utterance):
+        return await get_dorm_crowding()
+
     schedule_data = await common.load_data("/code/app/static/data/meal_schedule.json")
     user_id = _get_user_id(req)
     favorite_places = (
@@ -38,6 +43,9 @@ async def get_today_menu(req: KakaoRequest):
     return: 오늘의 메뉴, 요일 퀵리플라이
     """
     utterance = req.userRequest.utterance.strip()
+    if _is_dorm_crowding_utterance(utterance):
+        return await get_dorm_crowding()
+
     if _is_favorite_utterance(utterance):
         return await _handle_favorite_fallback(req, utterance)
 
@@ -53,6 +61,20 @@ async def get_today_menu(req: KakaoRequest):
         raise HTTPException(status_code=404, detail="해당 요일에 메뉴가 없습니다.")
 
     response = cafeteria.create_menu_response(kor_day, menu_data, place)
+    return JSONResponse(response)
+
+
+@router.post("/dorm/crowding")
+async def get_dorm_crowding():
+    """
+    return: 기숙사 식당 현재 인원/입장 가능 인원
+    """
+    try:
+        response = await run_in_threadpool(cafeteria.get_dorm_crowding_response)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503, detail="기숙사 혼잡도 정보를 가져오지 못했습니다."
+        ) from exc
     return JSONResponse(response)
 
 
@@ -169,6 +191,11 @@ def _get_user_id(req: KakaoRequest | None) -> str | None:
 
 def _is_favorite_utterance(utterance: str) -> bool:
     return "즐겨찾기" in utterance.replace(" ", "")
+
+
+def _is_dorm_crowding_utterance(utterance: str) -> bool:
+    normalized = utterance.replace(" ", "")
+    return "기숙사" in normalized and "혼잡도" in normalized
 
 
 async def _handle_favorite_fallback(req: KakaoRequest, utterance: str):
