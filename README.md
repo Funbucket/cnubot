@@ -106,6 +106,21 @@ docker compose exec -T backend python -m app.jobs.scrape_menus all
 
 ## Tests
 
+## Experiment Admin
+
+The experiment admin is available at `/admin` and is protected by HTTP Basic Auth.
+Set these environment variables before exposing it:
+
+```env
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=<strong-random-password>
+```
+
+The first experiment can compare promotion button copy using the Kakao user ID as
+the sticky randomization unit. The admin records exposure and click events and
+shows counts by variant. Use HTTPS in production because Basic Auth credentials
+must not be sent over plain HTTP.
+
 ```bash
 cd backend
 PYTHONPATH=app python -m unittest discover -s tests

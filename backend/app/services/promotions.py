@@ -18,16 +18,17 @@ TOSS_SHOPPING_PROMOTION = {
 }
 
 
-def create_toss_promotion_button():
+def create_toss_promotion_button(label: str | None = None):
+    label = label or TOSS_SHOPPING_PROMOTION["button_label"]
     if common.KAKAO_TOSS_PROMOTION_BLOCK_ID:
         return {
-            "label": TOSS_SHOPPING_PROMOTION["button_label"],
+            "label": label,
             "action": "block",
             "blockId": common.KAKAO_TOSS_PROMOTION_BLOCK_ID,
             "messageText": "쇼핑 특가",
         }
     return {
-        "label": TOSS_SHOPPING_PROMOTION["button_label"],
+        "label": label,
         "action": "webLink",
         "webLinkUrl": TOSS_SHOPPING_PROMOTION["url"],
     }

@@ -1,7 +1,7 @@
 import os
 
 from app.schemas.kakao_request import KakaoRequest
-from app.services import cafeteria
+from app.services import cafeteria, experiments, promotions
 from app.utils import common, kakao_json_response
 from fastapi import APIRouter, Body, HTTPException
 from fastapi.concurrency import run_in_threadpool
@@ -52,7 +52,21 @@ async def get_today_menu(req: KakaoRequest):
     if not menu_data:
         raise HTTPException(status_code=404, detail="해당 요일에 메뉴가 없습니다.")
 
-    response = cafeteria.create_menu_response(kor_day, menu_data, place)
+    user_id = _get_user_id(req)
+    variant = await experiments.get_active_variant(
+        promotions.PROMOTION_EXPERIMENT_KEY, user_id
+    )
+    if variant:
+        await experiments.record_event(
+            promotions.PROMOTION_EXPERIMENT_KEY,
+            user_id,
+            "promotion_exposure",
+            {"surface": "menu_today"},
+        )
+    promotion_label = (variant or {}).get("config", {}).get("button_label")
+    response = cafeteria.create_menu_response(
+        kor_day, menu_data, place, promotion_label=promotion_label
+    )
     return JSONResponse(response)
 
 
@@ -95,7 +109,21 @@ async def get_menu_by_day(req: KakaoRequest):
 
         return kakao_response.get_response()
 
-    response = cafeteria.create_menu_response(kor_day, menu_data, place)
+    user_id = _get_user_id(req)
+    variant = await experiments.get_active_variant(
+        promotions.PROMOTION_EXPERIMENT_KEY, user_id
+    )
+    if variant:
+        await experiments.record_event(
+            promotions.PROMOTION_EXPERIMENT_KEY,
+            user_id,
+            "promotion_exposure",
+            {"surface": "menu_by_day"},
+        )
+    promotion_label = (variant or {}).get("config", {}).get("button_label")
+    response = cafeteria.create_menu_response(
+        kor_day, menu_data, place, promotion_label=promotion_label
+    )
     return JSONResponse(response)
 
 
