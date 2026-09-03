@@ -297,6 +297,16 @@ async def get_analysis(experiment_id: int) -> dict[str, Any]:
             "SELECT COUNT(*) FROM experiment_events WHERE experiment_id = $1",
             experiment_id,
         )
+        event_breakdown_rows = await conn.fetch(
+            """
+            SELECT event_name, COUNT(*)::int AS events,
+                   COUNT(DISTINCT user_id)::int AS users
+            FROM experiment_events
+            WHERE experiment_id = $1
+            GROUP BY event_name ORDER BY event_name
+            """,
+            experiment_id,
+        )
         assignment_rows = await conn.fetch(
             """
             SELECT a.variant_key, COUNT(*)::int AS users, COALESCE(v.weight, 0) AS weight
@@ -315,6 +325,7 @@ async def get_analysis(experiment_id: int) -> dict[str, Any]:
             "variants": variants,
             "assigned_users": total_assigned,
             "events": total_events,
+            "event_breakdown": [dict(row) for row in event_breakdown_rows],
             "min_sample_size_per_variant": experiment["min_sample_size"],
             "srm": srm,
             "quality": _quality_summary(experiment, variants, srm),
