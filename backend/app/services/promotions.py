@@ -11,7 +11,7 @@ PROMOTION_EXPERIMENT_KEY = "snack_product_comparison_v1"
 
 TOSS_SHOPPING_PRODUCTS = {
     "yellow_cheese_buttering": {
-    "title": "해태 버터링 딥황치즈맛 4개",
+        "title": "해태 버터링 딥황치즈맛 4개",
     "button_label": "🍪 황치즈 버터링 특가",
     "quick_reply_label": "🍪 황치즈 버터링 특가",
     "description": "🍪 황치즈 덕후 주목! 첫 구매 3,000원 추가 할인",
@@ -27,7 +27,7 @@ TOSS_SHOPPING_PRODUCTS = {
     ),
     },
     "lactofit_gold": {
-        "title": "종근당건강 락토핏 골드, 140포, 2개 + 증정 락토핏 골드, 30포 + 증정 아임비타 면역비타민C, 30포",
+        "title": "락토핏 골드 140포 2개 + 증정",
         "button_label": "💊 유산균 특가",
         "quick_reply_label": "💊 유산균 특가",
         "description": "💊 매일 챙기는 유산균, 무료배송 특가로 만나보세요",
@@ -108,18 +108,15 @@ def create_toss_promotion_quick_reply(kakao_response, product: dict | None = Non
 def create_toss_shopping_response(product: dict | None = None, click_url: str | None = None):
     kakao_response = kakao_json_response.KakaoJsonResponse()
     product = product or TOSS_SHOPPING_PROMOTION
-    card_description = (
-        f"{product['description']}\n"
-        f"{product['discount_rate']}% 할인 · "
-        f"{product['original_price']:,}원 → {product['price']:,}원"
-    )
+    card_description = f"{product['discount_rate']}% 할인 · 최대할인가 {product['price']:,}원"
     commerce_card = {
         "title": product["title"],
         "description": card_description,
-        "price": product["price"],
+        "price": product["original_price"],
         "currency": "won",
         "discount": product["discount"],
         "discountRate": product["discount_rate"],
+        "discountedPrice": product["price"],
         "thumbnails": [{"imageUrl": product["image_url"]}],
         "buttons": [
             {
