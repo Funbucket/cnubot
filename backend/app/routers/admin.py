@@ -31,7 +31,7 @@ class ExperimentInput(BaseModel):
     alpha: float = Field(default=0.05, gt=0, lt=1)
     power: float = Field(default=0.8, gt=0, lt=1)
     baseline_rate: float | None = Field(default=None, gt=0, lt=1)
-    mde: float | None = Field(default=None, gt=0, lt=1)
+    mde: float | None = Field(default=0.03, gt=0, lt=1)
     variants: list[VariantInput] = Field(min_length=2)
 
 
@@ -162,7 +162,7 @@ def _page(cards: str, experiment_count: int) -> str:
 <label>핵심 지표<input name="primary_metric" value="promotion_click_rate" required></label>
 <label>가드레일 지표<input name="guardrail_metric" value="menu_response_error_rate"></label>
 <label>기준 전환율<input name="baseline_rate" type="number" step="0.001" min="0.001" max="0.999" placeholder="예: 0.05"></label>
-<label>최소 검출 효과(MDE)<input name="mde" type="number" step="0.001" min="0.001" max="0.999" placeholder="예: 0.01"></label>
+<label>최소 검출 효과(MDE)<input name="mde" type="number" step="0.001" min="0.001" max="0.999" value="0.03"><span class="field-help">기본 3%p · 작은 실험에서도 확인 가능한 현실적인 차이</span></label>
 <label>유의수준 α<input name="alpha" type="number" step="0.01" value="0.05"></label>
 <label>검정력 power<input name="power" type="number" step="0.05" value="0.8"></label>
 <label>A 변형 키<input name="a_key" value="control"></label><label>A 버튼 문구<input name="a_label" value="간식 특가"></label>
