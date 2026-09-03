@@ -35,7 +35,7 @@ TOSS_SHOPPING_PRODUCTS = {
         "price": 51987,
         "discount": 96413,
         "discount_rate": 64,
-        "url": "https://sharelink.toss.im/links/products/2570438725?originSurface=recommended_products&originSectionCode=main&originPosition=47&originPage=1",
+        "url": "https://toss.im/_m/XddZXers",
         "image_url": "https://resources-fe.toss.im/image-optimize/width=2400,quality=90/https%3A%2F%2Fshopping.toss.im%2Flive%2Ftemp%2F2026-08-03%2F74828108-78eb-4328-bf27-62b32a559495.jpeg",
     },
 }
