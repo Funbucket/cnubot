@@ -4,6 +4,7 @@ import secrets
 from typing import Any
 
 from app.services import experiments
+from app.services import llm
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -21,12 +22,21 @@ class VariantInput(BaseModel):
 
 
 class ExperimentInput(BaseModel):
-    experiment_key: str
+    experiment_key: str | None = None
     name: str
     hypothesis: str
     primary_metric: str
     guardrail_metric: str | None = None
+    unit: str = "user"
+    alpha: float = Field(default=0.05, gt=0, lt=1)
+    power: float = Field(default=0.8, gt=0, lt=1)
+    baseline_rate: float | None = Field(default=None, gt=0, lt=1)
+    mde: float | None = Field(default=None, gt=0, lt=1)
     variants: list[VariantInput] = Field(min_length=2)
+
+
+class SuggestInput(BaseModel):
+    prompt: str = Field(min_length=3, max_length=4000)
 
 
 def require_admin(credentials: HTTPBasicCredentials = Depends(security)) -> str:
@@ -64,17 +74,28 @@ async def create_experiment(
     return {"id": experiment_id}
 
 
+@router.post("/suggest")
+async def suggest(payload: SuggestInput, _: str = Depends(require_admin)):
+    try:
+        return await llm.suggest_experiment(payload.prompt)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 @router.post("/experiments/{experiment_id}/{status}")
 async def change_status(experiment_id: int, status: str, _: str = Depends(require_admin)):
     if status not in {"running", "paused", "completed"}:
         raise HTTPException(status_code=400, detail="지원하지 않는 상태입니다.")
-    await experiments.set_experiment_status(experiment_id, status)
+    try:
+        await experiments.set_experiment_status(experiment_id, status)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True}
 
 
 @router.get("/experiments/{experiment_id}/results")
 async def results(experiment_id: int, _: str = Depends(require_admin)):
-    return await experiments.get_results(experiment_id)
+    return await experiments.get_analysis(experiment_id)
 
 
 def _experiment_card(row: dict[str, Any]) -> str:
@@ -119,11 +140,17 @@ pre{{white-space:pre-wrap;background:#f4f6f8;padding:8px;border-radius:6px}}
 <p>가설을 먼저 기록하고, 변형·핵심 지표·가드레일을 정한 뒤 실험을 시작하세요.</p>
 <form id="new-experiment">
 <h2>새 실험</h2>
-<label>실험 키<input name="experiment_key" placeholder="promotion_button_copy_v1" required></label>
+<label>AI에게 설계 요청<textarea id="ai-prompt" placeholder="예: 황치즈 버터링 특가 버튼 문구의 클릭률을 높일 수 있는 A/B 실험을 설계해줘"></textarea></label>
+<button type="button" onclick="aiSuggest()">AI 실험 초안 만들기</button>
+<label>실험 키<input name="experiment_key" placeholder="비워두면 자동 생성"></label>
 <label>실험 이름<input name="name" placeholder="간식 특가 버튼 문구 테스트" required></label>
 <label>가설<textarea name="hypothesis" required>상품 중심 문구가 일반 문구보다 클릭률을 높인다.</textarea></label>
 <label>핵심 지표<input name="primary_metric" value="promotion_click_rate" required></label>
 <label>가드레일 지표<input name="guardrail_metric" value="menu_response_error_rate"></label>
+<label>기준 전환율<input name="baseline_rate" type="number" step="0.001" min="0.001" max="0.999" placeholder="예: 0.05"></label>
+<label>최소 검출 효과(MDE)<input name="mde" type="number" step="0.001" min="0.001" max="0.999" placeholder="예: 0.01"></label>
+<label>유의수준 α<input name="alpha" type="number" step="0.01" value="0.05"></label>
+<label>검정력 power<input name="power" type="number" step="0.05" value="0.8"></label>
 <label>A 변형 키<input name="a_key" value="control"></label><label>A 버튼 문구<input name="a_label" value="간식 특가"></label>
 <label>B 변형 키<input name="b_key" value="treatment"></label><label>B 버튼 문구<input name="b_label" value="황치즈 버터링 특가"></label>
 <button>실험 초안 만들기</button>
@@ -131,7 +158,8 @@ pre{{white-space:pre-wrap;background:#f4f6f8;padding:8px;border-radius:6px}}
 <h2>실험 목록</h2>{cards or '<p>아직 만든 실험이 없습니다.</p>'}
 <script>
 const form=document.querySelector('#new-experiment');
-form.addEventListener('submit',async(e)=>{{e.preventDefault();const f=new FormData(form);const body={{experiment_key:f.get('experiment_key'),name:f.get('name'),hypothesis:f.get('hypothesis'),primary_metric:f.get('primary_metric'),guardrail_metric:f.get('guardrail_metric'),variants:[{{variant_key:f.get('a_key'),label:f.get('a_label'),weight:50,config:{{button_label:f.get('a_label')}}}},{{variant_key:f.get('b_key'),label:f.get('b_label'),weight:50,config:{{button_label:f.get('b_label')}}}}]}};const r=await fetch('/admin/experiments',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(body)}});if(r.ok)location.reload();else alert(await r.text())}});
+async function aiSuggest(){{const prompt=document.querySelector('#ai-prompt').value;if(!prompt)return alert('AI에게 요청할 내용을 입력하세요.');const r=await fetch('/admin/suggest',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{prompt}})}});if(!r.ok)return alert(await r.text());const d=await r.json();form.name.value=d.name||'';form.hypothesis.value=d.hypothesis||'';form.primary_metric.value=d.primary_metric||'';form.guardrail_metric.value=d.guardrail_metric||'';if(d.variants?.length>=2){{form.a_key.value=d.variants[0].variant_key;form.a_label.value=d.variants[0].label;form.b_key.value=d.variants[1].variant_key;form.b_label.value=d.variants[1].label;}}}}
+form.addEventListener('submit',async(e)=>{{e.preventDefault();const f=new FormData(form);const num=(name)=>f.get(name)?Number(f.get(name)):null;const body={{experiment_key:f.get('experiment_key')||null,name:f.get('name'),hypothesis:f.get('hypothesis'),primary_metric:f.get('primary_metric'),guardrail_metric:f.get('guardrail_metric'),alpha:num('alpha'),power:num('power'),baseline_rate:num('baseline_rate'),mde:num('mde'),variants:[{{variant_key:f.get('a_key'),label:f.get('a_label'),weight:50,config:{{button_label:f.get('a_label')}}}},{{variant_key:f.get('b_key'),label:f.get('b_label'),weight:50,config:{{button_label:f.get('b_label')}}}}]}};const r=await fetch('/admin/experiments',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(body)}});if(r.ok)location.reload();else alert(await r.text())}});
 async function statusChange(id,status){{await fetch(`/admin/experiments/${{id}}/${{status}}`,{{method:'POST'}});location.reload()}}
 async function results(id){{const r=await fetch(`/admin/experiments/${{id}}/results`);document.querySelector(`#result-${{id}}`).textContent=JSON.stringify(await r.json(),null,2)}}
 </script></html>"""

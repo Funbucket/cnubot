@@ -40,6 +40,13 @@ async def init_database() -> None:
                 hypothesis TEXT NOT NULL,
                 primary_metric TEXT NOT NULL,
                 guardrail_metric TEXT,
+                unit TEXT NOT NULL DEFAULT 'user',
+                alpha DOUBLE PRECISION NOT NULL DEFAULT 0.05,
+                power DOUBLE PRECISION NOT NULL DEFAULT 0.8,
+                baseline_rate DOUBLE PRECISION,
+                mde DOUBLE PRECISION,
+                min_sample_size INT,
+                analysis_plan JSONB NOT NULL DEFAULT '{}'::jsonb,
                 status TEXT NOT NULL DEFAULT 'draft'
                     CHECK (status IN ('draft', 'running', 'paused', 'completed')),
                 allocation JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -66,11 +73,13 @@ async def init_database() -> None:
                 user_id TEXT NOT NULL,
                 variant_key TEXT NOT NULL,
                 assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                first_exposed_at TIMESTAMPTZ,
                 PRIMARY KEY (experiment_id, user_id)
             );
 
             CREATE TABLE IF NOT EXISTS experiment_events (
                 id BIGSERIAL PRIMARY KEY,
+                event_id TEXT,
                 experiment_id BIGINT REFERENCES experiments(id)
                     ON DELETE SET NULL,
                 experiment_key TEXT NOT NULL,
@@ -78,12 +87,37 @@ async def init_database() -> None:
                 variant_key TEXT,
                 event_name TEXT NOT NULL,
                 properties JSONB NOT NULL DEFAULT '{}'::jsonb,
+                source TEXT,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS experiment_daily_rollups (
+                experiment_id BIGINT NOT NULL REFERENCES experiments(id)
+                    ON DELETE CASCADE,
+                rollup_date DATE NOT NULL,
+                variant_key TEXT NOT NULL,
+                event_name TEXT NOT NULL,
+                users INT NOT NULL,
+                events INT NOT NULL,
+                PRIMARY KEY (experiment_id, rollup_date, variant_key, event_name)
             );
 
             CREATE INDEX IF NOT EXISTS idx_experiment_events_lookup
                 ON experiment_events(experiment_key, event_name, variant_key);
             CREATE INDEX IF NOT EXISTS idx_experiment_assignments_lookup
                 ON experiment_assignments(experiment_id, variant_key);
+
+            ALTER TABLE experiments ADD COLUMN IF NOT EXISTS unit TEXT NOT NULL DEFAULT 'user';
+            ALTER TABLE experiments ADD COLUMN IF NOT EXISTS alpha DOUBLE PRECISION NOT NULL DEFAULT 0.05;
+            ALTER TABLE experiments ADD COLUMN IF NOT EXISTS power DOUBLE PRECISION NOT NULL DEFAULT 0.8;
+            ALTER TABLE experiments ADD COLUMN IF NOT EXISTS baseline_rate DOUBLE PRECISION;
+            ALTER TABLE experiments ADD COLUMN IF NOT EXISTS mde DOUBLE PRECISION;
+            ALTER TABLE experiments ADD COLUMN IF NOT EXISTS min_sample_size INT;
+            ALTER TABLE experiments ADD COLUMN IF NOT EXISTS analysis_plan JSONB NOT NULL DEFAULT '{}'::jsonb;
+            ALTER TABLE experiment_assignments ADD COLUMN IF NOT EXISTS first_exposed_at TIMESTAMPTZ;
+            ALTER TABLE experiment_events ADD COLUMN IF NOT EXISTS event_id TEXT;
+            ALTER TABLE experiment_events ADD COLUMN IF NOT EXISTS source TEXT;
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_experiment_events_event_id
+                ON experiment_events(event_id) WHERE event_id IS NOT NULL;
             """
         )

@@ -1,5 +1,6 @@
 from app.utils import common, kakao_json_response
 
+PROMOTION_EXPERIMENT_KEY = "promotion_button_copy_v1"
 
 TOSS_SHOPPING_PROMOTION = {
     "title": "해태 버터링 딥황치즈맛 4개",
