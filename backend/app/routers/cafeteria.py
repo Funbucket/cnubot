@@ -32,18 +32,18 @@ async def get_schedule(req: KakaoRequest | None = Body(default=None)):
     variant = await experiments.get_active_variant(
         promotions.PROMOTION_EXPERIMENT_KEY, user_id
     )
-    if variant:
-        await experiments.record_event(
-            promotions.PROMOTION_EXPERIMENT_KEY,
-            user_id,
-            "promotion_exposure",
-            {"surface": "schedule"},
-        )
     product_key = (variant or {}).get("config", {}).get("product_key")
     response = cafeteria.create_schedule_response(
         schedule_data,
         promotion_product=promotions.get_product(product_key) if variant else None,
     )
+    if variant and _promotion_is_visible(response, promotions.get_product(product_key)):
+        await experiments.record_event(
+            promotions.PROMOTION_EXPERIMENT_KEY,
+            user_id,
+            "promotion_exposure",
+            {"surface": "schedule_quick_reply", "product_key": product_key},
+        )
     return JSONResponse(response)
 
 
