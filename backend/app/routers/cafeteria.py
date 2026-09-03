@@ -1,3 +1,4 @@
+import json
 import os
 
 from app.schemas.kakao_request import KakaoRequest
@@ -71,18 +72,28 @@ async def get_today_menu(req: KakaoRequest):
     variant = await experiments.get_active_variant(
         promotions.PROMOTION_EXPERIMENT_KEY, user_id
     )
-    if variant:
+    product_key = (variant or {}).get("config", {}).get("product_key")
+    promotion_product = promotions.get_product(product_key)
+    click_url = (
+        f"{common.SERVER_URL}/promotions/toss-shopping/click?token="
+        f"{promotions.create_tracking_token(user_id, product_key)}"
+        if variant and user_id and product_key
+        else None
+    )
+    response = cafeteria.create_menu_response(
+        kor_day,
+        menu_data,
+        place,
+        promotion_product=promotion_product if variant else None,
+        promotion_click_url=click_url,
+    )
+    if variant and _promotion_is_visible(response, promotion_product):
         await experiments.record_event(
             promotions.PROMOTION_EXPERIMENT_KEY,
             user_id,
             "promotion_exposure",
-            {"surface": "menu_today"},
+            {"surface": "menu_today", "product_key": product_key},
         )
-    product_key = (variant or {}).get("config", {}).get("product_key")
-    promotion_product = promotions.get_product(product_key)
-    response = cafeteria.create_menu_response(
-        kor_day, menu_data, place, promotion_product=promotion_product if variant else None
-    )
     return JSONResponse(response)
 
 
@@ -129,20 +140,28 @@ async def get_menu_by_day(req: KakaoRequest):
     variant = await experiments.get_active_variant(
         promotions.PROMOTION_EXPERIMENT_KEY, user_id
     )
-    if variant:
-        await experiments.record_event(
-            promotions.PROMOTION_EXPERIMENT_KEY,
-            user_id,
-            "promotion_exposure",
-            {"surface": "menu_by_day"},
-        )
     product_key = (variant or {}).get("config", {}).get("product_key")
+    promotion_product = promotions.get_product(product_key)
+    click_url = (
+        f"{common.SERVER_URL}/promotions/toss-shopping/click?token="
+        f"{promotions.create_tracking_token(user_id, product_key)}"
+        if variant and user_id and product_key
+        else None
+    )
     response = cafeteria.create_menu_response(
         kor_day,
         menu_data,
         place,
-        promotion_product=promotions.get_product(product_key) if variant else None,
+        promotion_product=promotion_product if variant else None,
+        promotion_click_url=click_url,
     )
+    if variant and _promotion_is_visible(response, promotion_product):
+        await experiments.record_event(
+            promotions.PROMOTION_EXPERIMENT_KEY,
+            user_id,
+            "promotion_exposure",
+            {"surface": "menu_by_day", "product_key": product_key},
+        )
     return JSONResponse(response)
 
 
@@ -162,6 +181,10 @@ def _get_user_id(req: KakaoRequest | None) -> str | None:
     if not req or not req.userRequest.user:
         return None
     return req.userRequest.user.id
+
+
+def _promotion_is_visible(response: dict, product: dict) -> bool:
+    return product["button_label"] in json.dumps(response, ensure_ascii=False)
 
 
 def _is_dorm_crowding_utterance(utterance: str) -> bool:

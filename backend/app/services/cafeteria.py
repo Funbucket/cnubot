@@ -107,7 +107,11 @@ def create_schedule_response(meal_schedule: list[dict], promotion_product: dict 
 
 
 def create_menu_response(
-    day: str, menu_data: dict, place: str, promotion_product: dict | None = None
+    day: str,
+    menu_data: dict,
+    place: str,
+    promotion_product: dict | None = None,
+    promotion_click_url: str | None = None,
 ):
     kakao_response = kakao_json_response.KakaoJsonResponse()
 
@@ -137,7 +141,7 @@ def create_menu_response(
         # 점심 첫 번째 메뉴 카드에만 간식 특가 버튼을 노출합니다.
         if meal_time == "lunch" and items:
             items[0]["buttons"].append(
-                promotions.create_toss_promotion_button(promotion_product)
+                promotions.create_toss_promotion_button(promotion_product, promotion_click_url)
             )
             items[0]["buttonLayout"] = "vertical"
 

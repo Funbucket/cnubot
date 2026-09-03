@@ -1,3 +1,10 @@
+import base64
+import hashlib
+import hmac
+import json
+import os
+import time
+
 from app.utils import common, kakao_json_response
 
 PROMOTION_EXPERIMENT_KEY = "snack_product_comparison_v1"
@@ -34,7 +41,31 @@ TOSS_SHOPPING_PRODUCTS = {
 TOSS_SHOPPING_PROMOTION = TOSS_SHOPPING_PRODUCTS["yellow_cheese_buttering"]
 
 
-def create_toss_promotion_button(product: dict | None = None):
+def create_tracking_token(user_id: str, product_key: str) -> str:
+    payload = base64.urlsafe_b64encode(
+        json.dumps({"u": user_id, "p": product_key, "e": int(time.time()) + 86400}).encode()
+    ).decode().rstrip("=")
+    secret = os.getenv("PROMOTION_TRACKING_SECRET", "removed-secret").encode()
+    signature = hmac.new(secret, payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}.{signature}"
+
+
+def read_tracking_token(token: str) -> tuple[str, str] | None:
+    try:
+        payload, signature = token.split(".", 1)
+        secret = os.getenv("PROMOTION_TRACKING_SECRET", "removed-secret").encode()
+        expected = hmac.new(secret, payload.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            return None
+        data = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+        if data["e"] < time.time() or data["p"] not in TOSS_SHOPPING_PRODUCTS:
+            return None
+        return data["u"], data["p"]
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError):
+        return None
+
+
+def create_toss_promotion_button(product: dict | None = None, click_url: str | None = None):
     product = product or TOSS_SHOPPING_PROMOTION
     label = product["button_label"]
     if common.KAKAO_TOSS_PROMOTION_BLOCK_ID:
@@ -47,7 +78,7 @@ def create_toss_promotion_button(product: dict | None = None):
     return {
         "label": label,
         "action": "webLink",
-        "webLinkUrl": product["url"],
+        "webLinkUrl": click_url or product["url"],
     }
 
 
