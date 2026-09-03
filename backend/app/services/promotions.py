@@ -7,7 +7,7 @@ import time
 
 from app.utils import common, kakao_json_response
 
-PROMOTION_EXPERIMENT_KEY = ""
+PROMOTION_EXPERIMENT_KEY = "snack_product_comparison_v2"
 DEFAULT_PROMOTION_PRODUCT_KEY = "lavender_wipes"
 
 TOSS_SHOPPING_PRODUCTS = {
@@ -50,6 +50,18 @@ TOSS_SHOPPING_PRODUCTS = {
         "discount_rate": 74,
         "url": "https://toss.im/_m/1LO7hURq",
         "image_url": "https://resources-fe.toss.im/image-optimize/width=800,quality=75/https%3A%2F%2Fshopping.toss.im%2Flive%2Ftemp%2F2026-01-08%2F15629a7e-56c2-4f73-8896-6481eaffdbca.jpeg",
+    },
+    "cento_toothbrush": {
+        "title": "센토 프라임 바이브 칫솔 20개입",
+        "button_label": "🪥 칫솔 특가",
+        "quick_reply_label": "🪥 칫솔 특가",
+        "description": "🪥 초미세 탄력모 칫솔 20개입 특가",
+        "original_price": 26500,
+        "price": 15900,
+        "discount": 10600,
+        "discount_rate": 40,
+        "url": "https://toss.im/_m/rZBiP883",
+        "image_url": "https://resources-fe.toss.im/image-optimize/width=800,quality=75/https%3A%2F%2Fshopping.toss.im%2Flive%2Ftaca%2Fai%2Fv2%2FNzE0ZWM1%2FQU9PYmQ1N3pyMWY2SE8vaFZPcVZ2d0gxRk9nQjdGVHFrVlVZRUM4VmVuLzg.png",
     },
 }
 
