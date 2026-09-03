@@ -1,5 +1,5 @@
-from app.services import menu_reactions
 from app.scrapers import dorm
+from app.services import promotions
 from app.utils import common, kakao_json_response
 
 CUISINE_KOREAN = {
@@ -13,7 +13,6 @@ CUISINE_KOREAN = {
 
 MEAL_TIME_KOREAN = {"breakfast": "🍳 아침", "lunch": "☀️ 점심", "dinner": "🌙 저녁"}
 
-
 def get_kor_meal_time(meal_time: str):
     return MEAL_TIME_KOREAN.get(meal_time)
 
@@ -22,9 +21,8 @@ def get_kor_cuisine(cuisine: str):
     return CUISINE_KOREAN.get(cuisine)
 
 
-def create_schedule_response(meal_schedule: dict, favorite_places: set[str] | None = None):
+def create_schedule_response(meal_schedule: list[dict]):
     kakao_response = kakao_json_response.KakaoJsonResponse()
-    favorite_places = favorite_places or set()
 
     current_time_kst = common.get_current_kr_time().strftime("%H:%M")
 
@@ -72,24 +70,6 @@ def create_schedule_response(meal_schedule: dict, favorite_places: set[str] | No
                 }
             )
         ]
-        if place in favorite_places:
-            buttons.append(
-                {
-                    "action": "message",
-                    "label": "★ 해제하기",
-                    "messageText": f"{place_name} 즐겨찾기 해제",
-                    "extra": {"place": place},
-                }
-            )
-        else:
-            buttons.append(
-                {
-                    "action": "message",
-                    "label": "⭐ 즐겨찾기",
-                    "messageText": f"{place_name} 즐겨찾기",
-                    "extra": {"place": place},
-                }
-            )
         if place == "dorm":
             buttons.append(
                 {
@@ -119,6 +99,9 @@ def create_schedule_response(meal_schedule: dict, favorite_places: set[str] | No
         carousel = kakao_response.create_carousel(carousel_items)
         kakao_response.add_output_to_response(carousel)
 
+    kakao_response.add_quick_replies(
+        [promotions.create_toss_promotion_quick_reply(kakao_response)]
+    )
     response = kakao_response.get_response()
     return response
 
@@ -128,47 +111,6 @@ def create_menu_response(day: str, menu_data: dict, place: str):
 
     today_kor = common.get_today_in_korean()
     day_label = "오늘" if day == today_kor else day
-    place_key = common.get_eng_place(place)
-
-    def create_reaction_button(
-        label: str, reaction: str, meal_time: str, meal: dict
-    ) -> dict:
-        menu_items = meal.get("menu", [])
-        calorie = meal.get("calorie", "")
-        meal_id = menu_reactions.create_meal_id(
-            place_key=place_key,
-            day=day,
-            meal_time=meal_time,
-            meal_type=meal.get("type", ""),
-            calorie=calorie,
-            menu_items=menu_items,
-        )
-        extra = {
-            "mealId": meal_id,
-            "place": place_key,
-            "placeName": place,
-            "day": day,
-            "dayLabel": day_label,
-            "mealTime": meal_time,
-            "mealTimeLabel": get_kor_meal_time(meal_time),
-            "mealType": meal.get("type", ""),
-            "calorie": calorie,
-            "menuItems": menu_items,
-            "reaction": reaction,
-        }
-        button = {
-            "label": label,
-            "messageText": label,
-            "extra": extra,
-        }
-        if common.KAKAO_REACTION_BLOCK_ID:
-            button.update(
-                {"action": "block", "blockId": common.KAKAO_REACTION_BLOCK_ID}
-            )
-        else:
-            button["action"] = "message"
-        return button
-
     for meal_time in ["breakfast", "lunch", "dinner"]:
         items = [
             kakao_response.create_text_card(
@@ -182,12 +124,6 @@ def create_menu_response(day: str, menu_data: dict, place: str):
                     "\n".join(meal["menu"]),
                 ),
                 buttons=[
-                    create_reaction_button(
-                        "👍 괜찮아요", "positive", meal_time, meal
-                    ),
-                    create_reaction_button(
-                        "👎 아쉬워요", "negative", meal_time, meal
-                    ),
                     {"label": "식단 공유하기", "action": "share"},
                 ],
                 button_layout="vertical",
@@ -195,6 +131,11 @@ def create_menu_response(day: str, menu_data: dict, place: str):
             for meal in menu_data[meal_time]
             if meal["menu"]
         ]
+
+        # 점심 첫 번째 메뉴 카드에만 간식 특가 버튼을 노출합니다.
+        if meal_time == "lunch" and items:
+            items[0]["buttons"].append(promotions.create_toss_promotion_button())
+            items[0]["buttonLayout"] = "vertical"
 
         # carousel을 3개씩 2개 행으로 출력
         for i in range(0, len(items), 3):
@@ -214,6 +155,8 @@ def create_menu_response(day: str, menu_data: dict, place: str):
         kakao_response.add_output_to_response(simple_text)
 
     return response
+
+
 
 
 def create_dorm_crowding_response(crowding: dict):

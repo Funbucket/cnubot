@@ -1,7 +1,7 @@
 # cnubot
 
 충남대학교 학생을 위한 카카오톡 챗봇 기반 캠퍼스 정보 서비스입니다.  
-학식, 셔틀버스, 도서관 좌석, 고객센터 연결 기능을 제공하며, FastAPI 백엔드와 Postgres 기반 투표 저장소로 구성되어 있습니다.
+학식, 셔틀버스, 도서관 좌석, 고객센터 연결 기능을 제공하는 FastAPI 백엔드입니다.
 
 ## Features
 
@@ -11,7 +11,6 @@
 - 도서관 좌석 현황 조회
 - 카카오 상담원 연결용 고객센터 응답 제공
 - backend job을 통한 교내 식단 데이터 수집 및 JSON 저장
-- 식단 반응 투표 및 결과 집계
 
 ## Architecture
 
@@ -28,11 +27,6 @@ KakaoTalk Chatbot
         +--> static JSON / image assets
         |
         +--> /data/menus/*.json
-        |
-        +--> backend Postgres
-             - meal snapshots
-             - meal reactions
-
 Host scheduler
         |
         +--> docker compose exec backend python -m app.jobs.scrape_menus ...
@@ -66,18 +60,14 @@ cnubot/
   - 오늘의 메뉴 조회
 - `POST /cafeteria/menu/day`
   - 특정 요일 메뉴 조회
-- `POST /cafeteria/menu/reaction`
-  - 식단 반응 저장 및 투표 결과 반환
-- `POST /cafeteria/favorites`
-  - 사용자의 즐겨찾기 식당 목록 조회
-- `POST /cafeteria/favorites/toggle`
-  - 식당 즐겨찾기 추가/해제
 - `POST /shuttle/nearby`
   - 현재 시각 기준 셔틀 운행/대기 정보 조회
 - `POST /library/seats`
   - 도서관 좌석 현황 조회
 - `POST /help/contact`
   - 카카오 상담원 연결 응답 반환
+- `POST /talkn`
+  - talkn 소개 및 서비스 바로가기 응답 반환
 - `GET /cafeteria/images/{image_name}`
 - `GET /shuttle/images/{image_name}`
 
@@ -113,22 +103,6 @@ docker compose exec -T backend python -m app.jobs.scrape_menus all
 
 - `backend/app/utils/kakao_json_response.py`
 - `backend/app/services/`
-
-식단 반응 버튼을 카카오 블록 연결로 고정하려면 운영 환경에 반응 블록 ID를 설정합니다.
-
-```env
-KAKAO_REACTION_BLOCK_ID=<카카오 반응 블록 ID>
-```
-
-값이 없으면 반응 버튼은 `message` action으로 동작합니다.
-
-즐겨찾기는 message action 기반으로 동작합니다. 카카오 관리자에서 다음 발화를 즐겨찾기 블록에 연결합니다.
-
-```text
-즐겨찾기
-기숙사 즐겨찾기
-기숙사 즐겨찾기 해제
-```
 
 ## Tests
 

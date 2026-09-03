@@ -21,8 +21,7 @@ services:
     command: ["--host", "0.0.0.0", "--port", "80"]
     environment:
       SERVER_URL: ${SERVER_URL}
-      KAKAO_REACTION_BLOCK_ID: ${KAKAO_REACTION_BLOCK_ID:-}
-      KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY:-}
+      KAKAO_TOSS_PROMOTION_BLOCK_ID: ${KAKAO_TOSS_PROMOTION_BLOCK_ID:-}
       MENU_DATA_DIR: /data/menus
       DATABASE_URL: postgresql://${BACKEND_POSTGRES_USER}:${BACKEND_POSTGRES_PASSWORD}@backend-postgres:5432/${BACKEND_POSTGRES_DB}
     ports:

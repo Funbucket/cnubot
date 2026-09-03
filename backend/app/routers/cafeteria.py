@@ -1,7 +1,7 @@
 import os
 
 from app.schemas.kakao_request import KakaoRequest
-from app.services import cafeteria, cafeteria_favorites, menu_reactions
+from app.services import cafeteria
 from app.utils import common, kakao_json_response
 from fastapi import APIRouter, Body, HTTPException
 from fastapi.concurrency import run_in_threadpool
@@ -20,11 +20,6 @@ async def get_schedule(req: KakaoRequest | None = Body(default=None)):
         return await get_dorm_crowding()
 
     schedule_data = await common.load_data("/code/app/static/data/meal_schedule.json")
-    user_id = _get_user_id(req)
-    favorite_places = (
-        await cafeteria_favorites.get_favorite_places(user_id) if user_id else set()
-    )
-
     for cafeteria_data in schedule_data:
         place = cafeteria_data.get("place")
         if not cafeteria_data.get("date"):
@@ -32,7 +27,7 @@ async def get_schedule(req: KakaoRequest | None = Body(default=None)):
             if operating_date:
                 cafeteria_data["date"] = operating_date
 
-    response = cafeteria.create_schedule_response(schedule_data, favorite_places)
+    response = cafeteria.create_schedule_response(schedule_data)
     return JSONResponse(response)
 
 
@@ -45,9 +40,6 @@ async def get_today_menu(req: KakaoRequest):
     utterance = req.userRequest.utterance.strip()
     if _is_dorm_crowding_utterance(utterance):
         return await get_dorm_crowding()
-
-    if _is_favorite_utterance(utterance):
-        return await _handle_favorite_fallback(req, utterance)
 
     place = utterance
     current_kst = common.get_current_kr_time()
@@ -75,70 +67,6 @@ async def get_dorm_crowding():
         raise HTTPException(
             status_code=503, detail="기숙사 혼잡도 정보를 가져오지 못했습니다."
         ) from exc
-    return JSONResponse(response)
-
-
-@router.post("/menu/reaction")
-async def create_menu_reaction(req: KakaoRequest):
-    """
-    식단 카드의 반응 버튼 extra를 받아 사용자별 투표를 저장하고 집계 결과를 반환합니다.
-    """
-    extra = req.action.clientExtra if req.action and req.action.clientExtra else None
-    user = req.userRequest.user
-    user_id = user.id if user and user.id else None
-
-    if not extra:
-        raise HTTPException(status_code=400, detail="반응 정보가 없습니다.")
-    if not user_id:
-        raise HTTPException(status_code=400, detail="사용자 정보가 없습니다.")
-
-    try:
-        result = await menu_reactions.record_reaction(extra, user_id)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail="DB 연결이 준비되지 않았습니다.") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    response = menu_reactions.create_reaction_response(extra, result)
-    return JSONResponse(response)
-
-
-@router.post("/favorites")
-async def get_favorites(req: KakaoRequest):
-    user_id = _get_user_id(req)
-    if not user_id:
-        raise HTTPException(status_code=400, detail="사용자 정보가 없습니다.")
-
-    schedule_data = await common.load_data("/code/app/static/data/meal_schedule.json")
-    for cafeteria_data in schedule_data:
-        place = cafeteria_data.get("place")
-        if not cafeteria_data.get("date"):
-            operating_date = await common.get_operating_date_for_place(place)
-            if operating_date:
-                cafeteria_data["date"] = operating_date
-
-    favorites = await cafeteria_favorites.get_favorite_places(user_id)
-    response = await cafeteria_favorites.create_favorites_response(
-        schedule_data, favorites
-    )
-    return JSONResponse(response)
-
-
-@router.post("/favorites/toggle")
-async def update_favorite(req: KakaoRequest):
-    user_id = _get_user_id(req)
-    if not user_id:
-        raise HTTPException(status_code=400, detail="사용자 정보가 없습니다.")
-
-    extra = req.action.clientExtra if req.action and req.action.clientExtra else {}
-    utterance = req.userRequest.utterance.strip()
-    place = extra.get("place") or cafeteria_favorites.parse_favorite_place(utterance)
-    if not place:
-        raise HTTPException(status_code=400, detail="식당 정보를 찾을 수 없습니다.")
-
-    enabled = "해제" not in utterance
-    result = await cafeteria_favorites.set_favorite(user_id, place, enabled)
-    response = cafeteria_favorites.create_toggle_response(result)
     return JSONResponse(response)
 
 
@@ -189,16 +117,6 @@ def _get_user_id(req: KakaoRequest | None) -> str | None:
     return req.userRequest.user.id
 
 
-def _is_favorite_utterance(utterance: str) -> bool:
-    return "즐겨찾기" in utterance.replace(" ", "")
-
-
 def _is_dorm_crowding_utterance(utterance: str) -> bool:
     normalized = utterance.replace(" ", "")
     return "기숙사" in normalized and "혼잡도" in normalized
-
-
-async def _handle_favorite_fallback(req: KakaoRequest, utterance: str):
-    if cafeteria_favorites.parse_favorite_place(utterance):
-        return await update_favorite(req)
-    return await get_favorites(req)

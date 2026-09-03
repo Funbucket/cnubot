@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 SERVER_URL = os.getenv("SERVER_URL")
-KAKAO_REACTION_BLOCK_ID = os.getenv("KAKAO_REACTION_BLOCK_ID")
+KAKAO_TOSS_PROMOTION_BLOCK_ID = os.getenv("KAKAO_TOSS_PROMOTION_BLOCK_ID")
 MENU_DATA_DIR = Path(os.getenv("MENU_DATA_DIR", "/data/menus"))
 
 
