@@ -6,7 +6,7 @@ from typing import Any
 from app.services import experiments
 from app.services import llm
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field
 
@@ -56,9 +56,19 @@ def require_admin(credentials: HTTPBasicCredentials = Depends(security)) -> str:
 
 @router.get("", response_class=HTMLResponse)
 async def admin_home(_: str = Depends(require_admin)):
+    return RedirectResponse("/admin/experiments", status_code=303)
+
+
+@router.get("/experiments", response_class=HTMLResponse)
+async def experiments_home(_: str = Depends(require_admin)):
     rows = await experiments.list_experiments()
     cards = "".join(_experiment_card(row) for row in rows)
-    return HTMLResponse(_page(cards, len(rows)))
+    return HTMLResponse(_page(cards, len(rows), show_form=False, show_list=True))
+
+
+@router.get("/experiments/new", response_class=HTMLResponse)
+async def new_experiment(_: str = Depends(require_admin)):
+    return HTMLResponse(_page("", 0, show_form=True, show_list=False))
 
 
 @router.post("/experiments")
@@ -126,8 +136,9 @@ def _experiment_card(row: dict[str, Any]) -> str:
     """
 
 
-def _page(cards: str, experiment_count: int) -> str:
+def _page(cards: str, experiment_count: int, show_form: bool = True, show_list: bool = True) -> str:
     card_markup = cards or '<div class="card"><p class="sub">아직 만든 실험이 없습니다. 위에서 첫 가설을 등록해보세요.</p></div>'
+    page_mode = "new-page" if show_form and not show_list else "list-page"
     page = """<!doctype html>
 <html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CNU 실험실</title>
@@ -149,8 +160,9 @@ def _page(cards: str, experiment_count: int) -> str:
   .toolbar{{align-items:stretch;flex-direction:column}}.toolbar input{{max-width:none}}
   .toolbar select{{margin-top:0}}.result-panel{{margin-left:-4px;margin-right:-4px;padding-left:4px;padding-right:4px}}
 }}
+ .new-page .page-list{{display:none}}.list-page #new-experiment{{display:none}}nav{{display:flex;gap:8px;margin-bottom:12px}}nav a{{color:#3767e8;text-decoration:none;font-size:13px;font-weight:700;padding:8px 10px;border-radius:8px}}nav a.nav-primary{{background:#3767e8;color:#fff}}
 </style>
-<body><main class="shell"><header><div><span class="eyebrow">CNU EXPERIMENT LAB</span><h1>실험실</h1><p class="sub">가설을 검증하고, 학습을 기록하세요.</p></div><div class="notice">결정 전 샘플 수와 SRM을 확인하세요.</div></header>
+<body class="__PAGE_MODE__"><main class="shell"><header><div><span class="eyebrow">CNU EXPERIMENT LAB</span><h1>실험실</h1><p class="sub">가설을 검증하고, 학습을 기록하세요.</p></div><div><nav><a href="/admin/experiments">실험 목록</a><a class="nav-primary" href="/admin/experiments/new">＋ 새 실험</a></nav><div class="notice">결정 전 샘플 수와 SRM을 확인하세요.</div></div></header>
 <form id="new-experiment">
 <div class="section-title"><h2>새 실험 설계</h2><span class="eyebrow">STEP 1 · PLAN</span></div>
 <label class="wide">AI에게 설계 요청<textarea id="ai-prompt" placeholder="예: 황치즈 버터링 특가 버튼 문구의 클릭률을 높일 수 있는 A/B 실험을 설계해줘"></textarea><span class="field-help">가설·지표·변형 문구 초안을 자동으로 채워줍니다.</span></label>
@@ -169,17 +181,18 @@ def _page(cards: str, experiment_count: int) -> str:
 <label>B 변형 키<input name="b_key" value="treatment"></label><label>B 버튼 문구<input name="b_label" value="황치즈 버터링 특가"></label>
 </div><div class="form-footer"><span class="field-help">실험 키를 비우면 이름을 기반으로 자동 생성됩니다.</span><button>실험 초안 저장 →</button></div>
 </form>
-<div class="section-title"><h2>실험 목록</h2><span class="eyebrow">__EXPERIMENT_COUNT__ EXPERIMENTS</span></div><div class="toolbar"><input id="search" placeholder="실험 이름 검색"><select id="status-filter"><option value="">모든 상태</option><option value="draft">초안</option><option value="running">실행 중</option><option value="paused">일시중지</option><option value="completed">완료</option></select><span class="count" id="visible-count"></span></div><section id="experiment-list">__CARDS__</section></main>
+<section class="page-list"><div class="section-title"><h2>실험 목록</h2><span class="eyebrow">__EXPERIMENT_COUNT__ EXPERIMENTS</span></div><div class="toolbar"><input id="search" placeholder="실험 이름 검색"><select id="status-filter"><option value="">모든 상태</option><option value="draft">초안</option><option value="running">실행 중</option><option value="paused">일시중지</option><option value="completed">완료</option></select><span class="count" id="visible-count"></span></div><section id="experiment-list">__CARDS__</section></section></main>
 <script>
 const form=document.querySelector('#new-experiment');
 async function aiSuggest(){{const prompt=document.querySelector('#ai-prompt').value;if(!prompt)return alert('AI에게 요청할 내용을 입력하세요.');const r=await fetch('/admin/suggest',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{prompt}})}});if(!r.ok)return alert(await r.text());const d=await r.json();form.name.value=d.name||'';form.hypothesis.value=d.hypothesis||'';form.primary_metric.value=d.primary_metric||'';form.guardrail_metric.value=d.guardrail_metric||'';if(d.variants?.length>=2){{form.a_key.value=d.variants[0].variant_key;form.a_label.value=d.variants[0].label;form.b_key.value=d.variants[1].variant_key;form.b_label.value=d.variants[1].label;}}}}
-form.addEventListener('submit',async(e)=>{{e.preventDefault();const f=new FormData(form);const num=(name)=>f.get(name)?Number(f.get(name)):null;const body={{experiment_key:f.get('experiment_key')||null,name:f.get('name'),hypothesis:f.get('hypothesis'),primary_metric:f.get('primary_metric'),guardrail_metric:f.get('guardrail_metric'),alpha:num('alpha'),power:num('power'),baseline_rate:num('baseline_rate'),mde:num('mde'),variants:[{{variant_key:f.get('a_key'),label:f.get('a_label'),weight:50,config:{{button_label:f.get('a_label')}}}},{{variant_key:f.get('b_key'),label:f.get('b_label'),weight:50,config:{{button_label:f.get('b_label')}}}}]}};const r=await fetch('/admin/experiments',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(body)}});if(r.ok)location.reload();else alert(await r.text())}});
+form?.addEventListener('submit',async(e)=>{{e.preventDefault();const f=new FormData(form);const num=(name)=>f.get(name)?Number(f.get(name)):null;const body={{experiment_key:f.get('experiment_key')||null,name:f.get('name'),hypothesis:f.get('hypothesis'),primary_metric:f.get('primary_metric'),guardrail_metric:f.get('guardrail_metric'),alpha:num('alpha'),power:num('power'),baseline_rate:num('baseline_rate'),mde:num('mde'),variants:[{{variant_key:f.get('a_key'),label:f.get('a_label'),weight:50,config:{{button_label:f.get('a_label')}}}},{{variant_key:f.get('b_key'),label:f.get('b_label'),weight:50,config:{{button_label:f.get('b_label')}}}}]}};const r=await fetch('/admin/experiments',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(body)}});if(r.ok)location.reload();else alert(await r.text())}});
 async function statusChange(id,status){{await fetch(`/admin/experiments/${{id}}/${{status}}`,{{method:'POST'}});location.reload()}}
 function filterExperiments(){{const query=document.querySelector('#search').value.toLowerCase();const status=document.querySelector('#status-filter').value;const cards=document.querySelectorAll('.experiment-card');let visible=0;cards.forEach(card=>{{const show=(!query||card.dataset.name.includes(query))&&(!status||card.dataset.status===status);card.style.display=show?'':'none';if(show)visible++}});document.querySelector('#visible-count').textContent=`${{visible}}개 표시`}}
-document.querySelector('#search').addEventListener('input',filterExperiments);document.querySelector('#status-filter').addEventListener('change',filterExperiments);filterExperiments();
+document.querySelector('#search')?.addEventListener('input',filterExperiments);document.querySelector('#status-filter')?.addEventListener('change',filterExperiments);if(document.querySelector('#search'))filterExperiments();
 async function results(id){{const box=document.querySelector(`#result-${{id}}`);box.classList.remove('hidden');box.innerHTML='<p class="sub">분석 중...</p>';const r=await fetch(`/admin/experiments/${{id}}/results`);if(!r.ok){{box.innerHTML='<p class="notice">결과를 불러오지 못했습니다.</p>';return}}const d=await r.json();const q=d.quality||{{}};box.innerHTML=`<div class="result-summary"><div class="metric"><span>배정 사용자</span><b>${{d.assigned_users}}</b></div><div class="metric"><span>이벤트</span><b>${{d.events}}</b></div><div class="metric"><span>샘플 충족</span><b>${{q.sample_size_ok?'예':'아니오'}}</b></div><div class="metric"><span>SRM</span><b>${{d.srm?.status||'-'}}</b></div></div><table><thead><tr><th>변형</th><th>노출 사용자</th><th>클릭 사용자</th><th>전환율</th><th>비교 p-value</th></tr></thead><tbody>${{d.variants.map(v=>`<tr><td>${{v.variant_key}}</td><td>${{v.exposed_users}}</td><td>${{v.clicked_users}}</td><td>${{(v.conversion_rate*100).toFixed(2)}}%</td><td>${{v.comparison?(v.comparison.p_value).toFixed(4):'-'}}</td></tr>`).join('')}}</tbody></table>`}}
 </script></body></html>"""
     # The template keeps doubled braces so its CSS/JS can also be embedded safely
     # in the earlier f-string-based version of this page.
     page = page.replace("{{", "{").replace("}}", "}")
-    return page.replace("__EXPERIMENT_COUNT__", str(experiment_count)).replace("__CARDS__", card_markup)
+    page = page.replace("__PAGE_MODE__", page_mode).replace("__EXPERIMENT_COUNT__", str(experiment_count)).replace("__CARDS__", card_markup)
+    return page
