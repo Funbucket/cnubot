@@ -27,7 +27,22 @@ async def get_schedule(req: KakaoRequest | None = Body(default=None)):
             if operating_date:
                 cafeteria_data["date"] = operating_date
 
-    response = cafeteria.create_schedule_response(schedule_data)
+    user_id = _get_user_id(req)
+    variant = await experiments.get_active_variant(
+        promotions.PROMOTION_EXPERIMENT_KEY, user_id
+    )
+    if variant:
+        await experiments.record_event(
+            promotions.PROMOTION_EXPERIMENT_KEY,
+            user_id,
+            "promotion_exposure",
+            {"surface": "schedule"},
+        )
+    product_key = (variant or {}).get("config", {}).get("product_key")
+    response = cafeteria.create_schedule_response(
+        schedule_data,
+        promotion_product=promotions.get_product(product_key) if variant else None,
+    )
     return JSONResponse(response)
 
 
@@ -121,9 +136,12 @@ async def get_menu_by_day(req: KakaoRequest):
             "promotion_exposure",
             {"surface": "menu_by_day"},
         )
-    promotion_label = (variant or {}).get("config", {}).get("button_label")
+    product_key = (variant or {}).get("config", {}).get("product_key")
     response = cafeteria.create_menu_response(
-        kor_day, menu_data, place, promotion_label=promotion_label
+        kor_day,
+        menu_data,
+        place,
+        promotion_product=promotions.get_product(product_key) if variant else None,
     )
     return JSONResponse(response)
 

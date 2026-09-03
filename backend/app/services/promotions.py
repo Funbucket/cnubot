@@ -55,16 +55,17 @@ def get_product(product_key: str | None = None) -> dict:
     return TOSS_SHOPPING_PRODUCTS.get(product_key, TOSS_SHOPPING_PROMOTION)
 
 
-def create_toss_promotion_quick_reply(kakao_response):
+def create_toss_promotion_quick_reply(kakao_response, product: dict | None = None):
+    label = (product or {}).get("button_label", "🛍️ 쇼핑 특가")
     if common.KAKAO_TOSS_PROMOTION_BLOCK_ID:
         return kakao_response.create_quick_reply(
-            label="🛍️ 쇼핑 특가",
+            label=label,
             message_text="쇼핑 특가",
             action="block",
             block_id=common.KAKAO_TOSS_PROMOTION_BLOCK_ID,
         )
     return kakao_response.create_quick_reply(
-        label="🛍️ 쇼핑 특가",
+        label=label,
         message_text="쇼핑 특가",
     )
 

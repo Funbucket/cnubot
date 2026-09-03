@@ -21,7 +21,7 @@ def get_kor_cuisine(cuisine: str):
     return CUISINE_KOREAN.get(cuisine)
 
 
-def create_schedule_response(meal_schedule: list[dict]):
+def create_schedule_response(meal_schedule: list[dict], promotion_product: dict | None = None):
     kakao_response = kakao_json_response.KakaoJsonResponse()
 
     current_time_kst = common.get_current_kr_time().strftime("%H:%M")
@@ -100,7 +100,7 @@ def create_schedule_response(meal_schedule: list[dict]):
         kakao_response.add_output_to_response(carousel)
 
     kakao_response.add_quick_replies(
-        [promotions.create_toss_promotion_quick_reply(kakao_response)]
+        [promotions.create_toss_promotion_quick_reply(kakao_response, promotion_product)]
     )
     response = kakao_response.get_response()
     return response
