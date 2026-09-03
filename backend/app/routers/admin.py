@@ -58,7 +58,7 @@ def require_admin(credentials: HTTPBasicCredentials = Depends(security)) -> str:
 async def admin_home(_: str = Depends(require_admin)):
     rows = await experiments.list_experiments()
     cards = "".join(_experiment_card(row) for row in rows)
-    return HTMLResponse(_page(cards))
+    return HTMLResponse(_page(cards, len(rows)))
 
 
 @router.post("/experiments")
@@ -112,34 +112,31 @@ def _experiment_card(row: dict[str, Any]) -> str:
         actions = f'<button onclick="statusChange({experiment_id}, \'paused\')">일시중지</button>'
     elif row["status"] == "paused":
         actions = f'<button onclick="statusChange({experiment_id}, \'running\')">재개</button>'
+    status_label = {"draft": "초안", "running": "실행 중", "paused": "일시중지", "completed": "완료"}.get(row["status"], row["status"])
+    sample = row.get("min_sample_size") or "미설정"
     return f"""
-    <article class="card">
-      <div class="row"><h3>{html.escape(row['name'])}</h3><span class="status">{row['status']}</span></div>
-      <p><b>가설:</b> {html.escape(row['hypothesis'])}</p>
-      <p><b>핵심 지표:</b> {html.escape(row['primary_metric'])} · <b>가드레일:</b> {html.escape(row['guardrail_metric'] or '-')}</p>
-      <ul>{variants}</ul>
-      {actions} <button onclick="results({experiment_id})">결과 보기</button>
-      <pre id="result-{experiment_id}"></pre>
+    <article class="experiment-card">
+      <div class="card-top"><div><span class="eyebrow">{html.escape(row['experiment_key'])}</span><h3>{html.escape(row['name'])}</h3></div><span class="status status-{row['status']}">{status_label}</span></div>
+      <p class="hypothesis">{html.escape(row['hypothesis'])}</p>
+      <div class="meta-grid"><div><span>핵심 지표</span><b>{html.escape(row['primary_metric'])}</b></div><div><span>가드레일</span><b>{html.escape(row['guardrail_metric'] or '-')}</b></div><div><span>최소 샘플 / 변형</span><b>{sample}명</b></div><div><span>유의수준 · 검정력</span><b>{row.get('alpha', 0.05):.2f} · {row.get('power', 0.8):.0%}</b></div></div>
+      <div class="variants"><h4>변형</h4><ul>{variants}</ul></div>
+      <div class="actions">{actions}<button class="secondary" onclick="results({experiment_id})">결과 보기</button></div>
+      <div id="result-{experiment_id}" class="result-panel hidden"></div>
     </article>
     """
 
 
-def _page(cards: str) -> str:
-    return f"""<!doctype html>
+def _page(cards: str, experiment_count: int) -> str:
+    card_markup = cards or '<div class="card"><p class="sub">아직 만든 실험이 없습니다. 위에서 첫 가설을 등록해보세요.</p></div>'
+    page = """<!doctype html>
 <html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>실험 어드민</title>
+<title>CNU 실험실</title>
 <style>
-body{{font-family:system-ui,sans-serif;max-width:1000px;margin:32px auto;padding:0 16px;background:#f6f7f9;color:#18202a}}
-.card,form{{background:white;border:1px solid #e3e6eb;border-radius:12px;padding:18px;margin:14px 0;box-shadow:0 2px 8px #0000000b}}
-input,textarea{{width:100%;box-sizing:border-box;margin:6px 0 12px;padding:9px;border:1px solid #ccd2da;border-radius:6px}}
-button{{border:0;border-radius:6px;padding:8px 12px;background:#1769e0;color:white;cursor:pointer;margin:3px}}
-.row{{display:flex;justify-content:space-between;gap:12px;align-items:center}}.status{{background:#eef3ff;padding:4px 8px;border-radius:12px;font-size:12px}}
-pre{{white-space:pre-wrap;background:#f4f6f8;padding:8px;border-radius:6px}}
+*{{box-sizing:border-box}}body{{font-family:Inter,system-ui,sans-serif;margin:0;background:#f5f7fb;color:#172033}}.shell{{max-width:1120px;margin:auto;padding:32px 20px 64px}}header{{display:flex;justify-content:space-between;align-items:end;margin-bottom:28px}}h1{{font-size:30px;margin:4px 0 8px;letter-spacing:-.04em}}h2{{font-size:19px;margin:30px 0 12px}}h3{{font-size:18px;margin:5px 0;letter-spacing:-.02em}}h4{{font-size:13px;margin:18px 0 8px;color:#68738a}}p{{line-height:1.55}}.sub{{color:#68738a;margin:0}}.card,form,.experiment-card{{background:#fff;border:1px solid #e3e8f0;border-radius:16px;padding:22px;margin:14px 0;box-shadow:0 8px 24px #1720330a}}form{{border-top:4px solid #3767e8}}.section-title{{display:flex;justify-content:space-between;align-items:center}}.eyebrow{{font-size:11px;color:#71809b;font-family:ui-monospace,monospace}}label{{display:block;font-size:13px;font-weight:650;color:#3d4960;margin-top:12px}}input,textarea{{width:100%;font:inherit;box-sizing:border-box;margin-top:6px;padding:11px 12px;border:1px solid #d4dbe7;border-radius:9px;background:#fbfcfe}}input:focus,textarea:focus{{outline:3px solid #3767e822;border-color:#3767e8}}textarea{{min-height:76px;resize:vertical}}button{{border:0;border-radius:9px;padding:10px 14px;background:#3767e8;color:#fff;font-weight:700;cursor:pointer;margin:4px 4px 0 0}}button:hover{{filter:brightness(.95)}}button.secondary{{background:#eef2f8;color:#344159}}button:disabled{{opacity:.55;cursor:wait}}.card-top,.row{{display:flex;justify-content:space-between;gap:16px;align-items:center}}.status{{padding:5px 10px;border-radius:99px;font-size:12px;font-weight:700;white-space:nowrap}}.status-draft{{background:#fff4d6;color:#8a6200}}.status-running{{background:#dcf8e8;color:#147342}}.status-paused{{background:#e9edf5;color:#68738a}}.status-completed{{background:#e6edff;color:#3158af}}.hypothesis{{color:#4d5a70;margin:16px 0}}.meta-grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}}.meta-grid div{{padding:12px;background:#f7f9fc;border-radius:10px;min-width:0}}.meta-grid span{{display:block;color:#7b879b;font-size:11px;margin-bottom:5px}}.meta-grid b{{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px}}.variants ul{{list-style:none;padding:0;margin:0;display:flex;gap:8px;flex-wrap:wrap}}.variants li{{background:#f1f4fa;border-radius:8px;padding:8px 10px;font-size:13px}}.actions{{margin-top:18px}.result-panel{{margin-top:14px;border-top:1px solid #e6eaf1;padding-top:14px}}.hidden{{display:none}}.result-summary{{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}}.metric{{background:#f6f8fc;padding:10px 12px;border-radius:9px}}.metric span{{display:block;color:#71809b;font-size:11px}}.metric b{{display:block;margin-top:3px}}table{{width:100%;border-collapse:collapse;font-size:13px}}th,td{{padding:9px;text-align:left;border-bottom:1px solid #edf0f5}}th{{color:#71809b;font-weight:600}}.notice{{padding:12px 14px;background:#fff8e7;border:1px solid #f3dfaa;border-radius:10px;color:#785b12;font-size:13px}}@media(max-width:720px){{.meta-grid{{grid-template-columns:repeat(2,1fr)}}header{{display:block}}}}
 </style>
-<h1>실험 어드민</h1>
-<p>가설을 먼저 기록하고, 변형·핵심 지표·가드레일을 정한 뒤 실험을 시작하세요.</p>
+<body><main class="shell"><header><div><span class="eyebrow">CNU EXPERIMENT LAB</span><h1>실험실</h1><p class="sub">가설을 검증하고, 학습을 기록하세요.</p></div><div class="notice">결정 전 샘플 수와 SRM을 확인하세요.</div></header>
 <form id="new-experiment">
-<h2>새 실험</h2>
+<div class="section-title"><h2>새 실험 설계</h2><span class="eyebrow">STEP 1 · PLAN</span></div>
 <label>AI에게 설계 요청<textarea id="ai-prompt" placeholder="예: 황치즈 버터링 특가 버튼 문구의 클릭률을 높일 수 있는 A/B 실험을 설계해줘"></textarea></label>
 <button type="button" onclick="aiSuggest()">AI 실험 초안 만들기</button>
 <label>실험 키<input name="experiment_key" placeholder="비워두면 자동 생성"></label>
@@ -153,13 +150,14 @@ pre{{white-space:pre-wrap;background:#f4f6f8;padding:8px;border-radius:6px}}
 <label>검정력 power<input name="power" type="number" step="0.05" value="0.8"></label>
 <label>A 변형 키<input name="a_key" value="control"></label><label>A 버튼 문구<input name="a_label" value="간식 특가"></label>
 <label>B 변형 키<input name="b_key" value="treatment"></label><label>B 버튼 문구<input name="b_label" value="황치즈 버터링 특가"></label>
-<button>실험 초안 만들기</button>
+<button>실험 초안 저장</button>
 </form>
-<h2>실험 목록</h2>{cards or '<p>아직 만든 실험이 없습니다.</p>'}
+<div class="section-title"><h2>실험 목록</h2><span class="eyebrow">__EXPERIMENT_COUNT__ EXPERIMENTS</span></div>__CARDS__</main>
 <script>
 const form=document.querySelector('#new-experiment');
 async function aiSuggest(){{const prompt=document.querySelector('#ai-prompt').value;if(!prompt)return alert('AI에게 요청할 내용을 입력하세요.');const r=await fetch('/admin/suggest',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{prompt}})}});if(!r.ok)return alert(await r.text());const d=await r.json();form.name.value=d.name||'';form.hypothesis.value=d.hypothesis||'';form.primary_metric.value=d.primary_metric||'';form.guardrail_metric.value=d.guardrail_metric||'';if(d.variants?.length>=2){{form.a_key.value=d.variants[0].variant_key;form.a_label.value=d.variants[0].label;form.b_key.value=d.variants[1].variant_key;form.b_label.value=d.variants[1].label;}}}}
 form.addEventListener('submit',async(e)=>{{e.preventDefault();const f=new FormData(form);const num=(name)=>f.get(name)?Number(f.get(name)):null;const body={{experiment_key:f.get('experiment_key')||null,name:f.get('name'),hypothesis:f.get('hypothesis'),primary_metric:f.get('primary_metric'),guardrail_metric:f.get('guardrail_metric'),alpha:num('alpha'),power:num('power'),baseline_rate:num('baseline_rate'),mde:num('mde'),variants:[{{variant_key:f.get('a_key'),label:f.get('a_label'),weight:50,config:{{button_label:f.get('a_label')}}}},{{variant_key:f.get('b_key'),label:f.get('b_label'),weight:50,config:{{button_label:f.get('b_label')}}}}]}};const r=await fetch('/admin/experiments',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(body)}});if(r.ok)location.reload();else alert(await r.text())}});
 async function statusChange(id,status){{await fetch(`/admin/experiments/${{id}}/${{status}}`,{{method:'POST'}});location.reload()}}
-async function results(id){{const r=await fetch(`/admin/experiments/${{id}}/results`);document.querySelector(`#result-${{id}}`).textContent=JSON.stringify(await r.json(),null,2)}}
-</script></html>"""
+async function results(id){{const box=document.querySelector(`#result-${{id}}`);box.classList.remove('hidden');box.innerHTML='<p class="sub">분석 중...</p>';const r=await fetch(`/admin/experiments/${{id}}/results`);if(!r.ok){{box.innerHTML='<p class="notice">결과를 불러오지 못했습니다.</p>';return}}const d=await r.json();const q=d.quality||{{}};box.innerHTML=`<div class="result-summary"><div class="metric"><span>배정 사용자</span><b>${{d.assigned_users}}</b></div><div class="metric"><span>이벤트</span><b>${{d.events}}</b></div><div class="metric"><span>샘플 충족</span><b>${{q.sample_size_ok?'예':'아니오'}}</b></div><div class="metric"><span>SRM</span><b>${{d.srm?.status||'-'}}</b></div></div><table><thead><tr><th>변형</th><th>노출 사용자</th><th>클릭 사용자</th><th>전환율</th><th>비교 p-value</th></tr></thead><tbody>${{d.variants.map(v=>`<tr><td>${{v.variant_key}}</td><td>${{v.exposed_users}}</td><td>${{v.clicked_users}}</td><td>${{(v.conversion_rate*100).toFixed(2)}}%</td><td>${{v.comparison?(v.comparison.p_value).toFixed(4):'-'}}</td></tr>`).join('')}}</tbody></table>`}}
+</script></body></html>"""
+    return page.replace("__EXPERIMENT_COUNT__", str(experiment_count)).replace("__CARDS__", card_markup)
