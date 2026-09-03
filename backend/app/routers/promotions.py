@@ -16,4 +16,6 @@ async def get_toss_shopping_promotion(req: KakaoRequest | None = Body(default=No
         "promotion_click",
         {"surface": "promotion_block"},
     )
-    return JSONResponse(promotions.create_toss_shopping_response())
+    variant = await experiments.get_active_variant(promotions.PROMOTION_EXPERIMENT_KEY, user_id)
+    product_key = (variant or {}).get("config", {}).get("product_key")
+    return JSONResponse(promotions.create_toss_shopping_response(promotions.get_product(product_key)))

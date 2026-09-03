@@ -63,9 +63,10 @@ async def get_today_menu(req: KakaoRequest):
             "promotion_exposure",
             {"surface": "menu_today"},
         )
-    promotion_label = (variant or {}).get("config", {}).get("button_label")
+    product_key = (variant or {}).get("config", {}).get("product_key")
+    promotion_product = promotions.get_product(product_key)
     response = cafeteria.create_menu_response(
-        kor_day, menu_data, place, promotion_label=promotion_label
+        kor_day, menu_data, place, promotion_product=promotion_product if variant else None
     )
     return JSONResponse(response)
 
