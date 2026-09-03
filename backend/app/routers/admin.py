@@ -125,10 +125,11 @@ def _experiment_card(row: dict[str, Any]) -> str:
     status_label = {"draft": "초안", "running": "실행 중", "paused": "일시중지", "completed": "완료"}.get(row["status"], row["status"])
     sample = row.get("min_sample_size") or "미설정"
     return f"""
-    <article class="experiment-card" data-name="{html.escape(row['name'].lower())}" data-status="{row['status']}">
+    <article class="experiment-card" data-id="{experiment_id}" data-name="{html.escape(row['name'].lower())}" data-status="{row['status']}">
       <div class="card-top"><div><span class="eyebrow">{html.escape(row['experiment_key'])}</span><h3>{html.escape(row['name'])}</h3></div><span class="status status-{row['status']}">{status_label}</span></div>
       <p class="hypothesis">{html.escape(row['hypothesis'])}</p>
       <div class="meta-grid"><div><span>핵심 지표</span><b>{html.escape(row['primary_metric'])}</b></div><div><span>가드레일</span><b>{html.escape(row['guardrail_metric'] or '-')}</b></div><div><span>최소 샘플 / 변형</span><b>{sample}명</b></div><div><span>유의수준 · 검정력</span><b>{row.get('alpha', 0.05):.2f} · {row.get('power', 0.8):.0%}</b></div></div>
+      <div class="live-summary" id="live-{experiment_id}"><span class="live-label">실시간 현황</span><span class="live-loading">불러오는 중…</span></div>
       <div class="variants"><h4>변형</h4><ul>{variants}</ul></div>
       <div class="actions">{actions}<button class="secondary" onclick="results({experiment_id})">결과 보기</button></div>
       <div id="result-{experiment_id}" class="result-panel hidden"></div>
@@ -161,6 +162,7 @@ def _page(cards: str, experiment_count: int, show_form: bool = True, show_list: 
   .toolbar select{{margin-top:0}}.result-panel{{margin-left:-4px;margin-right:-4px;padding-left:4px;padding-right:4px}}
 }}
  .new-page .page-list{{display:none}}.list-page #new-experiment{{display:none}}nav{{display:flex;gap:8px;margin-bottom:12px}}nav a{{color:#3767e8;text-decoration:none;font-size:13px;font-weight:700;padding:8px 10px;border-radius:8px}}nav a.nav-primary{{background:#3767e8;color:#fff}}
+ .live-summary{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:16px 0 4px;padding:12px;background:#f7f9fc;border-radius:10px;color:#536078;font-size:12px}}.live-label{{color:#3767e8;font-weight:800}}.live-loading{{color:#8a94a6}}.progress{{flex:1;min-width:80px;height:6px;background:#e2e7f0;border-radius:99px;overflow:hidden}}.progress i{{display:block;height:100%;background:#3767e8;border-radius:inherit}}.srm{{font-weight:700}}
 </style>
 <body class="__PAGE_MODE__"><main class="shell"><header><div><span class="eyebrow">CNU EXPERIMENT LAB</span><h1>실험실</h1><p class="sub">가설을 검증하고, 학습을 기록하세요.</p></div><div><nav><a href="/admin/experiments">실험 목록</a><a class="nav-primary" href="/admin/experiments/new">＋ 새 실험</a></nav><div class="notice">결정 전 샘플 수와 SRM을 확인하세요.</div></div></header>
 <form id="new-experiment">
@@ -190,6 +192,9 @@ async function statusChange(id,status){{await fetch(`/admin/experiments/${{id}}/
 function filterExperiments(){{const query=document.querySelector('#search').value.toLowerCase();const status=document.querySelector('#status-filter').value;const cards=document.querySelectorAll('.experiment-card');let visible=0;cards.forEach(card=>{{const show=(!query||card.dataset.name.includes(query))&&(!status||card.dataset.status===status);card.style.display=show?'':'none';if(show)visible++}});document.querySelector('#visible-count').textContent=`${{visible}}개 표시`}}
 document.querySelector('#search')?.addEventListener('input',filterExperiments);document.querySelector('#status-filter')?.addEventListener('change',filterExperiments);if(document.querySelector('#search'))filterExperiments();
 async function results(id){{const box=document.querySelector(`#result-${{id}}`);box.classList.remove('hidden');box.innerHTML='<p class="sub">분석 중...</p>';const r=await fetch(`/admin/experiments/${{id}}/results`);if(!r.ok){{box.innerHTML='<p class="notice">결과를 불러오지 못했습니다.</p>';return}}const d=await r.json();const q=d.quality||{{}};box.innerHTML=`<div class="result-summary"><div class="metric"><span>배정 사용자</span><b>${{d.assigned_users}}</b></div><div class="metric"><span>이벤트</span><b>${{d.events}}</b></div><div class="metric"><span>샘플 충족</span><b>${{q.sample_size_ok?'예':'아니오'}}</b></div><div class="metric"><span>SRM</span><b>${{d.srm?.status||'-'}}</b></div></div><table><thead><tr><th>변형</th><th>노출 사용자</th><th>클릭 사용자</th><th>전환율</th><th>비교 p-value</th></tr></thead><tbody>${{d.variants.map(v=>`<tr><td>${{v.variant_key}}</td><td>${{v.exposed_users}}</td><td>${{v.clicked_users}}</td><td>${{(v.conversion_rate*100).toFixed(2)}}%</td><td>${{v.comparison?(v.comparison.p_value).toFixed(4):'-'}}</td></tr>`).join('')}}</tbody></table>`}}
+async function refreshLive(){{for(const card of document.querySelectorAll('.experiment-card[data-status="running"]')){{const id=card.dataset.id;const box=document.querySelector(`#live-${{id}}`);try{{const d=await (await fetch(`/admin/experiments/${{id}}/results`)).json();const min=d.min_sample_size_per_variant||0;const exposed=Math.max(...(d.variants||[]).map(v=>v.exposed_users||0),0);const pct=min?Math.min(100,exposed/min*100):0;box.innerHTML=`<span class="live-label">실시간 현황</span><b>${{exposed.toLocaleString()}}명 노출</b><span>${{(d.variants||[]).reduce((n,v)=>n+(v.clicked_users||0),0).toLocaleString()}}명 클릭</span><span>CTR ${{((d.variants||[]).reduce((n,v)=>n+(v.exposed_users||0),0)?((d.variants||[]).reduce((n,v)=>n+(v.clicked_users||0),0)/(d.variants||[]).reduce((n,v)=>n+(v.exposed_users||0),0)*100).toFixed(2):'0.00')}}%</span><span>목표 ${{pct.toFixed(0)}}%</span><i class="progress"><i style="width:${{pct}}%"></i></i><span class="srm">SRM ${{d.srm?.status||'-'}}</span>`}}catch(e){{box.innerHTML='<span class="live-label">실시간 현황</span><span>잠시 후 다시 시도합니다.</span>'}}}}
+}}
+if(document.querySelector('.experiment-card[data-status="running"]')){{refreshLive();setInterval(refreshLive,30000)}}
 </script></body></html>"""
     # The template keeps doubled braces so its CSS/JS can also be embedded safely
     # in the earlier f-string-based version of this page.
