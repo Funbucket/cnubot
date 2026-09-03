@@ -18,14 +18,16 @@ async def get_toss_shopping_promotion(req: KakaoRequest | None = Body(default=No
         "menu_button": "promotion_button_click",
         "quick_reply": "promotion_quick_reply_click",
     }.get(source, "promotion_block_click")
+    variant = await experiments.get_active_variant(
+        promotions.PROMOTION_EXPERIMENT_KEY, user_id
+    )
+    product_key = (variant or {}).get("config", {}).get("product_key") or promotions.DEFAULT_PROMOTION_PRODUCT_KEY
     await experiments.record_event(
         promotions.PROMOTION_EXPERIMENT_KEY,
         user_id,
         event_name,
         {"surface": source},
     )
-    variant = await experiments.get_active_variant(promotions.PROMOTION_EXPERIMENT_KEY, user_id)
-    product_key = (variant or {}).get("config", {}).get("product_key") or promotions.DEFAULT_PROMOTION_PRODUCT_KEY
     product = promotions.get_product(product_key)
     click_url = (
         f"{promotions.common.SERVER_URL}/promotions/toss-shopping/click?token="
@@ -42,6 +44,7 @@ async def track_toss_shopping_click(token: str = Query(..., min_length=20)):
     if not decoded:
         return JSONResponse({"detail": "유효하지 않거나 만료된 링크입니다."}, status_code=400)
     user_id, product_key, source = decoded
+    await experiments.get_active_variant(promotions.PROMOTION_EXPERIMENT_KEY, user_id)
     event_name = {
         "commerce_card": "commerce_card_click",
         "promotion_button": "promotion_button_click",
