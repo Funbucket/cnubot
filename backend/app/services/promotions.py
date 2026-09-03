@@ -74,6 +74,7 @@ def create_toss_promotion_button(product: dict | None = None, click_url: str | N
             "action": "block",
             "blockId": common.KAKAO_TOSS_PROMOTION_BLOCK_ID,
             "messageText": "쇼핑 특가",
+            "extra": {"source": "menu_button"},
         }
     return {
         "label": label,
@@ -94,6 +95,7 @@ def create_toss_promotion_quick_reply(kakao_response, product: dict | None = Non
             message_text="쇼핑 특가",
             action="block",
             block_id=common.KAKAO_TOSS_PROMOTION_BLOCK_ID,
+            extra={"source": "quick_reply"},
         )
     return kakao_response.create_quick_reply(
         label=label,

@@ -263,7 +263,10 @@ async def get_analysis(experiment_id: int) -> dict[str, Any]:
             """
             SELECT v.variant_key,
                    COUNT(DISTINCT e.user_id) FILTER (WHERE e.event_name = 'promotion_exposure') AS exposed_users,
-                   COUNT(DISTINCT e.user_id) FILTER (WHERE e.event_name = 'promotion_click') AS clicked_users
+                   COUNT(DISTINCT e.user_id) FILTER (WHERE e.event_name IN (
+                       'promotion_click', 'promotion_button_click',
+                       'promotion_quick_reply_click', 'promotion_block_click'
+                   )) AS clicked_users
             FROM experiment_variants v
             LEFT JOIN experiment_events e
               ON e.experiment_id = v.experiment_id AND e.variant_key = v.variant_key

@@ -11,11 +11,18 @@ router = APIRouter()
 @router.post("/toss-shopping")
 async def get_toss_shopping_promotion(req: KakaoRequest | None = Body(default=None)):
     user_id = req.userRequest.user.id if req and req.userRequest.user else None
+    source = "promotion_block"
+    if req and req.action and req.action.clientExtra:
+        source = req.action.clientExtra.get("source", source)
+    event_name = {
+        "menu_button": "promotion_button_click",
+        "quick_reply": "promotion_quick_reply_click",
+    }.get(source, "promotion_block_click")
     await experiments.record_event(
         promotions.PROMOTION_EXPERIMENT_KEY,
         user_id,
-        "promotion_click",
-        {"surface": "promotion_block"},
+        event_name,
+        {"surface": source},
     )
     variant = await experiments.get_active_variant(promotions.PROMOTION_EXPERIMENT_KEY, user_id)
     product_key = (variant or {}).get("config", {}).get("product_key")
@@ -31,7 +38,7 @@ async def track_toss_shopping_click(token: str = Query(..., min_length=20)):
     await experiments.record_event(
         promotions.PROMOTION_EXPERIMENT_KEY,
         user_id,
-        "promotion_click",
+        "promotion_button_click",
         {"surface": "tracked_web_link", "product_key": product_key},
     )
     return RedirectResponse(promotions.get_product(product_key)["url"], status_code=307)
