@@ -41,16 +41,16 @@ TOSS_SHOPPING_PRODUCTS = {
 TOSS_SHOPPING_PROMOTION = TOSS_SHOPPING_PRODUCTS["yellow_cheese_buttering"]
 
 
-def create_tracking_token(user_id: str, product_key: str) -> str:
+def create_tracking_token(user_id: str, product_key: str, source: str = "promotion_button") -> str:
     payload = base64.urlsafe_b64encode(
-        json.dumps({"u": user_id, "p": product_key, "e": int(time.time()) + 86400}).encode()
+        json.dumps({"u": user_id, "p": product_key, "s": source, "e": int(time.time()) + 86400}).encode()
     ).decode().rstrip("=")
     secret = os.getenv("PROMOTION_TRACKING_SECRET", "removed-secret").encode()
     signature = hmac.new(secret, payload.encode(), hashlib.sha256).hexdigest()
     return f"{payload}.{signature}"
 
 
-def read_tracking_token(token: str) -> tuple[str, str] | None:
+def read_tracking_token(token: str) -> tuple[str, str, str] | None:
     try:
         payload, signature = token.split(".", 1)
         secret = os.getenv("PROMOTION_TRACKING_SECRET", "removed-secret").encode()
@@ -60,7 +60,7 @@ def read_tracking_token(token: str) -> tuple[str, str] | None:
         data = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
         if data["e"] < time.time() or data["p"] not in TOSS_SHOPPING_PRODUCTS:
             return None
-        return data["u"], data["p"]
+        return data["u"], data["p"], data.get("s", "promotion_button")
     except (ValueError, KeyError, TypeError, json.JSONDecodeError):
         return None
 
@@ -103,7 +103,7 @@ def create_toss_promotion_quick_reply(kakao_response, product: dict | None = Non
     )
 
 
-def create_toss_shopping_response(product: dict | None = None):
+def create_toss_shopping_response(product: dict | None = None, click_url: str | None = None):
     kakao_response = kakao_json_response.KakaoJsonResponse()
     product = product or TOSS_SHOPPING_PROMOTION
     commerce_card = {
@@ -118,7 +118,7 @@ def create_toss_shopping_response(product: dict | None = None):
             {
                 "action": "webLink",
                 "label": product["button_label"],
-                "webLinkUrl": product["url"],
+                "webLinkUrl": click_url or product["url"],
             }
         ],
     }

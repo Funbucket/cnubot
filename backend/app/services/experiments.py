@@ -265,7 +265,8 @@ async def get_analysis(experiment_id: int) -> dict[str, Any]:
                    COUNT(DISTINCT e.user_id) FILTER (WHERE e.event_name = 'promotion_exposure') AS exposed_users,
                    COUNT(DISTINCT e.user_id) FILTER (WHERE e.event_name IN (
                        'promotion_click', 'promotion_button_click',
-                       'promotion_quick_reply_click', 'promotion_block_click'
+                       'promotion_quick_reply_click', 'promotion_block_click',
+                       'commerce_card_click'
                    )) AS clicked_users
             FROM experiment_variants v
             LEFT JOIN experiment_events e

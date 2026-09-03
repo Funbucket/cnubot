@@ -26,7 +26,14 @@ async def get_toss_shopping_promotion(req: KakaoRequest | None = Body(default=No
     )
     variant = await experiments.get_active_variant(promotions.PROMOTION_EXPERIMENT_KEY, user_id)
     product_key = (variant or {}).get("config", {}).get("product_key")
-    return JSONResponse(promotions.create_toss_shopping_response(promotions.get_product(product_key)))
+    product = promotions.get_product(product_key)
+    click_url = (
+        f"{promotions.common.SERVER_URL}/promotions/toss-shopping/click?token="
+        f"{promotions.create_tracking_token(user_id, product_key, 'commerce_card')}"
+        if user_id and product_key
+        else None
+    )
+    return JSONResponse(promotions.create_toss_shopping_response(product, click_url))
 
 
 @router.get("/toss-shopping/click")
@@ -34,11 +41,15 @@ async def track_toss_shopping_click(token: str = Query(..., min_length=20)):
     decoded = promotions.read_tracking_token(token)
     if not decoded:
         return JSONResponse({"detail": "유효하지 않거나 만료된 링크입니다."}, status_code=400)
-    user_id, product_key = decoded
+    user_id, product_key, source = decoded
+    event_name = {
+        "commerce_card": "commerce_card_click",
+        "promotion_button": "promotion_button_click",
+    }.get(source, "promotion_button_click")
     await experiments.record_event(
         promotions.PROMOTION_EXPERIMENT_KEY,
         user_id,
-        "promotion_button_click",
-        {"surface": "tracked_web_link", "product_key": product_key},
+        event_name,
+        {"surface": "tracked_web_link", "product_key": product_key, "source": source},
     )
     return RedirectResponse(promotions.get_product(product_key)["url"], status_code=307)
