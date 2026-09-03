@@ -83,7 +83,7 @@ def create_toss_shopping_response(product: dict | None = None):
         "buttons": [
             {
                 "action": "webLink",
-                "label": "🛒 특가로 구매하기",
+                "label": product["button_label"],
                 "webLinkUrl": product["url"],
             }
         ],
