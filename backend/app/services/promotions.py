@@ -7,7 +7,8 @@ import time
 
 from app.utils import common, kakao_json_response
 
-PROMOTION_EXPERIMENT_KEY = "snack_product_comparison_v1"
+PROMOTION_EXPERIMENT_KEY = ""
+DEFAULT_PROMOTION_PRODUCT_KEY = "lavender_wipes"
 
 TOSS_SHOPPING_PRODUCTS = {
     "yellow_cheese_buttering": {
@@ -38,9 +39,21 @@ TOSS_SHOPPING_PRODUCTS = {
         "url": "https://toss.im/_m/XddZXers",
         "image_url": "https://resources-fe.toss.im/image-optimize/width=2400,quality=90/https%3A%2F%2Fshopping.toss.im%2Flive%2Ftemp%2F2026-08-03%2F74828108-78eb-4328-bf27-62b32a559495.jpeg",
     },
+    "lavender_wipes": {
+        "title": "리벤스 라벤더 바이올렛 물티슈",
+        "button_label": "🧻 물티슈 특가",
+        "quick_reply_label": "🧻 물티슈 특가",
+        "description": "🧻 1매당 8원 · 무료배송 특가",
+        "original_price": 29900,
+        "price": 7500,
+        "discount": 22400,
+        "discount_rate": 74,
+        "url": "https://toss.im/_m/1LO7hURq",
+        "image_url": "https://resources-fe.toss.im/image-optimize/width=800,quality=75/https%3A%2F%2Fshopping.toss.im%2Flive%2Ftemp%2F2026-01-08%2F15629a7e-56c2-4f73-8896-6481eaffdbca.jpeg",
+    },
 }
 
-TOSS_SHOPPING_PROMOTION = TOSS_SHOPPING_PRODUCTS["yellow_cheese_buttering"]
+TOSS_SHOPPING_PROMOTION = TOSS_SHOPPING_PRODUCTS[DEFAULT_PROMOTION_PRODUCT_KEY]
 
 
 def create_tracking_token(user_id: str, product_key: str, source: str = "promotion_button") -> str:

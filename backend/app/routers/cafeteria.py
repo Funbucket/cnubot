@@ -32,10 +32,10 @@ async def get_schedule(req: KakaoRequest | None = Body(default=None)):
     variant = await experiments.get_active_variant(
         promotions.PROMOTION_EXPERIMENT_KEY, user_id
     )
-    product_key = (variant or {}).get("config", {}).get("product_key")
+    product_key = (variant or {}).get("config", {}).get("product_key") or promotions.DEFAULT_PROMOTION_PRODUCT_KEY
     response = cafeteria.create_schedule_response(
         schedule_data,
-        promotion_product=promotions.get_product(product_key) if variant else None,
+        promotion_product=promotions.get_product(product_key),
     )
     if variant and _promotion_is_visible(response, promotions.get_product(product_key)):
         await experiments.record_event(
@@ -72,19 +72,19 @@ async def get_today_menu(req: KakaoRequest):
     variant = await experiments.get_active_variant(
         promotions.PROMOTION_EXPERIMENT_KEY, user_id
     )
-    product_key = (variant or {}).get("config", {}).get("product_key")
+    product_key = (variant or {}).get("config", {}).get("product_key") or promotions.DEFAULT_PROMOTION_PRODUCT_KEY
     promotion_product = promotions.get_product(product_key)
     click_url = (
         f"{common.SERVER_URL}/promotions/toss-shopping/click?token="
         f"{promotions.create_tracking_token(user_id, product_key)}"
-        if variant and user_id and product_key
+        if user_id and product_key
         else None
     )
     response = cafeteria.create_menu_response(
         kor_day,
         menu_data,
         place,
-        promotion_product=promotion_product if variant else None,
+        promotion_product=promotion_product,
         promotion_click_url=click_url,
     )
     if variant and _promotion_is_visible(response, promotion_product):
@@ -140,19 +140,19 @@ async def get_menu_by_day(req: KakaoRequest):
     variant = await experiments.get_active_variant(
         promotions.PROMOTION_EXPERIMENT_KEY, user_id
     )
-    product_key = (variant or {}).get("config", {}).get("product_key")
+    product_key = (variant or {}).get("config", {}).get("product_key") or promotions.DEFAULT_PROMOTION_PRODUCT_KEY
     promotion_product = promotions.get_product(product_key)
     click_url = (
         f"{common.SERVER_URL}/promotions/toss-shopping/click?token="
         f"{promotions.create_tracking_token(user_id, product_key)}"
-        if variant and user_id and product_key
+        if user_id and product_key
         else None
     )
     response = cafeteria.create_menu_response(
         kor_day,
         menu_data,
         place,
-        promotion_product=promotion_product if variant else None,
+        promotion_product=promotion_product,
         promotion_click_url=click_url,
     )
     if variant and _promotion_is_visible(response, promotion_product):

@@ -25,7 +25,7 @@ async def get_toss_shopping_promotion(req: KakaoRequest | None = Body(default=No
         {"surface": source},
     )
     variant = await experiments.get_active_variant(promotions.PROMOTION_EXPERIMENT_KEY, user_id)
-    product_key = (variant or {}).get("config", {}).get("product_key")
+    product_key = (variant or {}).get("config", {}).get("product_key") or promotions.DEFAULT_PROMOTION_PRODUCT_KEY
     product = promotions.get_product(product_key)
     click_url = (
         f"{promotions.common.SERVER_URL}/promotions/toss-shopping/click?token="
