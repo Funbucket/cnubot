@@ -15,6 +15,7 @@ TOSS_SHOPPING_PRODUCTS = {
     "button_label": "🍪 황치즈 버터링 특가",
     "quick_reply_label": "🍪 황치즈 버터링 특가",
     "description": "🍪 황치즈 덕후 주목! 첫 구매 3,000원 추가 할인",
+    "original_price": 19200,
     "price": 14500,
     "discount": 4700,
     "discount_rate": 24,
@@ -30,6 +31,7 @@ TOSS_SHOPPING_PRODUCTS = {
         "button_label": "💊 유산균 특가",
         "quick_reply_label": "💊 유산균 특가",
         "description": "💊 매일 챙기는 유산균, 무료배송 특가로 만나보세요",
+        "original_price": 148400,
         "price": 51987,
         "discount": 96413,
         "discount_rate": 64,
@@ -106,9 +108,14 @@ def create_toss_promotion_quick_reply(kakao_response, product: dict | None = Non
 def create_toss_shopping_response(product: dict | None = None, click_url: str | None = None):
     kakao_response = kakao_json_response.KakaoJsonResponse()
     product = product or TOSS_SHOPPING_PROMOTION
+    card_description = (
+        f"{product['description']}\n"
+        f"{product['discount_rate']}% 할인 · "
+        f"{product['original_price']:,}원 → {product['price']:,}원"
+    )
     commerce_card = {
         "title": product["title"],
-        "description": product["description"],
+        "description": card_description,
         "price": product["price"],
         "currency": "won",
         "discount": product["discount"],
