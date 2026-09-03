@@ -52,4 +52,6 @@ async def track_toss_shopping_click(token: str = Query(..., min_length=20)):
         event_name,
         {"surface": "tracked_web_link", "product_key": product_key, "source": source},
     )
-    return RedirectResponse(promotions.get_product(product_key)["url"], status_code=307)
+    # 302 is handled more consistently than 307 by Kakao's in-app browser
+    # when redirecting from our tracking endpoint to an external Toss URL.
+    return RedirectResponse(promotions.get_product(product_key)["url"], status_code=302)
