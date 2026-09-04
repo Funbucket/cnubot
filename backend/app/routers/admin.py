@@ -219,7 +219,7 @@ FROM normalized GROUP BY product_key;"""
   ELSE 'promotion_block' END AS surface,
   COUNT(DISTINCT user_id) AS users, COUNT(*) AS events
 FROM experiment_events
-WHERE event_name IN ('promotion_click', 'promotion_button_click', 'promotion_quick_reply_click', 'promotion_block_click', 'commerce_card_click')
+WHERE event_name IN ('promotion_button_click', 'promotion_quick_reply_click', 'commerce_card_click')
 GROUP BY 1;"""
     daily_sql = """SELECT (created_at AT TIME ZONE 'Asia/Seoul')::date AS day,
   COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_exposure') AS exposed_users,
