@@ -60,6 +60,12 @@ async def admin_home(_: str = Depends(require_admin)):
     return RedirectResponse("/admin/experiments", status_code=303)
 
 
+@router.get("/insights", response_class=HTMLResponse)
+async def insights(_: str = Depends(require_admin)):
+    data = await experiments.get_promotion_insights()
+    return HTMLResponse(_insights_page(data))
+
+
 @router.get("/experiments", response_class=HTMLResponse)
 async def experiments_home(_: str = Depends(require_admin)):
     rows = await experiments.list_experiments()
@@ -155,6 +161,57 @@ def _experiment_card(row: dict[str, Any]) -> str:
     """
 
 
+def _insights_page(data: dict[str, Any]) -> str:
+    totals = data["totals"]
+    exposed = totals.get("exposed_users") or 0
+    clicked = totals.get("clicked_users") or 0
+    ctr = clicked / exposed * 100 if exposed else 0
+    product_rows = "".join(
+        f"<tr><td><b>{html.escape(_insight_label(row['product_key']))}</b><small><code>{html.escape(row['product_key'])}</code></small></td>"
+        f"<td>{row['exposed_users']:,}</td><td>{row['clicked_users']:,}</td>"
+        f"<td><b>{(row['clicked_users'] / row['exposed_users'] * 100 if row['exposed_users'] else 0):.2f}%</b></td>"
+        f"<td>{row['click_events']:,}건</td></tr>"
+        for row in data["products"]
+    ) or '<tr><td colspan="5" class="sub">아직 수집된 프로모션 데이터가 없습니다.</td></tr>'
+    surface_labels = {
+        "menu_today": "오늘 메뉴",
+        "menu_by_day": "요일별 메뉴",
+        "schedule_quick_reply": "스케줄 퀵리플라이",
+        "tracked_web_link": "commerceCard",
+    }
+    surface_rows = "".join(
+        f"<tr><td>{html.escape(surface_labels.get(row['surface'], row['surface']))}</td>"
+        f"<td>{row['users']:,}명</td><td>{row['events']:,}건</td></tr>"
+        for row in data["surfaces"]
+    ) or '<tr><td colspan="3" class="sub">아직 클릭 데이터가 없습니다.</td></tr>'
+    daily_rows = "".join(
+        f"<tr><td>{html.escape(str(row['day']))}</td><td>{row['exposed_users']:,}명</td>"
+        f"<td>{row['clicked_users']:,}명</td><td>{row['click_events']:,}건</td></tr>"
+        for row in data["daily"]
+    ) or '<tr><td colspan="4" class="sub">아직 일별 데이터가 없습니다.</td></tr>'
+    page = f"""<!doctype html>
+<html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CNU 인사이트</title>
+<style>
+*{{box-sizing:border-box}}body{{font-family:Inter,system-ui,sans-serif;margin:0;background:#f5f7fb;color:#172033}}.shell{{max-width:1120px;margin:auto;padding:28px 20px 64px}}header{{display:flex;justify-content:space-between;align-items:end;margin-bottom:24px}}h1{{font-size:30px;margin:4px 0 8px;letter-spacing:-.04em}}h2{{font-size:18px;margin:28px 0 10px}}p{{line-height:1.5}}.sub{{color:#71809b}}.eyebrow{{font-size:11px;color:#71809b;font-family:ui-monospace,monospace}}nav{{display:flex;gap:8px}}nav a{{color:#3767e8;text-decoration:none;font-size:13px;font-weight:700;padding:8px 10px;border-radius:8px}}nav a.active{{background:#3767e8;color:#fff}}.grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}}.metric,.panel{{background:#fff;border:1px solid #e3e8f0;border-radius:14px;box-shadow:0 8px 24px #1720330a}}.metric{{padding:17px}}.metric span{{display:block;color:#71809b;font-size:12px}}.metric b{{display:block;font-size:25px;margin-top:7px;letter-spacing:-.04em}}.metric small{{color:#71809b}}.panel{{padding:18px;overflow:hidden}}.panel-head{{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}}.panel-head h2{{margin:0}}.hint{{font-size:12px;color:#71809b}}table{{width:100%;border-collapse:collapse;font-size:13px}}th,td{{padding:12px 8px;text-align:left;border-bottom:1px solid #edf0f5;white-space:nowrap}}th{{font-size:11px;color:#71809b;font-weight:650}}td small{{display:block;color:#8a94a6;margin-top:3px}}code{{font-size:11px;color:#71809b}}.two{{display:grid;grid-template-columns:1fr 1fr;gap:14px}}@media(max-width:720px){{.shell{{padding:20px 14px 40px}}header{{display:block}}nav{{margin-top:16px;flex-wrap:wrap}}h1{{font-size:26px}}.grid,.two{{grid-template-columns:1fr}}.panel{{padding:14px;overflow-x:auto}}table{{min-width:520px}}.metric b{{font-size:23px}}}}
+</style><body><main class="shell"><header><div><span class="eyebrow">CNU PROMOTION INSIGHTS</span><h1>인사이트 대시보드</h1><p class="sub">수집된 추천 상품 반응을 상품·노출 위치·날짜별로 확인합니다.</p></div><nav><a class="active" href="/admin/insights">인사이트</a><a href="/admin/experiments">실험 목록</a><a href="/admin/experiments/new">＋ 새 실험</a></nav></header>
+<section class="grid"><div class="metric"><span>고유 노출 사용자</span><b>{exposed:,}명</b><small>상품 기준 중복 제거</small></div><div class="metric"><span>고유 클릭 사용자</span><b>{clicked:,}명</b><small>버튼·퀵리플라이·commerceCard</small></div><div class="metric"><span>전체 CTR</span><b>{ctr:.2f}%</b><small>{totals.get('events') or 0:,}건의 이벤트 기록</small></div></section>
+<h2>상품별 반응</h2><section class="panel"><div class="panel-head"><h2>어떤 상품이 반응이 좋은가</h2><span class="hint">고유 사용자 기준</span></div><table><thead><tr><th>상품</th><th>노출</th><th>클릭</th><th>CTR</th><th>클릭 이벤트</th></tr></thead><tbody>{product_rows}</tbody></table></section>
+<section class="two"><div><h2>노출 위치별 클릭</h2><section class="panel"><table><thead><tr><th>위치</th><th>사용자</th><th>이벤트</th></tr></thead><tbody>{surface_rows}</tbody></table></section></div><div><h2>최근 일별 추이</h2><section class="panel"><table><thead><tr><th>날짜</th><th>노출</th><th>클릭 사용자</th><th>클릭 이벤트</th></tr></thead><tbody>{daily_rows}</tbody></table></section></div></section>
+</main></body></html>"""
+    return page
+
+
+def _insight_label(product_key: str) -> str:
+    return {
+        "yellow_cheese_buttering": "황치즈 버터링",
+        "lactofit_gold": "락토핏 골드",
+        "lavender_wipes": "리벤스 라벤더 물티슈",
+        "cento_toothbrush": "센토 프라임 칫솔",
+        "unknown": "상품 미상",
+    }.get(product_key, product_key)
+
+
 def _page(cards: str, experiment_count: int, show_form: bool = True, show_list: bool = True) -> str:
     card_markup = cards or '<div class="card"><p class="sub">아직 만든 실험이 없습니다. 위에서 첫 가설을 등록해보세요.</p></div>'
     page_mode = "new-page" if show_form and not show_list else "list-page"
@@ -182,7 +239,7 @@ def _page(cards: str, experiment_count: int, show_form: bool = True, show_list: 
  .new-page .page-list{{display:none}}.list-page #new-experiment{{display:none}}nav{{display:flex;gap:8px;margin-bottom:12px}}nav a{{color:#3767e8;text-decoration:none;font-size:13px;font-weight:700;padding:8px 10px;border-radius:8px}}nav a.nav-primary{{background:#3767e8;color:#fff}}.event-metric{{min-width:150px}}.event-metric small{{display:block;color:#8a94a6;margin-top:3px}}
  .live-summary{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:16px 0 4px;padding:12px;background:#f7f9fc;border-radius:10px;color:#536078;font-size:12px}}.live-label{{color:#3767e8;font-weight:800}}.live-loading{{color:#8a94a6}}.progress{{flex:1;min-width:80px;height:6px;background:#e2e7f0;border-radius:99px;overflow:hidden}}.progress i{{display:block;height:100%;background:#3767e8;border-radius:inherit}}.srm{{font-weight:700}}
 </style>
-<body class="__PAGE_MODE__"><main class="shell"><header><div><span class="eyebrow">CNU EXPERIMENT LAB</span><h1>실험실</h1><p class="sub">가설을 검증하고, 학습을 기록하세요.</p></div><div><nav><a href="/admin/experiments">실험 목록</a><a class="nav-primary" href="/admin/experiments/new">＋ 새 실험</a></nav><div class="notice">결정 전 샘플 수와 SRM을 확인하세요.</div></div></header>
+<body class="__PAGE_MODE__"><main class="shell"><header><div><span class="eyebrow">CNU EXPERIMENT LAB</span><h1>실험실</h1><p class="sub">가설을 검증하고, 학습을 기록하세요.</p></div><div><nav><a href="/admin/insights">인사이트</a><a href="/admin/experiments">실험 목록</a><a class="nav-primary" href="/admin/experiments/new">＋ 새 실험</a></nav><div class="notice">결정 전 샘플 수와 SRM을 확인하세요.</div></div></header>
 <form id="new-experiment">
 <div class="section-title"><h2>새 실험 설계</h2><span class="eyebrow">STEP 1 · PLAN</span></div>
 <label class="wide">AI에게 설계 요청<textarea id="ai-prompt" placeholder="예: 황치즈 버터링 특가 버튼 문구의 클릭률을 높일 수 있는 A/B 실험을 설계해줘"></textarea><span class="field-help">가설·지표·변형 문구 초안을 자동으로 채워줍니다.</span></label>

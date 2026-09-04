@@ -348,6 +348,75 @@ async def get_analysis(experiment_id: int) -> dict[str, Any]:
         }
 
 
+async def get_promotion_insights() -> dict[str, Any]:
+    """Return product and surface aggregates for the promotion dashboard."""
+    pool = get_pool()
+    click_events = (
+        "promotion_click", "promotion_button_click", "promotion_quick_reply_click",
+        "promotion_block_click", "commerce_card_click",
+    )
+    async with pool.acquire() as conn:
+        product_rows = await conn.fetch(
+            """
+            WITH normalized AS (
+                SELECT COALESCE(e.properties->>'product_key', v.config->>'product_key', 'unknown') AS product_key,
+                       e.user_id, e.event_name
+                FROM experiment_events e
+                LEFT JOIN experiment_variants v
+                  ON v.experiment_id = e.experiment_id AND v.variant_key = e.variant_key
+            )
+            SELECT product_key,
+                   COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_exposure')::int AS exposed_users,
+                   COUNT(DISTINCT user_id) FILTER (WHERE event_name = ANY($1::text[]))::int AS clicked_users,
+                   COUNT(*) FILTER (WHERE event_name = ANY($1::text[]))::int AS click_events
+            FROM normalized
+            GROUP BY product_key
+            ORDER BY clicked_users DESC, exposed_users DESC, product_key
+            """,
+            list(click_events),
+        )
+        surface_rows = await conn.fetch(
+            """
+            SELECT COALESCE(properties->>'surface', source, 'unknown') AS surface,
+                   COUNT(DISTINCT user_id)::int AS users,
+                   COUNT(*)::int AS events
+            FROM experiment_events
+            WHERE event_name = ANY($1::text[])
+            GROUP BY surface
+            ORDER BY users DESC, surface
+            """,
+            list(click_events),
+        )
+        daily_rows = await conn.fetch(
+            """
+            SELECT (created_at AT TIME ZONE 'Asia/Seoul')::date AS day,
+                   COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_exposure')::int AS exposed_users,
+                   COUNT(DISTINCT user_id) FILTER (WHERE event_name = ANY($1::text[]))::int AS clicked_users,
+                   COUNT(*) FILTER (WHERE event_name = ANY($1::text[]))::int AS click_events
+            FROM experiment_events
+            GROUP BY day
+            ORDER BY day DESC
+            LIMIT 30
+            """,
+            list(click_events),
+        )
+        totals = await conn.fetchrow(
+            """
+            SELECT COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_exposure')::int AS exposed_users,
+                   COUNT(DISTINCT user_id) FILTER (WHERE event_name = ANY($1::text[]))::int AS clicked_users,
+                   COUNT(*)::int AS events
+            FROM experiment_events
+            """,
+            list(click_events),
+        )
+    return {
+        "products": [dict(row) for row in product_rows],
+        "surfaces": [dict(row) for row in surface_rows],
+        "daily": [dict(row) for row in daily_rows],
+        "totals": dict(totals),
+    }
+
+
 async def refresh_rollup(experiment_id: int, conn=None) -> None:
     own_connection = conn is None
     pool = get_pool()
