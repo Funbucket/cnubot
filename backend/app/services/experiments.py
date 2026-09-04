@@ -95,12 +95,22 @@ async def record_event(
             return
         assignment = await conn.fetchrow(
             """
-            SELECT variant_key FROM experiment_assignments
-            WHERE experiment_id = $1 AND user_id = $2
+            SELECT a.variant_key, v.config
+            FROM experiment_assignments a
+            LEFT JOIN experiment_variants v
+              ON v.experiment_id = a.experiment_id AND v.variant_key = a.variant_key
+            WHERE a.experiment_id = $1 AND a.user_id = $2
             """,
             experiment["id"],
             user_id,
         )
+        event_properties = dict(properties or {})
+        if "product_key" not in event_properties and assignment and assignment["config"]:
+            config = assignment["config"]
+            if isinstance(config, str):
+                config = json.loads(config)
+            if config.get("product_key"):
+                event_properties["product_key"] = config["product_key"]
         await conn.execute(
             """
             INSERT INTO experiment_events
@@ -114,7 +124,7 @@ async def record_event(
             user_id,
             assignment["variant_key"] if assignment else None,
             event_name,
-            json.dumps(properties or {}, ensure_ascii=False),
+            json.dumps(event_properties, ensure_ascii=False),
             event_id,
             source,
         )
@@ -262,18 +272,19 @@ async def get_analysis(experiment_id: int) -> dict[str, Any]:
             raise ValueError("실험을 찾을 수 없습니다.")
         rows = await conn.fetch(
             """
-            SELECT v.variant_key,
-                   COUNT(DISTINCT e.user_id) FILTER (WHERE e.event_name = 'promotion_exposure') AS exposed_users,
+            SELECT v.variant_key, v.config->>'product_key' AS product_key,
+                   COUNT(DISTINCT e.user_id) FILTER (WHERE e.event_name = 'promotion_exposure'
+                       AND COALESCE(e.properties->>'product_key', v.config->>'product_key') = v.config->>'product_key') AS exposed_users,
                    COUNT(DISTINCT e.user_id) FILTER (WHERE e.event_name IN (
                        'promotion_click', 'promotion_button_click',
                        'promotion_quick_reply_click', 'promotion_block_click',
                        'commerce_card_click'
-                   )) AS clicked_users
+                   ) AND COALESCE(e.properties->>'product_key', v.config->>'product_key') = v.config->>'product_key') AS clicked_users
             FROM experiment_variants v
             LEFT JOIN experiment_events e
               ON e.experiment_id = v.experiment_id AND e.variant_key = v.variant_key
             WHERE v.experiment_id = $1
-            GROUP BY v.variant_key ORDER BY v.variant_key
+            GROUP BY v.variant_key, v.config->>'product_key' ORDER BY v.variant_key
             """,
             experiment_id,
         )
@@ -300,11 +311,15 @@ async def get_analysis(experiment_id: int) -> dict[str, Any]:
         )
         event_breakdown_rows = await conn.fetch(
             """
-            SELECT event_name, COUNT(*)::int AS events,
-                   COUNT(DISTINCT user_id)::int AS users
-            FROM experiment_events
-            WHERE experiment_id = $1
-            GROUP BY event_name ORDER BY event_name
+            SELECT event_name, COALESCE(properties->>'product_key', v.config->>'product_key') AS product_key,
+                   COUNT(*)::int AS events,
+                   COUNT(DISTINCT e.user_id)::int AS users
+            FROM experiment_events e
+            LEFT JOIN experiment_variants v
+              ON v.experiment_id = e.experiment_id AND v.variant_key = e.variant_key
+            WHERE e.experiment_id = $1
+            GROUP BY event_name, COALESCE(properties->>'product_key', v.config->>'product_key')
+            ORDER BY event_name, product_key
             """,
             experiment_id,
         )
