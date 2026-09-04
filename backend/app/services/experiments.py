@@ -348,7 +348,7 @@ async def get_analysis(experiment_id: int) -> dict[str, Any]:
         }
 
 
-async def get_promotion_insights() -> dict[str, Any]:
+async def get_promotion_insights(start_date=None, end_date=None) -> dict[str, Any]:
     """Return product and surface aggregates for the promotion dashboard."""
     pool = get_pool()
     click_events = (
@@ -364,6 +364,8 @@ async def get_promotion_insights() -> dict[str, Any]:
                 FROM experiment_events e
                 LEFT JOIN experiment_variants v
                   ON v.experiment_id = e.experiment_id AND v.variant_key = e.variant_key
+                WHERE ($2::date IS NULL OR e.created_at >= $2::date)
+                  AND ($3::date IS NULL OR e.created_at < ($3::date + INTERVAL '1 day'))
             )
             SELECT product_key,
                    COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_exposure')::int AS exposed_users,
@@ -373,7 +375,7 @@ async def get_promotion_insights() -> dict[str, Any]:
             GROUP BY product_key
             ORDER BY clicked_users DESC, exposed_users DESC, product_key
             """,
-            list(click_events),
+            list(click_events), start_date, end_date,
         )
         surface_rows = await conn.fetch(
             """
@@ -388,10 +390,12 @@ async def get_promotion_insights() -> dict[str, Any]:
                    COUNT(*)::int AS events
             FROM experiment_events
             WHERE event_name = ANY($1::text[])
+              AND ($2::date IS NULL OR created_at >= $2::date)
+              AND ($3::date IS NULL OR created_at < ($3::date + INTERVAL '1 day'))
             GROUP BY 1
             ORDER BY users DESC, surface
             """,
-            list(click_events),
+            list(click_events), start_date, end_date,
         )
         daily_rows = await conn.fetch(
             """
@@ -400,11 +404,13 @@ async def get_promotion_insights() -> dict[str, Any]:
                    COUNT(DISTINCT user_id) FILTER (WHERE event_name = ANY($1::text[]))::int AS clicked_users,
                    COUNT(*) FILTER (WHERE event_name = ANY($1::text[]))::int AS click_events
             FROM experiment_events
+            WHERE ($2::date IS NULL OR created_at >= $2::date)
+              AND ($3::date IS NULL OR created_at < ($3::date + INTERVAL '1 day'))
             GROUP BY day
             ORDER BY day DESC
             LIMIT 30
             """,
-            list(click_events),
+            list(click_events), start_date, end_date,
         )
         totals = await conn.fetchrow(
             """
@@ -412,14 +418,18 @@ async def get_promotion_insights() -> dict[str, Any]:
                    COUNT(DISTINCT user_id) FILTER (WHERE event_name = ANY($1::text[]))::int AS clicked_users,
                    COUNT(*)::int AS events
             FROM experiment_events
+            WHERE ($2::date IS NULL OR created_at >= $2::date)
+              AND ($3::date IS NULL OR created_at < ($3::date + INTERVAL '1 day'))
             """,
-            list(click_events),
+            list(click_events), start_date, end_date,
         )
     return {
         "products": [dict(row) for row in product_rows],
         "surfaces": [dict(row) for row in surface_rows],
         "daily": [dict(row) for row in daily_rows],
         "totals": dict(totals),
+        "start_date": start_date,
+        "end_date": end_date,
     }
 
 
