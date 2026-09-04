@@ -168,9 +168,9 @@ def _insights_page(data: dict[str, Any]) -> str:
     ctr = clicked / exposed * 100 if exposed else 0
     product_rows = "".join(
         f"<tr><td><b>{html.escape(_insight_label(row['product_key']))}</b><small><code>{html.escape(row['product_key'])}</code></small></td>"
-        f"<td>{row['exposed_users']:,}</td><td>{row['clicked_users']:,}</td>"
-        f"<td><b>{(row['clicked_users'] / row['exposed_users'] * 100 if row['exposed_users'] else 0):.2f}%</b></td>"
-        f"<td>{row['click_events']:,}건</td></tr>"
+        f"<td data-label=\"노출\">{row['exposed_users']:,}</td><td data-label=\"클릭\">{row['clicked_users']:,}</td>"
+        f"<td data-label=\"CTR\"><b>{(row['clicked_users'] / row['exposed_users'] * 100 if row['exposed_users'] else 0):.2f}%</b></td>"
+        f"<td data-label=\"클릭 이벤트\">{row['click_events']:,}건</td></tr>"
         for row in data["products"]
     ) or '<tr><td colspan="5" class="sub">아직 수집된 프로모션 데이터가 없습니다.</td></tr>'
     surface_labels = {
@@ -180,20 +180,20 @@ def _insights_page(data: dict[str, Any]) -> str:
         "tracked_web_link": "commerceCard",
     }
     surface_rows = "".join(
-        f"<tr><td>{html.escape(surface_labels.get(row['surface'], row['surface']))}</td>"
-        f"<td>{row['users']:,}명</td><td>{row['events']:,}건</td></tr>"
+        f"<tr><td data-label=\"위치\">{html.escape(surface_labels.get(row['surface'], row['surface']))}</td>"
+        f"<td data-label=\"사용자\">{row['users']:,}명</td><td data-label=\"이벤트\">{row['events']:,}건</td></tr>"
         for row in data["surfaces"]
     ) or '<tr><td colspan="3" class="sub">아직 클릭 데이터가 없습니다.</td></tr>'
     daily_rows = "".join(
-        f"<tr><td>{html.escape(str(row['day']))}</td><td>{row['exposed_users']:,}명</td>"
-        f"<td>{row['clicked_users']:,}명</td><td>{row['click_events']:,}건</td></tr>"
+        f"<tr><td data-label=\"날짜\">{html.escape(str(row['day']))}</td><td data-label=\"노출\">{row['exposed_users']:,}명</td>"
+        f"<td data-label=\"클릭 사용자\">{row['clicked_users']:,}명</td><td data-label=\"클릭 이벤트\">{row['click_events']:,}건</td></tr>"
         for row in data["daily"]
     ) or '<tr><td colspan="4" class="sub">아직 일별 데이터가 없습니다.</td></tr>'
     page = f"""<!doctype html>
 <html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CNU 인사이트</title>
 <style>
-*{{box-sizing:border-box}}body{{font-family:Inter,system-ui,sans-serif;margin:0;background:#f5f7fb;color:#172033}}.shell{{max-width:1120px;margin:auto;padding:28px 20px 64px}}header{{display:flex;justify-content:space-between;align-items:end;margin-bottom:24px}}h1{{font-size:30px;margin:4px 0 8px;letter-spacing:-.04em}}h2{{font-size:18px;margin:28px 0 10px}}p{{line-height:1.5}}.sub{{color:#71809b}}.eyebrow{{font-size:11px;color:#71809b;font-family:ui-monospace,monospace}}nav{{display:flex;gap:8px}}nav a{{color:#3767e8;text-decoration:none;font-size:13px;font-weight:700;padding:8px 10px;border-radius:8px}}nav a.active{{background:#3767e8;color:#fff}}.grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}}.metric,.panel{{background:#fff;border:1px solid #e3e8f0;border-radius:14px;box-shadow:0 8px 24px #1720330a}}.metric{{padding:17px}}.metric span{{display:block;color:#71809b;font-size:12px}}.metric b{{display:block;font-size:25px;margin-top:7px;letter-spacing:-.04em}}.metric small{{color:#71809b}}.panel{{padding:18px;overflow:hidden}}.panel-head{{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}}.panel-head h2{{margin:0}}.hint{{font-size:12px;color:#71809b}}table{{width:100%;border-collapse:collapse;font-size:13px}}th,td{{padding:12px 8px;text-align:left;border-bottom:1px solid #edf0f5;white-space:nowrap}}th{{font-size:11px;color:#71809b;font-weight:650}}td small{{display:block;color:#8a94a6;margin-top:3px}}code{{font-size:11px;color:#71809b}}.two{{display:grid;grid-template-columns:1fr 1fr;gap:14px}}@media(max-width:720px){{.shell{{padding:20px 14px 40px}}header{{display:block}}nav{{margin-top:16px;flex-wrap:wrap}}h1{{font-size:26px}}.grid,.two{{grid-template-columns:1fr}}.panel{{padding:14px;overflow-x:auto}}table{{min-width:520px}}.metric b{{font-size:23px}}}}
+*{{box-sizing:border-box}}body{{font-family:Inter,system-ui,sans-serif;margin:0;background:#f5f7fb;color:#172033}}.shell{{max-width:1120px;margin:auto;padding:28px 20px 64px}}header{{display:flex;justify-content:space-between;align-items:end;margin-bottom:24px}}h1{{font-size:30px;margin:4px 0 8px;letter-spacing:-.04em}}h2{{font-size:18px;margin:28px 0 10px}}p{{line-height:1.5}}.sub{{color:#71809b}}.eyebrow{{font-size:11px;color:#71809b;font-family:ui-monospace,monospace}}nav{{display:flex;gap:8px}}nav a{{color:#3767e8;text-decoration:none;font-size:13px;font-weight:700;padding:8px 10px;border-radius:8px}}nav a.active{{background:#3767e8;color:#fff}}.grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}}.metric,.panel{{background:#fff;border:1px solid #e3e8f0;border-radius:14px;box-shadow:0 8px 24px #1720330a}}.metric{{padding:17px}}.metric span{{display:block;color:#71809b;font-size:12px}}.metric b{{display:block;font-size:25px;margin-top:7px;letter-spacing:-.04em}}.metric small{{color:#71809b}}.panel{{padding:18px;overflow:hidden}}.panel-head{{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}}.panel-head h2{{margin:0}}.hint{{font-size:12px;color:#71809b}}table{{width:100%;border-collapse:collapse;font-size:13px}}th,td{{padding:12px 8px;text-align:left;border-bottom:1px solid #edf0f5;white-space:nowrap}}th{{font-size:11px;color:#71809b;font-weight:650}}td small{{display:block;color:#8a94a6;margin-top:3px}}code{{font-size:11px;color:#71809b}}.two{{display:grid;grid-template-columns:1fr 1fr;gap:14px}}@media(max-width:720px){{.shell{{padding:20px 14px 40px}}header{{display:block}}nav{{margin-top:16px;flex-wrap:wrap}}nav a{{padding:8px 9px}}h1{{font-size:26px}}.grid,.two{{grid-template-columns:1fr}}.panel{{padding:12px;overflow:visible}}table,thead,tbody,tr,td{{display:block}}thead{{display:none}}tr{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px;padding:10px 2px;border-bottom:1px solid #edf0f5}}tr:last-child{{border-bottom:0}}td{{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:7px 2px;border:0;white-space:normal;text-align:right}}td::before{{content:attr(data-label);color:#71809b;font-size:11px;text-align:left}}td:first-child{{grid-column:1/-1;display:block;text-align:left;font-size:14px;padding-top:3px}}td:first-child::before{{display:none}}.metric b{{font-size:23px}}}}
 </style><body><main class="shell"><header><div><span class="eyebrow">CNU PROMOTION INSIGHTS</span><h1>인사이트 대시보드</h1><p class="sub">수집된 추천 상품 반응을 상품·노출 위치·날짜별로 확인합니다.</p></div><nav><a class="active" href="/admin/insights">인사이트</a><a href="/admin/experiments">실험 목록</a><a href="/admin/experiments/new">＋ 새 실험</a></nav></header>
 <section class="grid"><div class="metric"><span>고유 노출 사용자</span><b>{exposed:,}명</b><small>상품 기준 중복 제거</small></div><div class="metric"><span>고유 클릭 사용자</span><b>{clicked:,}명</b><small>버튼·퀵리플라이·commerceCard</small></div><div class="metric"><span>전체 CTR</span><b>{ctr:.2f}%</b><small>{totals.get('events') or 0:,}건의 이벤트 기록</small></div></section>
 <h2>상품별 반응</h2><section class="panel"><div class="panel-head"><h2>어떤 상품이 반응이 좋은가</h2><span class="hint">고유 사용자 기준</span></div><table><thead><tr><th>상품</th><th>노출</th><th>클릭</th><th>CTR</th><th>클릭 이벤트</th></tr></thead><tbody>{product_rows}</tbody></table></section>
