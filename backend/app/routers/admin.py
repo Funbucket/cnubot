@@ -1,4 +1,5 @@
 import html
+import asyncio
 import os
 import secrets
 from typing import Any
@@ -62,6 +63,13 @@ async def admin_home(_: str = Depends(require_admin)):
 @router.get("/experiments", response_class=HTMLResponse)
 async def experiments_home(_: str = Depends(require_admin)):
     rows = await experiments.list_experiments()
+    analyses = await asyncio.gather(
+        *(experiments.get_analysis(row["id"]) for row in rows),
+        return_exceptions=True,
+    )
+    for row, analysis in zip(rows, analyses):
+        if not isinstance(analysis, Exception):
+            row["live_analysis"] = analysis
     cards = "".join(_experiment_card(row) for row in rows)
     return HTMLResponse(_page(cards, len(rows), show_form=False, show_list=True))
 
@@ -124,12 +132,22 @@ def _experiment_card(row: dict[str, Any]) -> str:
         actions = f'<button onclick="statusChange({experiment_id}, \'running\')">재개</button>'
     status_label = {"draft": "초안", "running": "실행 중", "paused": "일시중지", "completed": "완료"}.get(row["status"], row["status"])
     sample = row.get("min_sample_size") or "미설정"
+    analysis = row.get("live_analysis", {})
+    analysis_variants = analysis.get("variants", [])
+    exposed = sum(v.get("exposed_users", 0) for v in analysis_variants)
+    clicked = sum(v.get("clicked_users", 0) for v in analysis_variants)
+    ctr = clicked / exposed * 100 if exposed else 0
+    progress = min(
+        [v.get("exposed_users", 0) / row["min_sample_size"] * 100 for v in analysis_variants]
+        or [0]
+    ) if row.get("min_sample_size") else 0
+    live_text = f"{exposed:,}명 노출 · {clicked:,}명 클릭 · CTR {ctr:.2f}% · 목표 {min(progress, 100):.0f}%"
     return f"""
     <article class="experiment-card" data-id="{experiment_id}" data-name="{html.escape(row['name'].lower())}" data-status="{row['status']}">
       <div class="card-top"><div><span class="eyebrow">{html.escape(row['experiment_key'])}</span><h3>{html.escape(row['name'])}</h3></div><span class="status status-{row['status']}">{status_label}</span></div>
       <p class="hypothesis">{html.escape(row['hypothesis'])}</p>
       <div class="meta-grid"><div><span>핵심 지표</span><b>{html.escape(row['primary_metric'])}</b></div><div><span>가드레일</span><b>{html.escape(row['guardrail_metric'] or '-')}</b></div><div><span>최소 샘플 / 변형</span><b>{sample}명</b></div><div><span>유의수준 · 검정력</span><b>{row.get('alpha', 0.05):.2f} · {row.get('power', 0.8):.0%}</b></div></div>
-      <div class="live-summary" id="live-{experiment_id}"><span class="live-label">실시간 현황</span><span class="live-loading">불러오는 중…</span></div>
+      <div class="live-summary" id="live-{experiment_id}"><span class="live-label">실시간 현황</span><b>{live_text}</b><span>SRM {html.escape(analysis.get('srm', {}).get('status', '-'))}</span></div>
       <div class="variants"><h4>변형</h4><ul>{variants}</ul></div>
       <div class="actions">{actions}<button class="secondary" onclick="results({experiment_id})">결과 보기</button></div>
       <div id="result-{experiment_id}" class="result-panel hidden"></div>

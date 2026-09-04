@@ -345,7 +345,7 @@ async def refresh_rollup(experiment_id: int, conn=None) -> None:
             SELECT experiment_id, created_at::date, variant_key, event_name,
                    COUNT(DISTINCT user_id)::int, COUNT(*)::int
             FROM experiment_events
-            WHERE experiment_id = $1
+            WHERE experiment_id = $1 AND variant_key IS NOT NULL
             GROUP BY experiment_id, created_at::date, variant_key, event_name
             ON CONFLICT (experiment_id, rollup_date, variant_key, event_name)
             DO UPDATE SET users = EXCLUDED.users, events = EXCLUDED.events
