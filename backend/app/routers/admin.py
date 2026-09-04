@@ -174,10 +174,10 @@ def _insights_page(data: dict[str, Any]) -> str:
         for row in data["products"]
     ) or '<tr><td colspan="5" class="sub">아직 수집된 프로모션 데이터가 없습니다.</td></tr>'
     surface_labels = {
-        "menu_today": "오늘 메뉴",
-        "menu_by_day": "요일별 메뉴",
-        "schedule_quick_reply": "스케줄 퀵리플라이",
-        "tracked_web_link": "commerceCard",
+        "menu_button": "학식 메뉴 버튼",
+        "quick_reply": "스케줄 퀵리플라이",
+        "commerce_card": "commerceCard",
+        "promotion_block": "기타 프로모션 영역",
     }
     surface_rows = "".join(
         f"<tr><td data-label=\"위치\">{html.escape(surface_labels.get(row['surface'], row['surface']))}</td>"
@@ -189,15 +189,41 @@ def _insights_page(data: dict[str, Any]) -> str:
         f"<td data-label=\"클릭 사용자\">{row['clicked_users']:,}명</td><td data-label=\"클릭 이벤트\">{row['click_events']:,}건</td></tr>"
         for row in data["daily"]
     ) or '<tr><td colspan="4" class="sub">아직 일별 데이터가 없습니다.</td></tr>'
+    product_sql = """WITH normalized AS (
+  SELECT COALESCE(e.properties->>'product_key', v.config->>'product_key', 'unknown') AS product_key,
+         e.user_id, e.event_name
+  FROM experiment_events e
+  LEFT JOIN experiment_variants v ON v.experiment_id = e.experiment_id
+    AND v.variant_key = e.variant_key
+)
+SELECT product_key,
+  COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_exposure') AS exposed_users,
+  COUNT(DISTINCT user_id) FILTER (WHERE event_name IN ('promotion_click', 'promotion_button_click', 'promotion_quick_reply_click', 'promotion_block_click', 'commerce_card_click')) AS clicked_users
+FROM normalized GROUP BY product_key;"""
+    surface_sql = """SELECT CASE
+  WHEN event_name = 'promotion_quick_reply_click' THEN 'quick_reply'
+  WHEN event_name = 'commerce_card_click' THEN 'commerce_card'
+  WHEN event_name = 'promotion_button_click' THEN 'menu_button'
+  ELSE 'promotion_block' END AS surface,
+  COUNT(DISTINCT user_id) AS users, COUNT(*) AS events
+FROM experiment_events
+WHERE event_name IN ('promotion_click', 'promotion_button_click', 'promotion_quick_reply_click', 'promotion_block_click', 'commerce_card_click')
+GROUP BY 1;"""
+    daily_sql = """SELECT (created_at AT TIME ZONE 'Asia/Seoul')::date AS day,
+  COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_exposure') AS exposed_users,
+  COUNT(DISTINCT user_id) FILTER (WHERE event_name IN ('promotion_click', 'promotion_button_click', 'promotion_quick_reply_click', 'promotion_block_click', 'commerce_card_click')) AS clicked_users
+FROM experiment_events
+GROUP BY day ORDER BY day DESC LIMIT 30;"""
+    details = lambda query: f'<details><summary>집계 기준 · SQL 보기</summary><pre>{html.escape(query)}</pre></details>'
     page = f"""<!doctype html>
 <html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CNU 인사이트</title>
 <style>
-*{{box-sizing:border-box}}body{{font-family:Inter,system-ui,sans-serif;margin:0;background:#f5f7fb;color:#172033}}.shell{{max-width:1120px;margin:auto;padding:28px 20px 64px}}header{{display:flex;justify-content:space-between;align-items:end;margin-bottom:24px}}h1{{font-size:30px;margin:4px 0 8px;letter-spacing:-.04em}}h2{{font-size:18px;margin:28px 0 10px}}p{{line-height:1.5}}.sub{{color:#71809b}}.eyebrow{{font-size:11px;color:#71809b;font-family:ui-monospace,monospace}}nav{{display:flex;gap:8px}}nav a{{color:#3767e8;text-decoration:none;font-size:13px;font-weight:700;padding:8px 10px;border-radius:8px}}nav a.active{{background:#3767e8;color:#fff}}.grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}}.metric,.panel{{background:#fff;border:1px solid #e3e8f0;border-radius:14px;box-shadow:0 8px 24px #1720330a}}.metric{{padding:17px}}.metric span{{display:block;color:#71809b;font-size:12px}}.metric b{{display:block;font-size:25px;margin-top:7px;letter-spacing:-.04em}}.metric small{{color:#71809b}}.panel{{padding:18px;overflow:hidden}}.panel-head{{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}}.panel-head h2{{margin:0}}.hint{{font-size:12px;color:#71809b}}table{{width:100%;border-collapse:collapse;font-size:13px}}th,td{{padding:12px 8px;text-align:left;border-bottom:1px solid #edf0f5;white-space:nowrap}}th{{font-size:11px;color:#71809b;font-weight:650}}td small{{display:block;color:#8a94a6;margin-top:3px}}code{{font-size:11px;color:#71809b}}.two{{display:grid;grid-template-columns:1fr 1fr;gap:14px}}@media(max-width:720px){{.shell{{padding:20px 14px 40px}}header{{display:block}}nav{{margin-top:16px;flex-wrap:wrap}}nav a{{padding:8px 9px}}h1{{font-size:26px}}.grid,.two{{grid-template-columns:1fr}}.panel{{padding:12px;overflow:visible}}table,thead,tbody,tr,td{{display:block}}thead{{display:none}}tr{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px;padding:10px 2px;border-bottom:1px solid #edf0f5}}tr:last-child{{border-bottom:0}}td{{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:7px 2px;border:0;white-space:normal;text-align:right}}td::before{{content:attr(data-label);color:#71809b;font-size:11px;text-align:left}}td:first-child{{grid-column:1/-1;display:block;text-align:left;font-size:14px;padding-top:3px}}td:first-child::before{{display:none}}.metric b{{font-size:23px}}}}
+*{{box-sizing:border-box}}body{{font-family:Inter,system-ui,sans-serif;margin:0;background:#f5f7fb;color:#172033}}.shell{{max-width:1120px;margin:auto;padding:28px 20px 64px}}header{{display:flex;justify-content:space-between;align-items:end;margin-bottom:24px}}h1{{font-size:30px;margin:4px 0 8px;letter-spacing:-.04em}}h2{{font-size:18px;margin:28px 0 10px}}p{{line-height:1.5}}.sub{{color:#71809b}}.eyebrow{{font-size:11px;color:#71809b;font-family:ui-monospace,monospace}}nav{{display:flex;gap:8px}}nav a{{color:#3767e8;text-decoration:none;font-size:13px;font-weight:700;padding:8px 10px;border-radius:8px}}nav a.active{{background:#3767e8;color:#fff}}.grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}}.metric,.panel{{background:#fff;border:1px solid #e3e8f0;border-radius:14px;box-shadow:0 8px 24px #1720330a}}.metric{{padding:17px}}.metric span{{display:block;color:#71809b;font-size:12px}}.metric b{{display:block;font-size:25px;margin-top:7px;letter-spacing:-.04em}}.metric small{{color:#71809b}}.panel{{padding:18px;overflow:hidden}}.panel-head{{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}}.panel-head h2{{margin:0}}.hint{{font-size:12px;color:#71809b}}table{{width:100%;border-collapse:collapse;font-size:13px}}th,td{{padding:12px 8px;text-align:left;border-bottom:1px solid #edf0f5;white-space:nowrap}}th{{font-size:11px;color:#71809b;font-weight:650}}td small{{display:block;color:#8a94a6;margin-top:3px}}code{{font-size:11px;color:#71809b}}details{{margin-top:14px;border-top:1px solid #edf0f5;padding-top:10px}}summary{{cursor:pointer;color:#3767e8;font-size:12px;font-weight:700}}pre{{white-space:pre-wrap;word-break:break-word;background:#f7f9fc;color:#536078;border-radius:9px;padding:12px;font:11px/1.55 ui-monospace,monospace;margin:10px 0 0}}.two{{display:grid;grid-template-columns:1fr 1fr;gap:14px}}@media(max-width:720px){{.shell{{padding:20px 14px 40px}}header{{display:block}}nav{{margin-top:16px;flex-wrap:wrap}}nav a{{padding:8px 9px}}h1{{font-size:26px}}.grid,.two{{grid-template-columns:1fr}}.panel{{padding:12px;overflow:visible}}table,thead,tbody,tr,td{{display:block}}thead{{display:none}}tr{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px;padding:10px 2px;border-bottom:1px solid #edf0f5}}tr:last-child{{border-bottom:0}}td{{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:7px 2px;border:0;white-space:normal;text-align:right}}td::before{{content:attr(data-label);color:#71809b;font-size:11px;text-align:left}}td:first-child{{grid-column:1/-1;display:block;text-align:left;font-size:14px;padding-top:3px}}td:first-child::before{{display:none}}.metric b{{font-size:23px}}}}
 </style><body><main class="shell"><header><div><span class="eyebrow">CNU PROMOTION INSIGHTS</span><h1>인사이트 대시보드</h1><p class="sub">수집된 추천 상품 반응을 상품·노출 위치·날짜별로 확인합니다.</p></div><nav><a class="active" href="/admin/insights">인사이트</a><a href="/admin/experiments">실험 목록</a><a href="/admin/experiments/new">＋ 새 실험</a></nav></header>
 <section class="grid"><div class="metric"><span>고유 노출 사용자</span><b>{exposed:,}명</b><small>상품 기준 중복 제거</small></div><div class="metric"><span>고유 클릭 사용자</span><b>{clicked:,}명</b><small>버튼·퀵리플라이·commerceCard</small></div><div class="metric"><span>전체 CTR</span><b>{ctr:.2f}%</b><small>{totals.get('events') or 0:,}건의 이벤트 기록</small></div></section>
-<h2>상품별 반응</h2><section class="panel"><div class="panel-head"><h2>어떤 상품이 반응이 좋은가</h2><span class="hint">고유 사용자 기준</span></div><table><thead><tr><th>상품</th><th>노출</th><th>클릭</th><th>CTR</th><th>클릭 이벤트</th></tr></thead><tbody>{product_rows}</tbody></table></section>
-<section class="two"><div><h2>노출 위치별 클릭</h2><section class="panel"><table><thead><tr><th>위치</th><th>사용자</th><th>이벤트</th></tr></thead><tbody>{surface_rows}</tbody></table></section></div><div><h2>최근 일별 추이</h2><section class="panel"><table><thead><tr><th>날짜</th><th>노출</th><th>클릭 사용자</th><th>클릭 이벤트</th></tr></thead><tbody>{daily_rows}</tbody></table></section></div></section>
+<h2>상품별 반응</h2><section class="panel"><div class="panel-head"><h2>어떤 상품이 반응이 좋은가</h2><span class="hint">고유 사용자 기준</span></div><table><thead><tr><th>상품</th><th>노출</th><th>클릭</th><th>CTR</th><th>클릭 이벤트</th></tr></thead><tbody>{product_rows}</tbody></table>{details(product_sql)}</section>
+<section class="two"><div><h2>노출 위치별 클릭</h2><section class="panel"><table><thead><tr><th>위치</th><th>사용자</th><th>이벤트</th></tr></thead><tbody>{surface_rows}</tbody></table>{details(surface_sql)}</section></div><div><h2>최근 일별 추이</h2><section class="panel"><table><thead><tr><th>날짜</th><th>노출</th><th>클릭 사용자</th><th>클릭 이벤트</th></tr></thead><tbody>{daily_rows}</tbody></table>{details(daily_sql)}</section></div></section>
 </main></body></html>"""
     return page
 

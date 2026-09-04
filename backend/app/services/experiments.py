@@ -377,12 +377,18 @@ async def get_promotion_insights() -> dict[str, Any]:
         )
         surface_rows = await conn.fetch(
             """
-            SELECT COALESCE(properties->>'surface', source, 'unknown') AS surface,
+            SELECT CASE
+                       WHEN event_name = 'promotion_quick_reply_click' THEN 'quick_reply'
+                       WHEN event_name = 'commerce_card_click' THEN 'commerce_card'
+                       WHEN event_name = 'promotion_button_click' THEN 'menu_button'
+                       WHEN event_name IN ('promotion_click', 'promotion_block_click') THEN 'promotion_block'
+                       ELSE COALESCE(properties->>'surface', source, 'unknown')
+                   END AS surface,
                    COUNT(DISTINCT user_id)::int AS users,
                    COUNT(*)::int AS events
             FROM experiment_events
             WHERE event_name = ANY($1::text[])
-            GROUP BY surface
+            GROUP BY 1
             ORDER BY users DESC, surface
             """,
             list(click_events),
