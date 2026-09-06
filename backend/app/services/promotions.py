@@ -7,8 +7,8 @@ import time
 
 from app.utils import common, kakao_json_response
 
-PROMOTION_EXPERIMENT_KEY = "snack_product_comparison_v2"
-DEFAULT_PROMOTION_PRODUCT_KEY = "lavender_wipes"
+PROMOTION_EXPERIMENT_KEY = "snack_product_comparison_v3"
+DEFAULT_PROMOTION_PRODUCT_KEY = "pepsi_lime"
 
 TOSS_SHOPPING_PRODUCTS = {
     "yellow_cheese_buttering": {
@@ -62,6 +62,30 @@ TOSS_SHOPPING_PRODUCTS = {
         "discount_rate": 40,
         "url": "https://toss.im/_m/rZBiP883",
         "image_url": "https://resources-fe.toss.im/image-optimize/width=800,quality=75/https%3A%2F%2Fshopping.toss.im%2Flive%2Ftaca%2Fai%2Fv2%2FNzE0ZWM1%2FQU9PYmQ1N3pyMWY2SE8vaFZPcVZ2d0gxRk9nQjdGVHFrVlVZRUM4VmVuLzg.png",
+    },
+    "pepsi_lime": {
+        "title": "펩시 제로슈거 라임 245ml 30개",
+        "button_label": "🥤 펩시 라임 특가",
+        "quick_reply_label": "🥤 펩시 라임 특가",
+        "description": "🥤 상쾌한 라임향 제로 탄산, 20% 할인",
+        "original_price": 17900,
+        "price": 14200,
+        "discount": 3700,
+        "discount_rate": 20,
+        "url": "https://toss.im/_m/zeU1Q3n2",
+        "image_url": "https://resources-fe.toss.im/image-optimize/width=2400,quality=90/https%3A%2F%2Fshopping.toss.im%2Flive%2Ftaca%2Fai%2FYTI5M2Zm%2FQU9LVVlwd3p2NzlCdld1TVk5enZudUZXcTFFcnN4Q3JuS3ZVUUw2dlZKOWg.png",
+    },
+    "softener_soap": {
+        "title": "수뜰리에 섬유유연제 비누향 2.5L 4개",
+        "button_label": "🧺 섬유유연제 특가",
+        "quick_reply_label": "🧺 섬유유연제 특가",
+        "description": "🧺 비누향 섬유유연제 88% 할인",
+        "original_price": 39600,
+        "price": 4590,
+        "discount": 35010,
+        "discount_rate": 88,
+        "url": "https://toss.im/_m/lXf00Eti",
+        "image_url": "https://resources-fe.toss.im/image-optimize/width=2400,quality=90/https%3A%2F%2Fshopping.toss.im%2Flive%2Ftemp%2F2026-08-10%2F1e4fe51d-5eff-40b9-82e5-057e3a8529d9.png",
     },
 }
 
