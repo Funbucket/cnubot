@@ -8,7 +8,7 @@ from app.routers.shuttle import router as shuttle_router
 from app.routers.talkn import router as talkn_router
 from fastapi import FastAPI
 
-app = FastAPI()
+app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
 
 @app.on_event("startup")

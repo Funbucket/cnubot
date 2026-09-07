@@ -22,11 +22,11 @@ services:
     environment:
       SERVER_URL: ${SERVER_URL}
       KAKAO_TOSS_PROMOTION_BLOCK_ID: ${KAKAO_TOSS_PROMOTION_BLOCK_ID:-}
-      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.6-luna}
-      OPENAI_ENV_FILE: /run/secrets/totally.env
+      PROMOTION_TRACKING_SECRET: ${PROMOTION_TRACKING_SECRET}
       MENU_DATA_DIR: /data/menus
       DATABASE_URL: postgresql://${BACKEND_POSTGRES_USER}:${BACKEND_POSTGRES_PASSWORD}@backend-postgres:5432/${BACKEND_POSTGRES_DB}
     ports:
@@ -35,7 +35,6 @@ services:
       - ./backend/app:/code/app/
       - ./backend/tests:/code/tests/
       - ./data:/data/menus
-      - ../totally/.env:/run/secrets/totally.env:ro
     depends_on:
       backend-postgres:
         condition: service_healthy

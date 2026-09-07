@@ -92,20 +92,24 @@ TOSS_SHOPPING_PRODUCTS = {
 TOSS_SHOPPING_PROMOTION = TOSS_SHOPPING_PRODUCTS[DEFAULT_PROMOTION_PRODUCT_KEY]
 
 
+def _tracking_secret() -> bytes:
+    secret = os.getenv("PROMOTION_TRACKING_SECRET", "").strip()
+    if not secret:
+        raise RuntimeError("PROMOTION_TRACKING_SECRET is not set")
+    return secret.encode()
+
 def create_tracking_token(user_id: str, product_key: str, source: str = "promotion_button") -> str:
     payload = base64.urlsafe_b64encode(
         json.dumps({"u": user_id, "p": product_key, "s": source, "e": int(time.time()) + 86400}).encode()
     ).decode().rstrip("=")
-    secret = os.getenv("PROMOTION_TRACKING_SECRET", "removed-secret").encode()
-    signature = hmac.new(secret, payload.encode(), hashlib.sha256).hexdigest()
+    signature = hmac.new(_tracking_secret(), payload.encode(), hashlib.sha256).hexdigest()
     return f"{payload}.{signature}"
 
 
 def read_tracking_token(token: str) -> tuple[str, str, str] | None:
     try:
         payload, signature = token.split(".", 1)
-        secret = os.getenv("PROMOTION_TRACKING_SECRET", "removed-secret").encode()
-        expected = hmac.new(secret, payload.encode(), hashlib.sha256).hexdigest()
+        expected = hmac.new(_tracking_secret(), payload.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(signature, expected):
             return None
         data = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))

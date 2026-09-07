@@ -1,23 +1,13 @@
 import json
 import os
 import re
-from pathlib import Path
 
 import requests
 from fastapi.concurrency import run_in_threadpool
 
 
 def _api_key() -> str:
-    key = os.getenv("OPENAI_API_KEY", "").strip()
-    if key:
-        return key
-    env_file = Path(os.getenv("OPENAI_ENV_FILE", "/run/secrets/totally.env"))
-    if env_file.exists():
-        for line in env_file.read_text(encoding="utf-8").splitlines():
-            if line.startswith("OPENAI_API_KEY="):
-                return line.split("=", 1)[1].strip().strip('"').strip("'")
-    return ""
-
+    return os.getenv("OPENAI_API_KEY", "").strip()
 
 async def suggest_experiment(prompt: str) -> dict:
     key = _api_key()

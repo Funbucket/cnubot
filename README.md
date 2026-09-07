@@ -112,9 +112,11 @@ The experiment admin is available at `/admin` and is protected by HTTP Basic Aut
 Set these environment variables before exposing it:
 
 ```env
-ADMIN_USERNAME=admin
+ADMIN_USERNAME=<admin-username>
 ADMIN_PASSWORD=<strong-random-password>
 ```
+
+Keep .env outside version control. Copy .env.example and replace every placeholder before starting the service.
 
 The first experiment can compare promotion button copy using the Kakao user ID as
 the sticky randomization unit. The admin records exposure and click events and
