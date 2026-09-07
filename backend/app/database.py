@@ -107,6 +107,16 @@ async def init_database() -> None:
             CREATE INDEX IF NOT EXISTS idx_experiment_assignments_lookup
                 ON experiment_assignments(experiment_id, variant_key);
 
+            CREATE TABLE IF NOT EXISTS recommendation_category_affinity (
+                user_id TEXT NOT NULL,
+                category_id BIGINT NOT NULL,
+                score DOUBLE PRECISION NOT NULL DEFAULT 0,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (user_id, category_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_recommendation_affinity_user
+                ON recommendation_category_affinity(user_id, score DESC);
+
             ALTER TABLE experiments ADD COLUMN IF NOT EXISTS unit TEXT NOT NULL DEFAULT 'user';
             ALTER TABLE experiments ADD COLUMN IF NOT EXISTS alpha DOUBLE PRECISION NOT NULL DEFAULT 0.05;
             ALTER TABLE experiments ADD COLUMN IF NOT EXISTS power DOUBLE PRECISION NOT NULL DEFAULT 0.8;

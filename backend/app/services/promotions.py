@@ -7,6 +7,7 @@ import time
 
 from app.utils import common, kakao_json_response
 from app.services import toss_sharelink
+from app.services import recommendations
 
 PROMOTION_EXPERIMENT_KEY = "snack_product_comparison_v3"
 DEFAULT_PROMOTION_PRODUCT_KEY = "pepsi_lime"
@@ -93,9 +94,10 @@ TOSS_SHOPPING_PRODUCTS = {
 TOSS_SHOPPING_PROMOTION = TOSS_SHOPPING_PRODUCTS[DEFAULT_PROMOTION_PRODUCT_KEY]
 
 
-async def get_live_toss_product() -> tuple[str, dict]:
+async def get_live_toss_product(user_id: str | None = None) -> tuple[str, dict]:
     candidates = await toss_sharelink.best_selling(size=10)
-    item = next((item for item in candidates if not item.get("isSoldOut")), None)
+    affinity = await recommendations.category_affinity(user_id)
+    item = recommendations.rank_candidates(candidates, affinity)
     if not item:
         raise toss_sharelink.TossSharelinkError("NO_AVAILABLE_TOSS_PRODUCT")
     item_id = int(item["tacaItemId"])
@@ -126,24 +128,47 @@ def _tracking_secret() -> bytes:
         raise RuntimeError("PROMOTION_TRACKING_SECRET is not set")
     return secret.encode()
 
-def create_tracking_token(user_id: str, product_key: str, source: str = "promotion_button") -> str:
+def create_tracking_token(
+    user_id: str,
+    product_key: str,
+    source: str = "promotion_button",
+    category_ids: list[int] | None = None,
+    target_url: str | None = None,
+) -> str:
     payload = base64.urlsafe_b64encode(
-        json.dumps({"u": user_id, "p": product_key, "s": source, "e": int(time.time()) + 86400}).encode()
+        json.dumps(
+            {
+                "u": user_id,
+                "p": product_key,
+                "s": source,
+                "c": category_ids or [],
+                "l": target_url,
+                "e": int(time.time()) + 86400,
+            }
+        ).encode()
     ).decode().rstrip("=")
     signature = hmac.new(_tracking_secret(), payload.encode(), hashlib.sha256).hexdigest()
     return f"{payload}.{signature}"
 
 
-def read_tracking_token(token: str) -> tuple[str, str, str] | None:
+def read_tracking_token(token: str) -> tuple[str, str, str, list[int], str | None] | None:
     try:
         payload, signature = token.split(".", 1)
         expected = hmac.new(_tracking_secret(), payload.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(signature, expected):
             return None
         data = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
-        if data["e"] < time.time() or data["p"] not in TOSS_SHOPPING_PRODUCTS:
+        if data["e"] < time.time() or (
+            data["p"] not in TOSS_SHOPPING_PRODUCTS and not data.get("l")
+        ):
             return None
-        return data["u"], data["p"], data.get("s", "promotion_button")
+        return (
+            data["u"],
+            data["p"],
+            data.get("s", "promotion_button"),
+            [int(value) for value in data.get("c", [])],
+            data.get("l"),
+        )
     except (ValueError, KeyError, TypeError, json.JSONDecodeError):
         return None
 

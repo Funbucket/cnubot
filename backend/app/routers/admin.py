@@ -194,7 +194,7 @@ def _recommendations_page(products: list[dict[str, Any]], error: str = "") -> st
     notice = f'<div class="warning">{html.escape(error)}</div>' if error else ""
     return f"""<!doctype html>
 <html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CNU 통합 추천</title>
+<title>CNU 개인화 추천</title>
 <style>
 body{{font-family:system-ui,sans-serif;background:#f5f7fb;color:#172033;margin:0}}
 main{{max-width:900px;margin:auto;padding:32px 20px 64px}}
@@ -209,8 +209,8 @@ nav a{{color:#3767e8;text-decoration:none;font-weight:700;font-size:13px}}
 .warning{{background:#fff8e7;border:1px solid #f3dfaa;border-radius:10px;padding:12px;color:#785b12}}
 table{{width:100%;border-collapse:collapse;font-size:14px}}th,td{{text-align:left;padding:10px;border-bottom:1px solid #edf0f5}}th{{color:#71809b}}
 code{{background:#f1f4fa;padding:2px 5px;border-radius:5px}}@media(max-width:650px){{header{{display:block}}.grid{{grid-template-columns:1fr}}nav{{margin-top:16px}}}}
-</style><main><header><div><div class="sub">CNU RECOMMENDATION CENTER</div><h1>통합 추천</h1><p class="sub">현재는 A/B 테스트 없이 모든 사용자에게 동일한 Toss 상품 추천 정책을 적용합니다.</p></div><nav><a href="/admin/recommendations">통합 추천</a><a href="/admin/experiments">보관된 실험</a><a href="/admin/insights">기존 인사이트</a></nav></header>
-{notice}<section class="card"><div class="grid"><div class="metric"><span>운영 상태</span><b class="status">통합 추천 운영 중</b></div><div class="metric"><span>추천 정책</span><b>인기 상품 우선</b></div><div class="metric"><span>상품 캐시</span><b>1시간</b></div></div><p class="sub">Toss 베스트 상품을 조회하고, 품절 상품을 제외한 뒤 상품 상세 정보와 추적 링크를 연결합니다. API 오류가 나면 기존 fallback 상품을 사용합니다.</p></section>
+</style><main><header><div><div class="sub">CNU RECOMMENDATION CENTER</div><h1>개인화 추천</h1><p class="sub">사용자별 클릭 카테고리를 학습해 Toss 인기상품 순위를 개인화합니다.</p></div><nav><a href="/admin/recommendations">개인화 추천</a><a href="/admin/experiments">보관된 실험</a><a href="/admin/insights">기존 인사이트</a></nav></header>
+{notice}<section class="card"><div class="grid"><div class="metric"><span>운영 상태</span><b class="status">개인화 추천 운영 중</b></div><div class="metric"><span>추천 정책</span><b>인기상품 + 카테고리 affinity</b></div><div class="metric"><span>상품 캐시</span><b>1시간</b></div></div><p class="sub">사용자가 클릭한 상품의 카테고리 점수를 저장하고, 이후 같은 카테고리의 Toss 인기상품을 우선 추천합니다. 신규 사용자는 전체 인기순으로 시작하며 API 오류 시 fallback 상품을 사용합니다.</p></section>
 <section class="card"><h2>현재 후보 상품</h2><table><thead><tr><th>순위</th><th>상품</th><th>가격</th><th>상태</th></tr></thead><tbody>{rows}</tbody></table></section></main></html>"""
 
 
