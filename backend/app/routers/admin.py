@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 from app.services import experiments
 from app.services import llm
+from app.services import toss_sharelink
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -59,7 +60,18 @@ def require_admin(credentials: HTTPBasicCredentials = Depends(security)) -> str:
 
 @router.get("", response_class=HTMLResponse)
 async def admin_home(_: str = Depends(require_admin)):
-    return RedirectResponse("/admin/experiments", status_code=303)
+    return RedirectResponse("/admin/recommendations", status_code=303)
+
+
+@router.get("/recommendations", response_class=HTMLResponse)
+async def recommendations(_: str = Depends(require_admin)):
+    try:
+        products = await toss_sharelink.best_selling(size=5)
+        error = ""
+    except Exception:
+        products = []
+        error = "Toss 상품 목록을 불러오지 못했습니다. 기존 fallback 상품으로 동작합니다."
+    return HTMLResponse(_recommendations_page(products, error))
 
 
 @router.get("/insights", response_class=HTMLResponse)
@@ -171,6 +183,35 @@ def _experiment_card(row: dict[str, Any]) -> str:
       <div id="result-{experiment_id}" class="result-panel hidden"></div>
     </article>
     """
+
+
+def _recommendations_page(products: list[dict[str, Any]], error: str = "") -> str:
+    rows = "".join(
+        f"<tr><td>{index}</td><td>{html.escape(str(item.get('displayName', '-')))}</td>"
+        f"<td>{item.get('displayPrice', 0):,}원</td><td>{'품절' if item.get('isSoldOut') else '판매 중'}</td></tr>"
+        for index, item in enumerate(products, 1)
+    ) or '<tr><td colspan="4">상품 목록이 없습니다.</td></tr>'
+    notice = f'<div class="warning">{html.escape(error)}</div>' if error else ""
+    return f"""<!doctype html>
+<html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CNU 통합 추천</title>
+<style>
+body{{font-family:system-ui,sans-serif;background:#f5f7fb;color:#172033;margin:0}}
+main{{max-width:900px;margin:auto;padding:32px 20px 64px}}
+header{{display:flex;justify-content:space-between;align-items:end;gap:20px;margin-bottom:24px}}
+h1{{margin:4px 0 8px;font-size:30px}}h2{{margin:28px 0 12px;font-size:19px}}
+.sub{{color:#68738a;line-height:1.6}}nav{{display:flex;gap:8px;flex-wrap:wrap}}
+nav a{{color:#3767e8;text-decoration:none;font-weight:700;font-size:13px}}
+.card{{background:#fff;border:1px solid #e3e8f0;border-radius:16px;padding:22px;margin:14px 0}}
+.grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}}.metric{{background:#f7f9fc;border-radius:10px;padding:14px}}
+.metric span{{display:block;color:#71809b;font-size:12px;margin-bottom:6px}}.metric b{{font-size:16px}}
+.status{{color:#147342;background:#dcf8e8;border-radius:99px;padding:6px 10px;font-size:12px;font-weight:700}}
+.warning{{background:#fff8e7;border:1px solid #f3dfaa;border-radius:10px;padding:12px;color:#785b12}}
+table{{width:100%;border-collapse:collapse;font-size:14px}}th,td{{text-align:left;padding:10px;border-bottom:1px solid #edf0f5}}th{{color:#71809b}}
+code{{background:#f1f4fa;padding:2px 5px;border-radius:5px}}@media(max-width:650px){{header{{display:block}}.grid{{grid-template-columns:1fr}}nav{{margin-top:16px}}}}
+</style><main><header><div><div class="sub">CNU RECOMMENDATION CENTER</div><h1>통합 추천</h1><p class="sub">현재는 A/B 테스트 없이 모든 사용자에게 동일한 Toss 상품 추천 정책을 적용합니다.</p></div><nav><a href="/admin/recommendations">통합 추천</a><a href="/admin/experiments">보관된 실험</a><a href="/admin/insights">기존 인사이트</a></nav></header>
+{notice}<section class="card"><div class="grid"><div class="metric"><span>운영 상태</span><b class="status">통합 추천 운영 중</b></div><div class="metric"><span>추천 정책</span><b>인기 상품 우선</b></div><div class="metric"><span>상품 캐시</span><b>1시간</b></div></div><p class="sub">Toss 베스트 상품을 조회하고, 품절 상품을 제외한 뒤 상품 상세 정보와 추적 링크를 연결합니다. API 오류가 나면 기존 fallback 상품을 사용합니다.</p></section>
+<section class="card"><h2>현재 후보 상품</h2><table><thead><tr><th>순위</th><th>상품</th><th>가격</th><th>상태</th></tr></thead><tbody>{rows}</tbody></table></section></main></html>"""
 
 
 def _insights_page(data: dict[str, Any]) -> str:
