@@ -93,6 +93,25 @@ TOSS_SHOPPING_PRODUCTS = {
 
 TOSS_SHOPPING_PROMOTION = TOSS_SHOPPING_PRODUCTS[DEFAULT_PROMOTION_PRODUCT_KEY]
 
+_PROMOTION_LABELS = (
+    (("펩시", "라임"), "🥤 펩시 라임 특가"),
+    (("버터링",), "🍪 버터링 특가"),
+    (("락토핏",), "💊 락토핏 특가"),
+    (("물티슈",), "🧻 물티슈 특가"),
+    (("칫솔",), "🪥 칫솔 특가"),
+    (("섬유유연제",), "🧺 섬유유연제 특가"),
+    (("삼겹살",), "🥩 삼겹살 특가"),
+)
+
+
+def promotion_label(title: str) -> str:
+    for keywords, label in _PROMOTION_LABELS:
+        if all(keyword in title for keyword in keywords):
+            return label
+    compact_title = title.split(",", 1)[0].split("(", 1)[0].strip()
+    compact_title = compact_title[:8] or "추천 상품"
+    return f"{compact_title} 특가"[:14]
+
 
 async def get_live_toss_product(user_id: str | None = None) -> tuple[str, dict]:
     candidates = await toss_sharelink.best_selling(size=10)
@@ -107,8 +126,8 @@ async def get_live_toss_product(user_id: str | None = None) -> tuple[str, dict]:
     product_key = f"toss_item_{item_id}"
     TOSS_SHOPPING_PRODUCTS[product_key] = {
         "title": source.get("displayName") or item.get("displayName", "토스쇼핑 상품"),
-        "button_label": "🛍️ 상품 보러가기",
-        "quick_reply_label": "🛍️ 상품 보러가기",
+        "button_label": promotion_label(source.get("displayName") or item.get("displayName", "")),
+        "quick_reply_label": promotion_label(source.get("displayName") or item.get("displayName", "")),
         "description": "토스쇼핑 인기 상품",
         "original_price": source.get("originalPrice") or item.get("originalPrice", 0),
         "price": source.get("displayPrice") or item.get("displayPrice", 0),
