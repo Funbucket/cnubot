@@ -1,3 +1,5 @@
+import os
+
 from app.services import promotions
 from app.services import experiments
 from app.schemas.kakao_request import KakaoRequest
@@ -22,6 +24,11 @@ async def get_toss_shopping_promotion(req: KakaoRequest | None = Body(default=No
         promotions.PROMOTION_EXPERIMENT_KEY, user_id
     )
     product_key = (variant or {}).get("config", {}).get("product_key") or promotions.DEFAULT_PROMOTION_PRODUCT_KEY
+    if os.getenv("TOSS_LIVE_RECOMMENDATIONS", "false").lower() == "true" and not (variant or {}).get("config", {}).get("product_key"):
+        try:
+            product_key, _ = await promotions.get_live_toss_product()
+        except Exception:
+            product_key = promotions.DEFAULT_PROMOTION_PRODUCT_KEY
     await experiments.record_event(
         promotions.PROMOTION_EXPERIMENT_KEY,
         user_id,

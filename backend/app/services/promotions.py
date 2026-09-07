@@ -6,6 +6,7 @@ import os
 import time
 
 from app.utils import common, kakao_json_response
+from app.services import toss_sharelink
 
 PROMOTION_EXPERIMENT_KEY = "snack_product_comparison_v3"
 DEFAULT_PROMOTION_PRODUCT_KEY = "pepsi_lime"
@@ -90,6 +91,33 @@ TOSS_SHOPPING_PRODUCTS = {
 }
 
 TOSS_SHOPPING_PROMOTION = TOSS_SHOPPING_PRODUCTS[DEFAULT_PROMOTION_PRODUCT_KEY]
+
+
+async def get_live_toss_product() -> tuple[str, dict]:
+    candidates = await toss_sharelink.best_selling(size=10)
+    item = next((item for item in candidates if not item.get("isSoldOut")), None)
+    if not item:
+        raise toss_sharelink.TossSharelinkError("NO_AVAILABLE_TOSS_PRODUCT")
+    item_id = int(item["tacaItemId"])
+    detail = await toss_sharelink.detail(item_id)
+    link = await toss_sharelink.issue_link(item_id)
+    source = detail or item
+    product_key = f"toss_item_{item_id}"
+    TOSS_SHOPPING_PRODUCTS[product_key] = {
+        "title": source.get("displayName") or item.get("displayName", "토스쇼핑 상품"),
+        "button_label": "🛍️ 상품 보러가기",
+        "quick_reply_label": "🛍️ 상품 보러가기",
+        "description": "토스쇼핑 인기 상품",
+        "original_price": source.get("originalPrice") or item.get("originalPrice", 0),
+        "price": source.get("displayPrice") or item.get("displayPrice", 0),
+        "discount": max((source.get("originalPrice") or 0) - (source.get("displayPrice") or 0), 0),
+        "discount_rate": source.get("discountRate") or item.get("discountRate", 0),
+        "url": link,
+        "image_url": source.get("thumbnailUrl") or item.get("thumbnailUrl", ""),
+        "taca_item_id": item_id,
+        "category_ids": source.get("categoryIds") or item.get("categoryIds", []),
+    }
+    return product_key, TOSS_SHOPPING_PRODUCTS[product_key]
 
 
 def _tracking_secret() -> bytes:
