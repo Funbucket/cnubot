@@ -1,8 +1,7 @@
-import json
 import os
 
 from app.schemas.kakao_request import KakaoRequest
-from app.services import cafeteria, experiments, promotions
+from app.services import cafeteria, promotions
 from app.utils import common, kakao_json_response
 from fastapi import APIRouter, Body, HTTPException
 from fastapi.concurrency import run_in_threadpool
@@ -29,21 +28,11 @@ async def get_schedule(req: KakaoRequest | None = Body(default=None)):
                 cafeteria_data["date"] = operating_date
 
     user_id = _get_user_id(req)
-    variant = await experiments.get_active_variant(
-        promotions.PROMOTION_EXPERIMENT_KEY, user_id
-    )
-    product_key = (variant or {}).get("config", {}).get("product_key") or promotions.DEFAULT_PROMOTION_PRODUCT_KEY
+    product_key, promotion_product = await _personalized_product(user_id)
     response = cafeteria.create_schedule_response(
         schedule_data,
-        promotion_product=promotions.get_product(product_key),
+        promotion_product=promotion_product,
     )
-    if variant and _promotion_is_visible(response, promotions.get_product(product_key)):
-        await experiments.record_event(
-            promotions.PROMOTION_EXPERIMENT_KEY,
-            user_id,
-            "promotion_exposure",
-            {"surface": "schedule_quick_reply", "product_key": product_key},
-        )
     return JSONResponse(response)
 
 
@@ -69,14 +58,10 @@ async def get_today_menu(req: KakaoRequest):
         raise HTTPException(status_code=404, detail="해당 요일에 메뉴가 없습니다.")
 
     user_id = _get_user_id(req)
-    variant = await experiments.get_active_variant(
-        promotions.PROMOTION_EXPERIMENT_KEY, user_id
-    )
-    product_key = (variant or {}).get("config", {}).get("product_key") or promotions.DEFAULT_PROMOTION_PRODUCT_KEY
-    promotion_product = promotions.get_product(product_key)
+    product_key, promotion_product = await _personalized_product(user_id)
     click_url = (
         f"{common.SERVER_URL}/promotions/toss-shopping/click?token="
-        f"{promotions.create_tracking_token(user_id, product_key)}"
+        f"{promotions.create_tracking_token(user_id, product_key, category_ids=promotion_product.get('category_ids'), target_url=promotion_product.get('url'))}"
         if user_id and product_key
         else None
     )
@@ -87,13 +72,6 @@ async def get_today_menu(req: KakaoRequest):
         promotion_product=promotion_product,
         promotion_click_url=click_url,
     )
-    if variant and _promotion_is_visible(response, promotion_product):
-        await experiments.record_event(
-            promotions.PROMOTION_EXPERIMENT_KEY,
-            user_id,
-            "promotion_exposure",
-            {"surface": "menu_today", "product_key": product_key},
-        )
     return JSONResponse(response)
 
 
@@ -137,14 +115,10 @@ async def get_menu_by_day(req: KakaoRequest):
         return kakao_response.get_response()
 
     user_id = _get_user_id(req)
-    variant = await experiments.get_active_variant(
-        promotions.PROMOTION_EXPERIMENT_KEY, user_id
-    )
-    product_key = (variant or {}).get("config", {}).get("product_key") or promotions.DEFAULT_PROMOTION_PRODUCT_KEY
-    promotion_product = promotions.get_product(product_key)
+    product_key, promotion_product = await _personalized_product(user_id)
     click_url = (
         f"{common.SERVER_URL}/promotions/toss-shopping/click?token="
-        f"{promotions.create_tracking_token(user_id, product_key)}"
+        f"{promotions.create_tracking_token(user_id, product_key, category_ids=promotion_product.get('category_ids'), target_url=promotion_product.get('url'))}"
         if user_id and product_key
         else None
     )
@@ -155,13 +129,6 @@ async def get_menu_by_day(req: KakaoRequest):
         promotion_product=promotion_product,
         promotion_click_url=click_url,
     )
-    if variant and _promotion_is_visible(response, promotion_product):
-        await experiments.record_event(
-            promotions.PROMOTION_EXPERIMENT_KEY,
-            user_id,
-            "promotion_exposure",
-            {"surface": "menu_by_day", "product_key": product_key},
-        )
     return JSONResponse(response)
 
 
@@ -183,8 +150,12 @@ def _get_user_id(req: KakaoRequest | None) -> str | None:
     return req.userRequest.user.id
 
 
-def _promotion_is_visible(response: dict, product: dict) -> bool:
-    return product["button_label"] in json.dumps(response, ensure_ascii=False)
+async def _personalized_product(user_id: str | None) -> tuple[str, dict]:
+    try:
+        return await promotions.get_live_toss_product(user_id)
+    except Exception:
+        key = promotions.DEFAULT_PROMOTION_PRODUCT_KEY
+        return key, promotions.get_product(key)
 
 
 def _is_dorm_crowding_utterance(utterance: str) -> bool:
