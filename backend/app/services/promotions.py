@@ -103,14 +103,36 @@ _PROMOTION_LABELS = (
     (("삼겹살",), "🥩 삼겹살 특가"),
 )
 
+_CATEGORY_EMOJIS = (
+    (("음료", "커피", "차"), "🥤"),
+    (("식품", "간식", "과자", "축산", "수산", "농산"), "🍽️"),
+    (("패션", "의류", "신발", "가방", "잡화"), "👕"),
+    (("화장품", "미용", "뷰티"), "💄"),
+    (("가구", "홈데코", "인테리어"), "🛋️"),
+    (("가전", "디지털", "컴퓨터", "전자"), "🔌"),
+    (("생활", "주방", "욕실", "청소"), "🧺"),
+    (("반려", "애완"), "🐾"),
+    (("유아", "아동", "출산", "완구"), "🧸"),
+    (("스포츠", "레저", "골프", "캠핑"), "⚽"),
+    (("자동차", "공구", "산업"), "🔧"),
+    (("도서", "문구", "오피스"), "📚"),
+    (("여행", "티켓", "공연", "문화"), "🎫"),
+)
 
-def promotion_label(title: str) -> str:
+
+def promotion_label(title: str, category_names: list[str] | None = None) -> str:
     for keywords, label in _PROMOTION_LABELS:
         if all(keyword in title for keyword in keywords):
             return label
+    category_text = " ".join(category_names or [])
+    emoji = "🛍️"
+    for keywords, candidate_emoji in _CATEGORY_EMOJIS:
+        if any(keyword in category_text for keyword in keywords):
+            emoji = candidate_emoji
+            break
     compact_title = title.split(",", 1)[0].split("(", 1)[0].strip()
-    compact_title = compact_title[:8] or "추천 상품"
-    return f"{compact_title} 특가"[:14]
+    compact_title = compact_title[:8].strip() or "추천 상품"
+    return f"{emoji} {compact_title} 특가"[:14]
 
 
 async def get_live_toss_product(
@@ -127,11 +149,21 @@ async def get_live_toss_product(
     detail = await toss_sharelink.detail(item_id)
     link = await toss_sharelink.issue_link(item_id)
     source = detail or item
+    category_ids = source.get("categoryIds") or item.get("categoryIds", [])
+    try:
+        category_tree = await toss_sharelink.categories()
+    except toss_sharelink.TossSharelinkError:
+        category_tree = {}
+    category_names = [
+        category_tree.get(int(category_id), [""])[-1]
+        for category_id in category_ids
+        if category_tree.get(int(category_id))
+    ]
     product_key = f"toss_item_{item_id}"
     TOSS_SHOPPING_PRODUCTS[product_key] = {
         "title": source.get("displayName") or item.get("displayName", "토스쇼핑 상품"),
-        "button_label": promotion_label(source.get("displayName") or item.get("displayName", "")),
-        "quick_reply_label": promotion_label(source.get("displayName") or item.get("displayName", "")),
+        "button_label": promotion_label(source.get("displayName") or item.get("displayName", ""), category_names),
+        "quick_reply_label": promotion_label(source.get("displayName") or item.get("displayName", ""), category_names),
         "description": "토스쇼핑 인기 상품",
         "original_price": source.get("originalPrice") or item.get("originalPrice", 0),
         "price": source.get("displayPrice") or item.get("displayPrice", 0),
@@ -140,7 +172,7 @@ async def get_live_toss_product(
         "url": link,
         "image_url": source.get("thumbnailUrl") or item.get("thumbnailUrl", ""),
         "taca_item_id": item_id,
-        "category_ids": source.get("categoryIds") or item.get("categoryIds", []),
+        "category_ids": category_ids,
     }
     await recommendations.record_exposure(
         user_id,

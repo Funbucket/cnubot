@@ -11,6 +11,7 @@ class TossSharelinkError(RuntimeError):
 
 _token: tuple[str, float] | None = None
 _best_cache: tuple[float, list[dict[str, Any]]] | None = None
+_category_cache: tuple[float, dict[int, list[str]]] | None = None
 _link_cache: dict[tuple[int, str, str], str] = {}
 
 
@@ -91,6 +92,27 @@ async def best_selling(size: int = 10) -> list[dict[str, Any]]:
     items = body.get("success", {}).get("items", [])
     _best_cache = (now + 3600, items)
     return items
+
+
+async def categories() -> dict[int, list[str]]:
+    global _category_cache
+    now = time.time()
+    if _category_cache and _category_cache[0] > now:
+        return _category_cache[1]
+    body = await asyncio.to_thread(_get_sync, "/openapi/categories")
+    flattened: dict[int, list[str]] = {}
+
+    def walk(nodes: list[dict[str, Any]], parent_path: list[str]) -> None:
+        for node in nodes:
+            path = parent_path + [str(node.get("displayName", ""))]
+            category_id = node.get("categoryId")
+            if category_id is not None:
+                flattened[int(category_id)] = [name for name in path if name]
+            walk(node.get("children", []), path)
+
+    walk(body.get("success", {}).get("categories", []), [])
+    _category_cache = (now + 86400, flattened)
+    return flattened
 
 
 async def detail(taca_item_id: int) -> dict[str, Any] | None:
