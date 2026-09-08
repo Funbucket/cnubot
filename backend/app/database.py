@@ -116,6 +116,22 @@ async def init_database() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_recommendation_affinity_user
                 ON recommendation_category_affinity(user_id, score DESC);
+            ALTER TABLE recommendation_category_affinity
+                ADD COLUMN IF NOT EXISTS click_count INT NOT NULL DEFAULT 0;
+            ALTER TABLE recommendation_category_affinity
+                ADD COLUMN IF NOT EXISTS last_clicked_at TIMESTAMPTZ;
+
+            CREATE TABLE IF NOT EXISTS recommendation_item_events (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                surface TEXT NOT NULL,
+                taca_item_id BIGINT NOT NULL,
+                event_type TEXT NOT NULL CHECK (event_type IN ('exposure', 'click')),
+                category_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_recommendation_item_events_user_time
+                ON recommendation_item_events(user_id, created_at DESC);
 
             ALTER TABLE experiments ADD COLUMN IF NOT EXISTS unit TEXT NOT NULL DEFAULT 'user';
             ALTER TABLE experiments ADD COLUMN IF NOT EXISTS alpha DOUBLE PRECISION NOT NULL DEFAULT 0.05;

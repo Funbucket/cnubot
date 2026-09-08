@@ -28,7 +28,7 @@ async def get_schedule(req: KakaoRequest | None = Body(default=None)):
                 cafeteria_data["date"] = operating_date
 
     user_id = _get_user_id(req)
-    product_key, promotion_product = await _personalized_product(user_id)
+    product_key, promotion_product = await _personalized_product(user_id, "quick_reply")
     response = cafeteria.create_schedule_response(
         schedule_data,
         promotion_product=promotion_product,
@@ -58,10 +58,10 @@ async def get_today_menu(req: KakaoRequest):
         raise HTTPException(status_code=404, detail="해당 요일에 메뉴가 없습니다.")
 
     user_id = _get_user_id(req)
-    product_key, promotion_product = await _personalized_product(user_id)
+    product_key, promotion_product = await _personalized_product(user_id, "menu_card")
     click_url = (
         f"{common.SERVER_URL}/promotions/toss-shopping/click?token="
-        f"{promotions.create_tracking_token(user_id, product_key, category_ids=promotion_product.get('category_ids'), target_url=promotion_product.get('url'))}"
+        f"{promotions.create_tracking_token(user_id, product_key, category_ids=promotion_product.get('category_ids'), target_url=promotion_product.get('url'), taca_item_id=promotion_product.get('taca_item_id'), surface='menu_card')}"
         if user_id and product_key
         else None
     )
@@ -115,10 +115,10 @@ async def get_menu_by_day(req: KakaoRequest):
         return kakao_response.get_response()
 
     user_id = _get_user_id(req)
-    product_key, promotion_product = await _personalized_product(user_id)
+    product_key, promotion_product = await _personalized_product(user_id, "menu_card")
     click_url = (
         f"{common.SERVER_URL}/promotions/toss-shopping/click?token="
-        f"{promotions.create_tracking_token(user_id, product_key, category_ids=promotion_product.get('category_ids'), target_url=promotion_product.get('url'))}"
+        f"{promotions.create_tracking_token(user_id, product_key, category_ids=promotion_product.get('category_ids'), target_url=promotion_product.get('url'), taca_item_id=promotion_product.get('taca_item_id'), surface='menu_card')}"
         if user_id and product_key
         else None
     )
@@ -150,9 +150,9 @@ def _get_user_id(req: KakaoRequest | None) -> str | None:
     return req.userRequest.user.id
 
 
-async def _personalized_product(user_id: str | None) -> tuple[str, dict]:
+async def _personalized_product(user_id: str | None, surface: str) -> tuple[str, dict]:
     try:
-        return await promotions.get_live_toss_product(user_id)
+        return await promotions.get_live_toss_product(user_id, surface)
     except Exception:
         key = promotions.DEFAULT_PROMOTION_PRODUCT_KEY
         return key, promotions.get_product(key)

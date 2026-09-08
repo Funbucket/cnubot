@@ -113,10 +113,14 @@ def promotion_label(title: str) -> str:
     return f"{compact_title} 특가"[:14]
 
 
-async def get_live_toss_product(user_id: str | None = None) -> tuple[str, dict]:
+async def get_live_toss_product(
+    user_id: str | None = None,
+    surface: str = "default",
+) -> tuple[str, dict]:
     candidates = await toss_sharelink.best_selling(size=10)
     affinity = await recommendations.category_affinity(user_id)
-    item = recommendations.rank_candidates(candidates, affinity)
+    recent_ids = await recommendations.recent_item_ids(user_id)
+    item = recommendations.rank_candidates(candidates, affinity, recent_ids, user_id, surface)
     if not item:
         raise toss_sharelink.TossSharelinkError("NO_AVAILABLE_TOSS_PRODUCT")
     item_id = int(item["tacaItemId"])
@@ -138,6 +142,12 @@ async def get_live_toss_product(user_id: str | None = None) -> tuple[str, dict]:
         "taca_item_id": item_id,
         "category_ids": source.get("categoryIds") or item.get("categoryIds", []),
     }
+    await recommendations.record_exposure(
+        user_id,
+        surface,
+        item_id,
+        TOSS_SHOPPING_PRODUCTS[product_key]["category_ids"],
+    )
     return product_key, TOSS_SHOPPING_PRODUCTS[product_key]
 
 
@@ -153,6 +163,8 @@ def create_tracking_token(
     source: str = "promotion_button",
     category_ids: list[int] | None = None,
     target_url: str | None = None,
+    taca_item_id: int | None = None,
+    surface: str = "unknown",
 ) -> str:
     payload = base64.urlsafe_b64encode(
         json.dumps(
@@ -162,6 +174,8 @@ def create_tracking_token(
                 "s": source,
                 "c": category_ids or [],
                 "l": target_url,
+                "i": taca_item_id,
+                "v": surface,
                 "e": int(time.time()) + 86400,
             }
         ).encode()
@@ -170,7 +184,7 @@ def create_tracking_token(
     return f"{payload}.{signature}"
 
 
-def read_tracking_token(token: str) -> tuple[str, str, str, list[int], str | None] | None:
+def read_tracking_token(token: str) -> tuple[str, str, str, list[int], str | None, int | None, str] | None:
     try:
         payload, signature = token.split(".", 1)
         expected = hmac.new(_tracking_secret(), payload.encode(), hashlib.sha256).hexdigest()
@@ -187,6 +201,8 @@ def read_tracking_token(token: str) -> tuple[str, str, str, list[int], str | Non
             data.get("s", "promotion_button"),
             [int(value) for value in data.get("c", [])],
             data.get("l"),
+            data.get("i"),
+            data.get("v", "unknown"),
         )
     except (ValueError, KeyError, TypeError, json.JSONDecodeError):
         return None
