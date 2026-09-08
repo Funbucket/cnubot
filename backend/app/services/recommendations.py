@@ -25,25 +25,26 @@ async def category_affinity(user_id: str | None) -> dict[int, float]:
     return {int(row["category_id"]): float(row["score"]) for row in rows}
 
 
-async def recent_item_ids(user_id: str | None, hours: int = 24) -> set[int]:
+async def recent_item_ids(user_id: str | None, hours: int = 24) -> dict[int, object]:
     if not user_id:
-        return set()
+        return {}
     try:
         pool = get_pool()
     except RuntimeError:
-        return set()
+        return {}
     rows = await pool.fetch(
         """
-        SELECT DISTINCT taca_item_id
+        SELECT taca_item_id, MAX(created_at) AS last_exposed_at
         FROM recommendation_item_events
         WHERE user_id = $1
           AND event_type = 'exposure'
           AND created_at >= NOW() - ($2 * INTERVAL '1 hour')
+        GROUP BY taca_item_id
         """,
         user_id,
         hours,
     )
-    return {int(row["taca_item_id"]) for row in rows}
+    return {int(row["taca_item_id"]): row["last_exposed_at"] for row in rows}
 
 
 async def record_exposure(
@@ -117,16 +118,29 @@ async def record_category_click(
 def rank_candidates(
     items: list[dict],
     affinity: dict[int, float],
-    recent_ids: set[int] | None = None,
+    recent_ids: dict[int, object] | set[int] | None = None,
     user_id: str | None = None,
     surface: str = "default",
 ) -> dict | None:
     available = [item for item in items if not item.get("isSoldOut")]
     if not available:
         return None
-    recent_ids = recent_ids or set()
+    recent_ids = recent_ids or {}
     fresh = [item for item in available if int(item.get("tacaItemId", 0)) not in recent_ids]
-    candidates = fresh or available
+    exhausted = not fresh
+    if fresh:
+        candidates = fresh
+    else:
+        # Once every candidate was shown, rotate from the least recently shown
+        # item instead of falling back to the popularity leader every time.
+        candidates = sorted(
+            available,
+            key=lambda item: recent_ids.get(int(item.get("tacaItemId", 0)))
+            if isinstance(recent_ids, dict) else None,
+        )
+
+    if exhausted:
+        return candidates[0]
 
     if affinity and user_id:
         seed = hashlib.sha256(
