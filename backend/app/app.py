@@ -5,7 +5,6 @@ from app.routers.help import router as help_router
 from app.routers.library import router as library_router
 from app.routers.promotions import router as promotions_router
 from app.routers.shuttle import router as shuttle_router
-from app.routers.talkn import router as talkn_router
 from fastapi import FastAPI
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
@@ -26,4 +25,3 @@ app.include_router(shuttle_router, prefix="/shuttle", tags=["shuttle"])
 app.include_router(library_router, prefix="/library", tags=["library"])
 app.include_router(promotions_router, prefix="/promotions", tags=["promotions"])
 app.include_router(help_router, prefix="/help", tags=["help"])
-app.include_router(talkn_router, prefix="/talkn", tags=["talkn"])

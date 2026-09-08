@@ -11,21 +11,23 @@ router = APIRouter()
 @router.post("/toss-shopping")
 async def get_toss_shopping_promotion(req: KakaoRequest | None = Body(default=None)):
     user_id = req.userRequest.user.id if req and req.userRequest.user else None
-    preferred_item_id = await recommendations.latest_item_id(user_id, "quick_reply")
     try:
-        product_key, product = await promotions.get_live_toss_product(
-            user_id, "quick_reply", preferred_item_id
-        )
+        product_pairs = await promotions.get_live_toss_products(user_id, "quick_reply", limit=5)
     except Exception:
-        product_key = promotions.DEFAULT_PROMOTION_PRODUCT_KEY
-    product = promotions.get_product(product_key)
-    click_url = (
-        f"{promotions.common.SERVER_URL}/promotions/toss-shopping/click?token="
-        f"{promotions.create_tracking_token(user_id, product_key, 'commerce_card', product.get('category_ids'), product.get('url'), product.get('taca_item_id'), 'quick_reply')}"
-        if user_id and product_key
-        else None
-    )
-    return JSONResponse(promotions.create_toss_shopping_response(product, click_url))
+        product_pairs = []
+    if not product_pairs:
+        product_pairs = list(promotions.TOSS_SHOPPING_PRODUCTS.items())[:5]
+    products = [product for _, product in product_pairs]
+    click_urls = [
+        (
+            f"{promotions.common.SERVER_URL}/promotions/toss-shopping/click?token="
+            f"{promotions.create_tracking_token(user_id, product_key, 'commerce_card', product.get('category_ids'), product.get('url'), product.get('taca_item_id'), 'quick_reply')}"
+            if user_id
+            else None
+        )
+        for product_key, product in product_pairs
+    ]
+    return JSONResponse(promotions.create_toss_shopping_list_response(products, click_urls))
 
 
 @router.get("/toss-shopping/click")

@@ -15,8 +15,8 @@ DEFAULT_PROMOTION_PRODUCT_KEY = "pepsi_lime"
 TOSS_SHOPPING_PRODUCTS = {
     "yellow_cheese_buttering": {
         "title": "해태 버터링 딥황치즈맛 4개",
-    "button_label": "🍪 황치즈 버터링 특가",
-    "quick_reply_label": "🍪 황치즈 버터링 특가",
+    "button_label": "🍪 황치즈 버터링 특가 · 제휴",
+    "quick_reply_label": "🍪 황치즈 버터링 특가 · 제휴",
     "description": "🍪 황치즈 덕후 주목! 첫 구매 3,000원 추가 할인",
     "original_price": 19200,
     "price": 14500,
@@ -31,8 +31,8 @@ TOSS_SHOPPING_PRODUCTS = {
     },
     "lactofit_gold": {
         "title": "락토핏 골드 140포 2개 + 증정",
-        "button_label": "💊 유산균 특가",
-        "quick_reply_label": "💊 유산균 특가",
+        "button_label": "💊 유산균 특가 · 제휴",
+        "quick_reply_label": "💊 유산균 특가 · 제휴",
         "description": "💊 매일 챙기는 유산균, 무료배송 특가로 만나보세요",
         "original_price": 148400,
         "price": 51987,
@@ -43,8 +43,8 @@ TOSS_SHOPPING_PRODUCTS = {
     },
     "lavender_wipes": {
         "title": "리벤스 라벤더 바이올렛 물티슈",
-        "button_label": "🧻 물티슈 특가",
-        "quick_reply_label": "🧻 물티슈 특가",
+        "button_label": "🧻 물티슈 특가 · 제휴",
+        "quick_reply_label": "🧻 물티슈 특가 · 제휴",
         "description": "🧻 1매당 8원 · 무료배송 특가",
         "original_price": 29900,
         "price": 7500,
@@ -55,8 +55,8 @@ TOSS_SHOPPING_PRODUCTS = {
     },
     "cento_toothbrush": {
         "title": "센토 프라임 바이브 칫솔 20개입",
-        "button_label": "🪥 칫솔 특가",
-        "quick_reply_label": "🪥 칫솔 특가",
+        "button_label": "🪥 칫솔 특가 · 제휴",
+        "quick_reply_label": "🪥 칫솔 특가 · 제휴",
         "description": "🪥 초미세 탄력모 칫솔 20개입 특가",
         "original_price": 26500,
         "price": 15900,
@@ -67,8 +67,8 @@ TOSS_SHOPPING_PRODUCTS = {
     },
     "pepsi_lime": {
         "title": "펩시 제로슈거 라임 245ml 30개",
-        "button_label": "🥤 펩시 라임 특가",
-        "quick_reply_label": "🥤 펩시 라임 특가",
+        "button_label": "🥤 펩시 라임 특가 · 제휴",
+        "quick_reply_label": "🥤 펩시 라임 특가 · 제휴",
         "description": "🥤 상쾌한 라임향 제로 탄산, 20% 할인",
         "original_price": 17900,
         "price": 14200,
@@ -79,8 +79,8 @@ TOSS_SHOPPING_PRODUCTS = {
     },
     "softener_soap": {
         "title": "수뜰리에 섬유유연제 비누향 2.5L 4개",
-        "button_label": "🧺 섬유유연제 특가",
-        "quick_reply_label": "🧺 섬유유연제 특가",
+        "button_label": "🧺 섬유유연제 특가 · 제휴",
+        "quick_reply_label": "🧺 섬유유연제 특가 · 제휴",
         "description": "🧺 비누향 섬유유연제 88% 할인",
         "original_price": 39600,
         "price": 4590,
@@ -123,7 +123,7 @@ _CATEGORY_EMOJIS = (
 def promotion_label(title: str, category_names: list[str] | None = None) -> str:
     for keywords, label in _PROMOTION_LABELS:
         if all(keyword in title for keyword in keywords):
-            return label
+            return f"{label} · 제휴"
     category_text = " ".join(category_names or [])
     emoji = "🛍️"
     for keywords, candidate_emoji in _CATEGORY_EMOJIS:
@@ -132,7 +132,7 @@ def promotion_label(title: str, category_names: list[str] | None = None) -> str:
             break
     compact_title = title.split(",", 1)[0].split("(", 1)[0].strip()
     compact_title = compact_title[:8].strip() or "추천 상품"
-    return f"{emoji} {compact_title} 특가"[:14]
+    return f"{emoji} {compact_title} 특가 · 제휴"[:20]
 
 
 async def get_live_toss_product(
@@ -188,6 +188,57 @@ async def get_live_toss_product(
         TOSS_SHOPPING_PRODUCTS[product_key]["category_ids"],
     )
     return product_key, TOSS_SHOPPING_PRODUCTS[product_key]
+
+
+async def get_live_toss_products(
+    user_id: str | None = None,
+    surface: str = "quick_reply",
+    limit: int = 5,
+) -> list[tuple[str, dict]]:
+    candidates = await toss_sharelink.best_selling(size=max(limit * 2, 10))
+    affinity = await recommendations.category_affinity(user_id)
+    recent_ids = await recommendations.recent_item_ids(user_id)
+    ranked_items = recommendations.rank_candidates_ordered(
+        candidates, affinity, recent_ids, user_id, surface, limit
+    )
+    products: list[tuple[str, dict]] = []
+    for item in ranked_items:
+        try:
+            item_id = int(item["tacaItemId"])
+            detail = await toss_sharelink.detail(item_id)
+            link = await toss_sharelink.issue_link(item_id)
+            source = detail or item
+            category_ids = source.get("categoryIds") or item.get("categoryIds", [])
+            try:
+                category_tree = await toss_sharelink.categories()
+            except toss_sharelink.TossSharelinkError:
+                category_tree = {}
+            category_names = [
+                category_tree.get(int(category_id), [""])[-1]
+                for category_id in category_ids
+                if category_tree.get(int(category_id))
+            ]
+            product_key = f"toss_item_{item_id}"
+            TOSS_SHOPPING_PRODUCTS[product_key] = {
+                "title": source.get("displayName") or item.get("displayName", "토스쇼핑 상품"),
+                "button_label": promotion_label(source.get("displayName") or item.get("displayName", ""), category_names),
+                "quick_reply_label": promotion_label(source.get("displayName") or item.get("displayName", ""), category_names),
+                "description": "토스쇼핑 인기 상품",
+                "original_price": source.get("originalPrice") or item.get("originalPrice", 0),
+                "price": source.get("displayPrice") or item.get("displayPrice", 0),
+                "discount": max((source.get("originalPrice") or 0) - (source.get("displayPrice") or 0), 0),
+                "discount_rate": source.get("discountRate") or item.get("discountRate", 0),
+                "url": link,
+                "image_url": source.get("thumbnailUrl") or item.get("thumbnailUrl", ""),
+                "taca_item_id": item_id,
+                "category_ids": category_ids,
+            }
+            product = TOSS_SHOPPING_PRODUCTS[product_key]
+            await recommendations.record_exposure(user_id, surface, item_id, category_ids)
+            products.append((product_key, product))
+        except (KeyError, TypeError, ValueError, toss_sharelink.TossSharelinkError):
+            continue
+    return products
 
 
 def _tracking_secret() -> bytes:
@@ -270,7 +321,7 @@ def get_product(product_key: str | None = None) -> dict:
 
 
 def create_toss_promotion_quick_reply(kakao_response, product: dict | None = None):
-    label = (product or {}).get("button_label", "🛍️ 쇼핑 특가")
+    label = (product or {}).get("button_label", "🛒 기숙사·자취생 특가")
     if common.KAKAO_TOSS_PROMOTION_BLOCK_ID:
         return kakao_response.create_quick_reply(
             label=label,
@@ -288,7 +339,10 @@ def create_toss_promotion_quick_reply(kakao_response, product: dict | None = Non
 def create_toss_shopping_response(product: dict | None = None, click_url: str | None = None):
     kakao_response = kakao_json_response.KakaoJsonResponse()
     product = product or TOSS_SHOPPING_PROMOTION
-    card_description = f"{product['discount_rate']}% 할인 · 최대할인가 {product['price']:,}원"
+    card_description = (
+        "구매 수수료는 챗봇 서버 운영비로 사용됩니다.\n"
+        f"{product['discount_rate']}% 할인 · 최대할인가 {product['price']:,}원"
+    )
     commerce_card = {
         "title": product["title"],
         "description": card_description,
@@ -308,4 +362,40 @@ def create_toss_shopping_response(product: dict | None = None, click_url: str | 
     }
     return kakao_response.add_output_to_response(
         {"commerceCard": commerce_card}
+    ).get_response()
+
+
+def create_toss_shopping_list_response(
+    products: list[dict], click_urls: list[str | None] | None = None
+):
+    kakao_response = kakao_json_response.KakaoJsonResponse()
+    click_urls = click_urls or [None] * len(products)
+    cards = []
+    for product, click_url in zip(products, click_urls):
+        cards.append(
+            {
+                "title": product["title"],
+                "description": f"{product['discount_rate']}% 할인 · 최대할인가 {product['price']:,}원",
+                "price": product["original_price"],
+                "currency": "won",
+                "discount": product["discount"],
+                "discountRate": product["discount_rate"],
+                "discountedPrice": product["price"],
+                "thumbnails": [{"imageUrl": product["image_url"]}],
+                "buttons": [
+                    {
+                        "action": "webLink",
+                        "label": product["button_label"],
+                        "webLinkUrl": click_url or product["url"],
+                    }
+                ],
+            }
+        )
+    kakao_response.add_output_to_response(
+        kakao_response.create_simple_text(
+            "구매 수수료는 챗봇 서버 운영비로 사용됩니다."
+        )
+    )
+    return kakao_response.add_output_to_response(
+        kakao_response.create_carousel(cards, type="commerceCard")
     ).get_response()

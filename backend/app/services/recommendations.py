@@ -186,3 +186,27 @@ def rank_candidates(
             + (total - int(item.get("rank", total))) * 0.1
         ),
     )
+
+
+def rank_candidates_ordered(
+    items: list[dict],
+    affinity: dict[int, float],
+    recent_ids: dict[int, object] | set[int] | None = None,
+    user_id: str | None = None,
+    surface: str = "default",
+    limit: int = 5,
+) -> list[dict]:
+    """Return a ranked list using the same policy as the single-item picker."""
+    remaining = list(items)
+    ranked: list[dict] = []
+    while remaining and len(ranked) < limit:
+        selected = rank_candidates(remaining, affinity, recent_ids, user_id, surface)
+        if not selected:
+            break
+        ranked.append(selected)
+        selected_id = int(selected.get("tacaItemId", 0))
+        remaining = [
+            item for item in remaining
+            if int(item.get("tacaItemId", 0)) != selected_id
+        ]
+    return ranked

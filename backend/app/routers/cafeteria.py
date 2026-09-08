@@ -27,12 +27,7 @@ async def get_schedule(req: KakaoRequest | None = Body(default=None)):
             if operating_date:
                 cafeteria_data["date"] = operating_date
 
-    user_id = _get_user_id(req)
-    product_key, promotion_product = await _personalized_product(user_id, "quick_reply")
-    response = cafeteria.create_schedule_response(
-        schedule_data,
-        promotion_product=promotion_product,
-    )
+    response = cafeteria.create_schedule_response(schedule_data)
     return JSONResponse(response)
 
 
