@@ -340,7 +340,9 @@ def create_toss_shopping_response(product: dict | None = None, click_url: str | 
     kakao_response = kakao_json_response.KakaoJsonResponse()
     product = product or TOSS_SHOPPING_PROMOTION
     card_description = (
-        "구매 수수료는 챗봇 서버 운영비로 사용됩니다.\n"
+        "츠누봇이 토스와 함께 준비한 특가예요 🛍️\n"
+        "• 이 링크를 통해서만 할인 혜택을 받을 수 있어요.\n"
+        "• 구매 수수료는 챗봇 서버 운영비로 사용됩니다.\n"
         f"{product['discount_rate']}% 할인 · 최대할인가 {product['price']:,}원"
     )
     commerce_card = {
@@ -393,7 +395,9 @@ def create_toss_shopping_list_response(
         )
     kakao_response.add_output_to_response(
         kakao_response.create_simple_text(
-            "구매 수수료는 챗봇 서버 운영비로 사용됩니다."
+            "츠누봇이 토스와 함께 준비한 특가예요 🛍️\n"
+            "• 이 링크를 통해서만 할인 혜택을 받을 수 있어요.\n"
+            "• 구매 수수료는 챗봇 서버 운영비로 사용됩니다."
         )
     )
     return kakao_response.add_output_to_response(
