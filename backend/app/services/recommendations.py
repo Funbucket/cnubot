@@ -47,6 +47,30 @@ async def recent_item_ids(user_id: str | None, hours: int = 24) -> dict[int, obj
     return {int(row["taca_item_id"]): row["last_exposed_at"] for row in rows}
 
 
+async def latest_item_id(user_id: str | None, surface: str) -> int | None:
+    if not user_id:
+        return None
+    try:
+        pool = get_pool()
+    except RuntimeError:
+        return None
+    row = await pool.fetchrow(
+        """
+        SELECT taca_item_id
+        FROM recommendation_item_events
+        WHERE user_id = $1
+          AND surface = $2
+          AND event_type = 'exposure'
+          AND created_at >= NOW() - INTERVAL '24 hours'
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        user_id,
+        surface,
+    )
+    return int(row["taca_item_id"]) if row else None
+
+
 async def record_exposure(
     user_id: str | None,
     surface: str,

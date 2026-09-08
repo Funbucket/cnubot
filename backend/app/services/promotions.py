@@ -138,11 +138,18 @@ def promotion_label(title: str, category_names: list[str] | None = None) -> str:
 async def get_live_toss_product(
     user_id: str | None = None,
     surface: str = "default",
+    preferred_item_id: int | None = None,
 ) -> tuple[str, dict]:
     candidates = await toss_sharelink.best_selling(size=10)
     affinity = await recommendations.category_affinity(user_id)
     recent_ids = await recommendations.recent_item_ids(user_id)
-    item = recommendations.rank_candidates(candidates, affinity, recent_ids, user_id, surface)
+    item = next(
+        (candidate for candidate in candidates
+         if preferred_item_id and int(candidate.get("tacaItemId", 0)) == preferred_item_id),
+        None,
+    )
+    if item is None:
+        item = recommendations.rank_candidates(candidates, affinity, recent_ids, user_id, surface)
     if not item:
         raise toss_sharelink.TossSharelinkError("NO_AVAILABLE_TOSS_PRODUCT")
     item_id = int(item["tacaItemId"])

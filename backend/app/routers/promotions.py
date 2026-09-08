@@ -11,8 +11,11 @@ router = APIRouter()
 @router.post("/toss-shopping")
 async def get_toss_shopping_promotion(req: KakaoRequest | None = Body(default=None)):
     user_id = req.userRequest.user.id if req and req.userRequest.user else None
+    preferred_item_id = await recommendations.latest_item_id(user_id, "quick_reply")
     try:
-        product_key, product = await promotions.get_live_toss_product(user_id, "quick_reply")
+        product_key, product = await promotions.get_live_toss_product(
+            user_id, "quick_reply", preferred_item_id
+        )
     except Exception:
         product_key = promotions.DEFAULT_PROMOTION_PRODUCT_KEY
     product = promotions.get_product(product_key)
