@@ -60,7 +60,7 @@ def create_schedule_response(meal_schedule: list[dict], promotion_product: dict 
                 {
                     "action": "webLink",
                     "label": "식단 보기",
-                    "webLinkUrl": f"{common.SERVER_URL}/cafeteria/images/hall_1_menu.png",
+                    "webLinkUrl": "https://cnuit.cnu.ac.kr/patis/system/ReportImageViewController.do?platformType=exbuilder&method=view&f0=cooperation&f1=consumer&f2=ocl02&f3=20260820&f4=4BB44F6703C94056A1B18E5F013A066F.png",
                 }
                 if place == "hall_1"
                 else {

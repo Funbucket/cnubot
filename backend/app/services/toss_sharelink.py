@@ -10,7 +10,7 @@ class TossSharelinkError(RuntimeError):
 
 
 _token: tuple[str, float] | None = None
-_best_cache: tuple[float, list[dict[str, Any]]] | None = None
+_best_cache: dict[int, tuple[float, list[dict[str, Any]]]] = {}
 _category_cache: tuple[float, dict[int, list[str]]] | None = None
 _link_cache: dict[tuple[int, str, str], str] = {}
 
@@ -84,13 +84,13 @@ def _post_sync(path: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 async def best_selling(size: int = 10) -> list[dict[str, Any]]:
-    global _best_cache
     now = time.time()
-    if _best_cache and _best_cache[0] > now:
-        return _best_cache[1]
+    cached = _best_cache.get(size)
+    if cached and cached[0] > now:
+        return cached[1]
     body = await asyncio.to_thread(_get_sync, "/openapi/products/best-selling", {"size": size})
     items = body.get("success", {}).get("items", [])
-    _best_cache = (now + 3600, items)
+    _best_cache[size] = (now + 3600, items)
     return items
 
 

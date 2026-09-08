@@ -6,6 +6,23 @@ from datetime import date
 from app.database import get_pool
 
 
+_STUDENT_CATEGORY_GROUPS = (
+    ("food", ("식품", "간식", "음료", "커피", "라면", "즉석", "냉동", "김치")),
+    ("living", ("생활", "세제", "청소", "휴지", "물티슈", "욕실", "위생")),
+    ("kitchen", ("주방", "식기", "조리", "보관", "수납")),
+    ("appliance", ("가전", "디지털", "전자", "충전", "조명", "선풍기")),
+    ("study", ("문구", "도서", "오피스", "책상")),
+    ("beauty", ("뷰티", "화장품", "미용", "샴푸", "바디", "치약", "칫솔")),
+)
+_STUDENT_POSITIVE_KEYWORDS = (
+    "간편", "자취", "기숙사", "소형", "미니", "휴대", "일회용", "정리", "세탁",
+    "텀블러", "도시락", "수건", "침구", "옷걸이", "이어폰", "키보드", "마우스",
+)
+_STUDENT_LOW_FIT_KEYWORDS = (
+    "가구", "소파", "침대", "대형", "자동차", "골프", "유아", "출산", "산업용",
+)
+
+
 async def category_affinity(user_id: str | None) -> dict[int, float]:
     if not user_id:
         return {}
@@ -139,12 +156,43 @@ async def record_category_click(
             )
 
 
+def _category_group(item: dict) -> str | None:
+    text = " ".join(
+        [str(item.get("displayName", ""))]
+        + [str(value) for value in item.get("_category_names", [])]
+    )
+    for group, keywords in _STUDENT_CATEGORY_GROUPS:
+        if any(keyword in text for keyword in keywords):
+            return group
+    return None
+
+
+def _student_fit_score(item: dict) -> float:
+    text = " ".join(
+        [str(item.get("displayName", ""))]
+        + [str(value) for value in item.get("_category_names", [])]
+    )
+    score = 2.0 if _category_group(item) else 0.0
+    score += min(
+        sum(keyword in text for keyword in _STUDENT_POSITIVE_KEYWORDS) * 0.5,
+        2.0,
+    )
+    score -= min(
+        sum(keyword in text for keyword in _STUDENT_LOW_FIT_KEYWORDS),
+        3.0,
+    )
+    score += min(float(item.get("discountRate") or 0), 50.0) / 25.0
+    score += min(float(item.get("reviewScore") or 0), 5.0) / 5.0
+    return score
+
+
 def rank_candidates(
     items: list[dict],
     affinity: dict[int, float],
     recent_ids: dict[int, object] | set[int] | None = None,
     user_id: str | None = None,
     surface: str = "default",
+    selected_groups: set[str] | None = None,
 ) -> dict | None:
     available = [item for item in items if not item.get("isSoldOut")]
     if not available:
@@ -184,6 +232,13 @@ def rank_candidates(
         key=lambda item: (
             sum(affinity.get(int(category_id), 0) for category_id in item.get("categoryIds", [])) * 10
             + (total - int(item.get("rank", total))) * 0.1
+            + _student_fit_score(item)
+            - (
+                1.5
+                if selected_groups
+                and _category_group(item) in selected_groups
+                else 0.0
+            )
         ),
     )
 
@@ -199,11 +254,34 @@ def rank_candidates_ordered(
     """Return a ranked list using the same policy as the single-item picker."""
     remaining = list(items)
     ranked: list[dict] = []
+    selected_groups: set[str] = set()
+    group_counts: dict[str, int] = {}
     while remaining and len(ranked) < limit:
-        selected = rank_candidates(remaining, affinity, recent_ids, user_id, surface)
+        diverse_remaining = [
+            item
+            for item in remaining
+            if not _category_group(item)
+            or group_counts.get(_category_group(item), 0) < 2
+        ]
+        if diverse_remaining:
+            remaining_for_selection = diverse_remaining
+        else:
+            remaining_for_selection = remaining
+        selected = rank_candidates(
+            remaining_for_selection,
+            affinity,
+            recent_ids,
+            user_id,
+            surface,
+            selected_groups,
+        )
         if not selected:
             break
         ranked.append(selected)
+        group = _category_group(selected)
+        if group:
+            selected_groups.add(group)
+            group_counts[group] = group_counts.get(group, 0) + 1
         selected_id = int(selected.get("tacaItemId", 0))
         remaining = [
             item for item in remaining

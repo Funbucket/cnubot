@@ -11,6 +11,8 @@ from app.services import recommendations
 
 PROMOTION_EXPERIMENT_KEY = "snack_product_comparison_v3"
 DEFAULT_PROMOTION_PRODUCT_KEY = "pepsi_lime"
+TOSS_MENU_BUTTON_LABEL = "🛍️ 토스 제휴 특가"
+TOSS_CANDIDATE_POOL_SIZE = 100
 
 TOSS_SHOPPING_PRODUCTS = {
     "yellow_cheese_buttering": {
@@ -135,12 +137,30 @@ def promotion_label(title: str, category_names: list[str] | None = None) -> str:
     return f"{emoji} {compact_title} 특가 · 제휴"[:20]
 
 
+async def _annotate_candidate_categories(candidates: list[dict]) -> list[dict]:
+    try:
+        category_tree = await toss_sharelink.categories()
+    except toss_sharelink.TossSharelinkError:
+        return candidates
+    annotated = []
+    for candidate in candidates:
+        item = dict(candidate)
+        item["_category_names"] = [
+            name
+            for category_id in item.get("categoryIds", [])
+            for name in category_tree.get(int(category_id), [])
+        ]
+        annotated.append(item)
+    return annotated
+
+
 async def get_live_toss_product(
     user_id: str | None = None,
     surface: str = "default",
     preferred_item_id: int | None = None,
 ) -> tuple[str, dict]:
-    candidates = await toss_sharelink.best_selling(size=10)
+    candidates = await toss_sharelink.best_selling(size=TOSS_CANDIDATE_POOL_SIZE)
+    candidates = await _annotate_candidate_categories(candidates)
     affinity = await recommendations.category_affinity(user_id)
     recent_ids = await recommendations.recent_item_ids(user_id)
     item = next(
@@ -195,7 +215,8 @@ async def get_live_toss_products(
     surface: str = "quick_reply",
     limit: int = 5,
 ) -> list[tuple[str, dict]]:
-    candidates = await toss_sharelink.best_selling(size=max(limit * 2, 10))
+    candidates = await toss_sharelink.best_selling(size=TOSS_CANDIDATE_POOL_SIZE)
+    candidates = await _annotate_candidate_categories(candidates)
     affinity = await recommendations.category_affinity(user_id)
     recent_ids = await recommendations.recent_item_ids(user_id)
     ranked_items = recommendations.rank_candidates_ordered(
@@ -300,7 +321,7 @@ def read_tracking_token(token: str) -> tuple[str, str, str, list[int], str | Non
 
 def create_toss_promotion_button(product: dict | None = None, click_url: str | None = None):
     product = product or TOSS_SHOPPING_PROMOTION
-    label = product["button_label"]
+    label = TOSS_MENU_BUTTON_LABEL
     if common.KAKAO_TOSS_PROMOTION_BLOCK_ID:
         return {
             "label": label,
@@ -340,7 +361,7 @@ def create_toss_shopping_response(product: dict | None = None, click_url: str | 
     kakao_response = kakao_json_response.KakaoJsonResponse()
     product = product or TOSS_SHOPPING_PROMOTION
     card_description = (
-        "츠누봇이 토스와 함께 준비한 특가예요 🛍️\n"
+        "츠누봇이 토스와 준비한 특가예요 🛍️\n"
         "• 이 링크를 통해서만 할인 혜택을 받을 수 있어요.\n"
         "• 구매 수수료는 챗봇 서버 운영비로 사용됩니다.\n"
         f"{product['discount_rate']}% 할인 · 최대할인가 {product['price']:,}원"
@@ -357,7 +378,7 @@ def create_toss_shopping_response(product: dict | None = None, click_url: str | 
         "buttons": [
             {
                 "action": "webLink",
-                "label": product["button_label"],
+                "label": product["button_label"].removesuffix(" · 제휴"),
                 "webLinkUrl": click_url or product["url"],
             }
         ],
@@ -387,7 +408,7 @@ def create_toss_shopping_list_response(
                 "buttons": [
                     {
                         "action": "webLink",
-                        "label": product["button_label"],
+                        "label": product["button_label"].removesuffix(" · 제휴"),
                         "webLinkUrl": click_url or product["url"],
                     }
                 ],
@@ -395,7 +416,7 @@ def create_toss_shopping_list_response(
         )
     kakao_response.add_output_to_response(
         kakao_response.create_simple_text(
-            "츠누봇이 토스와 함께 준비한 특가예요 🛍️\n"
+            "츠누봇이 토스와 준비한 특가예요 🛍️\n"
             "• 이 링크를 통해서만 할인 혜택을 받을 수 있어요.\n"
             "• 구매 수수료는 챗봇 서버 운영비로 사용됩니다."
         )
