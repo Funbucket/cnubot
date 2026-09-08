@@ -12,11 +12,11 @@ router = APIRouter()
 async def get_toss_shopping_promotion(req: KakaoRequest | None = Body(default=None)):
     user_id = req.userRequest.user.id if req and req.userRequest.user else None
     try:
-        product_pairs = await promotions.get_live_toss_products(user_id, "quick_reply", limit=5)
+        product_pairs = await promotions.get_live_toss_products(user_id, "quick_reply", limit=6)
     except Exception:
         product_pairs = []
     if not product_pairs:
-        product_pairs = list(promotions.TOSS_SHOPPING_PRODUCTS.items())[:5]
+        product_pairs = list(promotions.TOSS_SHOPPING_PRODUCTS.items())[:6]
     products = [product for _, product in product_pairs]
     click_urls = [
         (

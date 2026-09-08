@@ -141,7 +141,15 @@ def create_menu_response(
         # 점심 첫 번째 메뉴 카드에만 간식 특가 버튼을 노출합니다.
         if meal_time == "lunch" and items:
             items[0]["buttons"].append(
-                promotions.create_toss_promotion_button(promotion_product, promotion_click_url)
+                promotions.create_toss_promotion_button(
+                    promotion_product,
+                    promotion_click_url,
+                    label=(
+                        promotions.TOSS_DORM_MENU_BUTTON_LABEL
+                        if place == "dorm"
+                        else promotions.TOSS_LIVING_MENU_BUTTON_LABEL
+                    ),
+                )
             )
             items[0]["buttonLayout"] = "vertical"
 

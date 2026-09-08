@@ -12,7 +12,10 @@ from app.services import recommendations
 PROMOTION_EXPERIMENT_KEY = "snack_product_comparison_v3"
 DEFAULT_PROMOTION_PRODUCT_KEY = "pepsi_lime"
 TOSS_MENU_BUTTON_LABEL = "🛍️ 토스 제휴 특가"
+TOSS_DORM_MENU_BUTTON_LABEL = "🏠 기숙사생 특가"
+TOSS_LIVING_MENU_BUTTON_LABEL = "🛍️ 기숙사·자취생 특가"
 TOSS_CANDIDATE_POOL_SIZE = 100
+COMMERCE_CARDS_PER_ROW = 3
 
 TOSS_SHOPPING_PRODUCTS = {
     "yellow_cheese_buttering": {
@@ -319,21 +322,15 @@ def read_tracking_token(token: str) -> tuple[str, str, str, list[int], str | Non
         return None
 
 
-def create_toss_promotion_button(product: dict | None = None, click_url: str | None = None):
-    product = product or TOSS_SHOPPING_PROMOTION
-    label = TOSS_MENU_BUTTON_LABEL
-    if common.KAKAO_TOSS_PROMOTION_BLOCK_ID:
-        return {
-            "label": label,
-            "action": "block",
-            "blockId": common.KAKAO_TOSS_PROMOTION_BLOCK_ID,
-            "messageText": "쇼핑 특가",
-            "extra": {"source": "menu_button"},
-        }
+def create_toss_promotion_button(
+    product: dict | None = None,
+    click_url: str | None = None,
+    label: str = TOSS_LIVING_MENU_BUTTON_LABEL,
+):
     return {
         "label": label,
-        "action": "webLink",
-        "webLinkUrl": click_url or product["url"],
+        "action": "message",
+        "messageText": "쇼핑 특가",
     }
 
 
@@ -342,7 +339,7 @@ def get_product(product_key: str | None = None) -> dict:
 
 
 def create_toss_promotion_quick_reply(kakao_response, product: dict | None = None):
-    label = (product or {}).get("button_label", "🛒 기숙사·자취생 특가")
+    label = (product or {}).get("button_label", TOSS_LIVING_MENU_BUTTON_LABEL)
     if common.KAKAO_TOSS_PROMOTION_BLOCK_ID:
         return kakao_response.create_quick_reply(
             label=label,
@@ -421,6 +418,11 @@ def create_toss_shopping_list_response(
             "• 구매 수수료는 챗봇 서버 운영비로 사용됩니다."
         )
     )
-    return kakao_response.add_output_to_response(
-        kakao_response.create_carousel(cards, type="commerceCard")
-    ).get_response()
+    for start in range(0, len(cards), COMMERCE_CARDS_PER_ROW):
+        kakao_response.add_output_to_response(
+            kakao_response.create_carousel(
+                cards[start : start + COMMERCE_CARDS_PER_ROW],
+                type="commerceCard",
+            )
+        )
+    return kakao_response.get_response()
