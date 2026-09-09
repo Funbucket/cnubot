@@ -1,6 +1,7 @@
 import hashlib
 import json
 import math
+import os
 import re
 import secrets
 import uuid
@@ -82,6 +83,7 @@ async def record_event(
     properties: dict[str, Any] | None = None,
     event_id: str | None = None,
     source: str | None = None,
+    request_id: str | None = None,
 ) -> None:
     if not user_id:
         return
@@ -107,6 +109,7 @@ async def record_event(
             user_id,
         )
         event_properties = dict(properties or {})
+        event_id = event_id or str(uuid.uuid4())
         if "product_key" not in event_properties and assignment and assignment["config"]:
             config = assignment["config"]
             if isinstance(config, str):
@@ -115,10 +118,10 @@ async def record_event(
                 event_properties["product_key"] = config["product_key"]
         await conn.execute(
             """
-            INSERT INTO experiment_events
+            INSERT INTO user_events
                 (experiment_id, experiment_key, user_id, variant_key, event_name,
-                 properties, event_id, source)
-            VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)
+                properties, event_id, source, request_id)
+            VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9)
             ON CONFLICT DO NOTHING
             """,
             experiment["id"],
@@ -129,6 +132,7 @@ async def record_event(
             json.dumps(event_properties, ensure_ascii=False),
             event_id,
             source,
+            request_id,
         )
 
 
@@ -139,30 +143,30 @@ async def record_funnel_event(
     product_key: str | None = None,
     taca_item_id: int | None = None,
     properties: dict[str, Any] | None = None,
+    request_id: str | None = None,
 ) -> None:
-    """Record promotion funnel events independently of an active A/B test."""
+    """Compatibility wrapper for recording a non-experiment user event."""
     try:
         pool = get_pool()
     except RuntimeError:
         return
     event_id = str(uuid.uuid4())
-    event_properties = {
-        "schema_version": 1,
-        "event_id": event_id,
-        **(properties or {}),
-    }
+    event_properties = properties or {}
     await pool.execute(
         """
-        INSERT INTO promotion_funnel_events
-            (event_id, schema_version, user_id, event_name, source, product_key, taca_item_id, properties)
-        VALUES ($1, 1, $2, $3, $4, $5, $6, $7::jsonb)
+        INSERT INTO user_events
+            (event_id, schema_version, user_id, event_name, source, surface,
+             product_key, taca_item_id, request_id, properties)
+        VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
         """,
         event_id,
         user_id,
         event_name,
         source,
+        event_properties.get("surface"),
         product_key,
         taca_item_id,
+        request_id,
         json.dumps(event_properties, ensure_ascii=False),
     )
 
@@ -288,7 +292,7 @@ async def get_results(experiment_id: int) -> list[dict[str, Any]]:
             SELECT variant_key, event_name,
                    COUNT(*)::int AS events,
                    COUNT(DISTINCT user_id)::int AS users
-            FROM experiment_events
+            FROM user_events
             WHERE experiment_id = $1
             GROUP BY variant_key, event_name
             ORDER BY variant_key, event_name
@@ -318,7 +322,7 @@ async def get_analysis(experiment_id: int) -> dict[str, Any]:
                        'commerce_card_click'
                    ) AND COALESCE(e.properties->>'product_key', v.config->>'product_key') = v.config->>'product_key') AS clicked_users
             FROM experiment_variants v
-            LEFT JOIN experiment_events e
+            LEFT JOIN user_events e
               ON e.experiment_id = v.experiment_id AND e.variant_key = v.variant_key
             WHERE v.experiment_id = $1
             GROUP BY v.variant_key, v.config->>'product_key' ORDER BY v.variant_key
@@ -343,7 +347,7 @@ async def get_analysis(experiment_id: int) -> dict[str, Any]:
             experiment_id,
         )
         total_events = await conn.fetchval(
-            "SELECT COUNT(*) FROM experiment_events WHERE experiment_id = $1",
+            "SELECT COUNT(*) FROM user_events WHERE experiment_id = $1",
             experiment_id,
         )
         event_breakdown_rows = await conn.fetch(
@@ -351,7 +355,7 @@ async def get_analysis(experiment_id: int) -> dict[str, Any]:
             SELECT event_name, COALESCE(properties->>'product_key', v.config->>'product_key') AS product_key,
                    COUNT(*)::int AS events,
                    COUNT(DISTINCT e.user_id)::int AS users
-            FROM experiment_events e
+            FROM user_events e
             LEFT JOIN experiment_variants v
               ON v.experiment_id = e.experiment_id AND v.variant_key = e.variant_key
             WHERE e.experiment_id = $1
@@ -392,23 +396,23 @@ async def get_promotion_insights(start_date=None, end_date=None) -> dict[str, An
         "promotion_click", "promotion_button_click", "promotion_quick_reply_click",
         "promotion_block_click", "commerce_card_click",
     )
+    excluded_user_ids = [
+        value.strip()
+        for value in os.getenv("ANALYTICS_EXCLUDED_USER_IDS", "").split(",")
+        if value.strip()
+    ]
     async with pool.acquire() as conn:
         product_rows = await conn.fetch(
             """
             WITH normalized AS (
-                SELECT COALESCE(e.properties->>'product_key', v.config->>'product_key', 'unknown') AS product_key,
+                SELECT COALESCE(e.product_key, e.properties->>'product_key', v.config->>'product_key', 'unknown') AS product_key,
                        e.user_id, e.event_name, e.properties, e.source
-                FROM experiment_events e
+                FROM qualified_promotion_events e
                 LEFT JOIN experiment_variants v
                   ON v.experiment_id = e.experiment_id AND v.variant_key = e.variant_key
                 WHERE ($2::date IS NULL OR e.created_at >= $2::date)
                   AND ($3::date IS NULL OR e.created_at < ($3::date + INTERVAL '1 day'))
-                UNION ALL
-                SELECT COALESCE(product_key, 'unknown') AS product_key,
-                       user_id, event_name, properties, source
-                FROM promotion_funnel_events
-                WHERE ($2::date IS NULL OR created_at >= $2::date)
-                  AND ($3::date IS NULL OR created_at < ($3::date + INTERVAL '1 day'))
+                  AND (e.user_id IS NULL OR NOT (e.user_id = ANY($4::text[])))
             )
             SELECT product_key,
                    COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_exposure')::int AS exposed_users,
@@ -424,16 +428,13 @@ async def get_promotion_insights(start_date=None, end_date=None) -> dict[str, An
             GROUP BY product_key
             ORDER BY clicked_users DESC, exposed_users DESC, product_key
             """,
-            list(click_events), start_date, end_date,
+            list(click_events), start_date, end_date, excluded_user_ids,
         )
         surface_rows = await conn.fetch(
             """
             WITH all_events AS (
                 SELECT event_name, user_id, properties, source, created_at
-                FROM experiment_events
-                UNION ALL
-                SELECT event_name, user_id, properties, source, created_at
-                FROM promotion_funnel_events
+                FROM qualified_promotion_events
             )
             SELECT CASE
                        WHEN event_name = 'promotion_entry_click' THEN COALESCE(properties->>'entry_source', source, 'unknown')
@@ -450,19 +451,66 @@ async def get_promotion_insights(start_date=None, end_date=None) -> dict[str, An
               AND event_name IN ('promotion_entry_click', 'promotion_button_click', 'promotion_quick_reply_click', 'commerce_card_click')
               AND ($2::date IS NULL OR created_at >= $2::date)
               AND ($3::date IS NULL OR created_at < ($3::date + INTERVAL '1 day'))
+              AND (user_id IS NULL OR NOT (user_id = ANY($4::text[])))
             GROUP BY 1
             ORDER BY users DESC, surface
             """,
-            list(click_events), start_date, end_date,
+            list(click_events), start_date, end_date, excluded_user_ids,
+        )
+        entry_label_rows = await conn.fetch(
+            """
+            WITH all_events AS (
+                SELECT event_name, user_id, properties, source, created_at
+                FROM qualified_promotion_events
+            )
+            SELECT COALESCE(properties->>'button_label', properties->>'entry_button_label', '') AS label,
+                   COALESCE(properties->>'entry_source', source, 'unknown') AS source,
+                   COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_entry_exposure')::int AS exposed_users,
+                   COUNT(*) FILTER (WHERE event_name = 'promotion_entry_exposure')::int AS exposure_events,
+                   COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_entry_click')::int AS entry_users,
+                   COUNT(*) FILTER (WHERE event_name = 'promotion_entry_click')::int AS entry_events,
+                   COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'commerce_card_click')::int AS card_clicked_users,
+                   COUNT(*) FILTER (WHERE event_name = 'commerce_card_click')::int AS card_click_events
+            FROM all_events
+            WHERE event_name IN ('promotion_entry_exposure', 'promotion_entry_click', 'commerce_card_click')
+              AND NULLIF(COALESCE(properties->>'button_label', properties->>'entry_button_label', ''), '') IS NOT NULL
+              AND ($1::date IS NULL OR created_at >= $1::date)
+              AND ($2::date IS NULL OR created_at < ($2::date + INTERVAL '1 day'))
+              AND (user_id IS NULL OR NOT (user_id = ANY($3::text[])))
+            GROUP BY 1, 2
+            ORDER BY exposed_users DESC, exposure_events DESC, label
+            """,
+            start_date, end_date, excluded_user_ids,
+        )
+        position_rows = await conn.fetch(
+            """
+            WITH all_events AS (
+                SELECT event_name, user_id, properties, created_at
+                FROM qualified_promotion_events
+            )
+            SELECT (properties->>'position')::int AS position,
+                   MAX((properties->>'row')::int)::int AS row,
+                   MAX((properties->>'column')::int)::int AS column,
+                   COUNT(*) FILTER (WHERE event_name = 'promotion_exposure')::int AS exposed_events,
+                   COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_exposure')::int AS exposed_users,
+                   COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'commerce_card_click')::int AS clicked_users,
+                   COUNT(*) FILTER (WHERE event_name = 'commerce_card_click')::int AS click_events
+            FROM all_events
+            WHERE event_name IN ('promotion_exposure', 'commerce_card_click')
+              AND (properties->>'position') ~ '^[0-9]+$'
+              AND ($1::date IS NULL OR created_at >= $1::date)
+              AND ($2::date IS NULL OR created_at < ($2::date + INTERVAL '1 day'))
+              AND (user_id IS NULL OR NOT (user_id = ANY($3::text[])))
+            GROUP BY 1
+            ORDER BY position
+            """,
+            start_date, end_date, excluded_user_ids,
         )
         daily_rows = await conn.fetch(
             """
             WITH all_events AS (
                 SELECT event_name, user_id, created_at
-                FROM experiment_events
-                UNION ALL
-                SELECT event_name, user_id, created_at
-                FROM promotion_funnel_events
+                FROM qualified_promotion_events
             )
             SELECT (created_at AT TIME ZONE 'Asia/Seoul')::date AS day,
                    COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_exposure')::int AS exposed_users,
@@ -471,35 +519,55 @@ async def get_promotion_insights(start_date=None, end_date=None) -> dict[str, An
             FROM all_events
             WHERE ($2::date IS NULL OR created_at >= $2::date)
               AND ($3::date IS NULL OR created_at < ($3::date + INTERVAL '1 day'))
+              AND (user_id IS NULL OR NOT (user_id = ANY($4::text[])))
             GROUP BY day
             ORDER BY day DESC
             LIMIT 30
             """,
-            list(click_events), start_date, end_date,
+            list(click_events), start_date, end_date, excluded_user_ids,
         )
         totals = await conn.fetchrow(
             """
-            WITH all_events AS (
+            WITH filtered_events AS (
                 SELECT event_name, user_id, created_at
-                FROM experiment_events
-                UNION ALL
-                SELECT event_name, user_id, created_at
-                FROM promotion_funnel_events
+                FROM user_events
+                WHERE ($2::date IS NULL OR created_at >= $2::date)
+                  AND ($3::date IS NULL OR created_at < ($3::date + INTERVAL '1 day'))
+                  AND (user_id IS NULL OR NOT (user_id = ANY($4::text[])))
+            ), user_steps AS (
+                SELECT user_id,
+                       MIN(created_at) FILTER (WHERE event_name = 'promotion_entry_exposure') AS entry_exposure_at,
+                       MIN(created_at) FILTER (WHERE event_name = 'promotion_entry_click') AS entry_click_at,
+                       MIN(created_at) FILTER (WHERE event_name = 'promotion_exposure') AS product_exposure_at,
+                       MIN(created_at) FILTER (WHERE event_name = ANY($1::text[])) AS product_click_at
+                FROM filtered_events
+                WHERE user_id IS NOT NULL
+                GROUP BY user_id
             )
-            SELECT COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_exposure')::int AS exposed_users,
-                   COUNT(DISTINCT user_id) FILTER (WHERE event_name = ANY($1::text[]))::int AS clicked_users,
-                   COUNT(*) FILTER (WHERE event_name = 'promotion_exposure')::int AS exposure_events,
-                   COUNT(*) FILTER (WHERE event_name = ANY($1::text[]))::int AS click_events,
-                   COUNT(*)::int AS events
-            FROM all_events
-            WHERE ($2::date IS NULL OR created_at >= $2::date)
-              AND ($3::date IS NULL OR created_at < ($3::date + INTERVAL '1 day'))
+            SELECT COUNT(*) FILTER (WHERE entry_exposure_at IS NOT NULL)::int AS entry_exposed_users,
+                   COUNT(*) FILTER (WHERE entry_exposure_at IS NOT NULL
+                                         AND entry_click_at >= entry_exposure_at)::int AS entry_users,
+                   COUNT(*) FILTER (WHERE entry_exposure_at IS NOT NULL
+                                         AND entry_click_at IS NOT NULL
+                                         AND product_exposure_at >= entry_click_at)::int AS exposed_users,
+                   COUNT(*) FILTER (WHERE entry_exposure_at IS NOT NULL
+                                         AND entry_click_at IS NOT NULL
+                                         AND product_exposure_at IS NOT NULL
+                                         AND product_click_at >= product_exposure_at)::int AS clicked_users,
+                   (SELECT COUNT(*) FROM filtered_events WHERE event_name = 'promotion_entry_exposure')::int AS entry_exposure_events,
+                   (SELECT COUNT(*) FROM filtered_events WHERE event_name = 'promotion_entry_click')::int AS entry_events,
+                   (SELECT COUNT(*) FROM filtered_events WHERE event_name = 'promotion_exposure')::int AS exposure_events,
+                   (SELECT COUNT(*) FROM filtered_events WHERE event_name = ANY($1::text[]))::int AS click_events,
+                   (SELECT COUNT(*) FROM filtered_events)::int AS events
+            FROM user_steps
             """,
-            list(click_events), start_date, end_date,
+            list(click_events), start_date, end_date, excluded_user_ids,
         )
     return {
         "products": [dict(row) for row in product_rows],
         "surfaces": [dict(row) for row in surface_rows],
+        "entry_labels": [dict(row) for row in entry_label_rows],
+        "positions": [dict(row) for row in position_rows],
         "daily": [dict(row) for row in daily_rows],
         "totals": dict(totals),
         "start_date": start_date,
@@ -519,7 +587,7 @@ async def refresh_rollup(experiment_id: int, conn=None) -> None:
                 (experiment_id, rollup_date, variant_key, event_name, users, events)
             SELECT experiment_id, created_at::date, variant_key, event_name,
                    COUNT(DISTINCT user_id)::int, COUNT(*)::int
-            FROM experiment_events
+            FROM user_events
             WHERE experiment_id = $1 AND variant_key IS NOT NULL
             GROUP BY experiment_id, created_at::date, variant_key, event_name
             ON CONFLICT (experiment_id, rollup_date, variant_key, event_name)

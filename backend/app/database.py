@@ -56,6 +56,92 @@ async def init_database() -> None:
                 ended_at TIMESTAMPTZ
             );
 
+            -- The event log is the single source of truth for all user behaviour.
+            -- Experiment and recommendation tables below are dimensions/aggregates,
+            -- not separate event streams.
+            CREATE TABLE IF NOT EXISTS user_events (
+                id BIGSERIAL PRIMARY KEY,
+                event_id TEXT,
+                schema_version INT NOT NULL DEFAULT 1,
+                user_id TEXT,
+                anonymous_id TEXT,
+                request_id TEXT,
+                event_name TEXT NOT NULL,
+                source TEXT,
+                surface TEXT,
+                experiment_id BIGINT REFERENCES experiments(id) ON DELETE SET NULL,
+                experiment_key TEXT,
+                variant_key TEXT,
+                product_key TEXT,
+                taca_item_id BIGINT,
+                properties JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_user_events_event_id
+                ON user_events(event_id) WHERE event_id IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_user_events_user_time
+                ON user_events(user_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_user_events_user_name_time
+                ON user_events(user_id, event_name, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_user_events_name_time
+                ON user_events(event_name, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_user_events_experiment
+                ON user_events(experiment_id, variant_key, event_name, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_user_events_product
+                ON user_events(product_key, event_name, created_at DESC);
+            ALTER TABLE user_events ADD COLUMN IF NOT EXISTS request_id TEXT;
+            CREATE INDEX IF NOT EXISTS idx_user_events_request_time
+                ON user_events(request_id, created_at DESC);
+
+            CREATE OR REPLACE VIEW qualified_promotion_events AS
+            SELECT e.*,
+                   CASE
+                       WHEN e.event_name = 'promotion_entry_exposure' THEN 1
+                       WHEN e.event_name = 'promotion_entry_click'
+                            AND EXISTS (
+                                SELECT 1 FROM user_events p
+                                WHERE p.user_id = e.user_id
+                                  AND p.event_name = 'promotion_entry_exposure'
+                                  AND p.created_at <= e.created_at
+                            ) THEN 2
+                       WHEN e.event_name = 'promotion_exposure'
+                            AND EXISTS (
+                                SELECT 1 FROM user_events c
+                                WHERE c.user_id = e.user_id
+                                  AND c.event_name = 'promotion_entry_click'
+                                  AND c.created_at <= e.created_at
+                                  AND EXISTS (
+                                      SELECT 1 FROM user_events p
+                                      WHERE p.user_id = c.user_id
+                                        AND p.event_name = 'promotion_entry_exposure'
+                                        AND p.created_at <= c.created_at
+                                  )
+                            ) THEN 3
+                       WHEN e.event_name IN ('promotion_click', 'promotion_button_click',
+                                             'promotion_quick_reply_click',
+                                             'promotion_block_click', 'commerce_card_click')
+                            AND EXISTS (
+                                SELECT 1 FROM user_events x
+                                WHERE x.user_id = e.user_id
+                                  AND x.event_name = 'promotion_exposure'
+                                  AND x.created_at <= e.created_at
+                                  AND EXISTS (
+                                      SELECT 1 FROM user_events c
+                                      WHERE c.user_id = x.user_id
+                                        AND c.event_name = 'promotion_entry_click'
+                                        AND c.created_at <= x.created_at
+                                        AND EXISTS (
+                                            SELECT 1 FROM user_events p
+                                            WHERE p.user_id = c.user_id
+                                              AND p.event_name = 'promotion_entry_exposure'
+                                              AND p.created_at <= c.created_at
+                                        )
+                                  )
+                            ) THEN 4
+                   END AS funnel_stage
+            FROM user_events e;
+
             CREATE TABLE IF NOT EXISTS experiment_variants (
                 id BIGSERIAL PRIMARY KEY,
                 experiment_id BIGINT NOT NULL REFERENCES experiments(id)
@@ -77,20 +163,6 @@ async def init_database() -> None:
                 PRIMARY KEY (experiment_id, user_id)
             );
 
-            CREATE TABLE IF NOT EXISTS experiment_events (
-                id BIGSERIAL PRIMARY KEY,
-                event_id TEXT,
-                experiment_id BIGINT REFERENCES experiments(id)
-                    ON DELETE SET NULL,
-                experiment_key TEXT NOT NULL,
-                user_id TEXT NOT NULL,
-                variant_key TEXT,
-                event_name TEXT NOT NULL,
-                properties JSONB NOT NULL DEFAULT '{}'::jsonb,
-                source TEXT,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-
             CREATE TABLE IF NOT EXISTS experiment_daily_rollups (
                 experiment_id BIGINT NOT NULL REFERENCES experiments(id)
                     ON DELETE CASCADE,
@@ -102,8 +174,6 @@ async def init_database() -> None:
                 PRIMARY KEY (experiment_id, rollup_date, variant_key, event_name)
             );
 
-            CREATE INDEX IF NOT EXISTS idx_experiment_events_lookup
-                ON experiment_events(experiment_key, event_name, variant_key);
             CREATE INDEX IF NOT EXISTS idx_experiment_assignments_lookup
                 ON experiment_assignments(experiment_id, variant_key);
 
@@ -121,41 +191,6 @@ async def init_database() -> None:
             ALTER TABLE recommendation_category_affinity
                 ADD COLUMN IF NOT EXISTS last_clicked_at TIMESTAMPTZ;
 
-            CREATE TABLE IF NOT EXISTS recommendation_item_events (
-                id BIGSERIAL PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                surface TEXT NOT NULL,
-                taca_item_id BIGINT NOT NULL,
-                event_type TEXT NOT NULL CHECK (event_type IN ('exposure', 'click')),
-                category_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-            CREATE INDEX IF NOT EXISTS idx_recommendation_item_events_user_time
-                ON recommendation_item_events(user_id, created_at DESC);
-
-            CREATE TABLE IF NOT EXISTS promotion_funnel_events (
-                id BIGSERIAL PRIMARY KEY,
-                event_id TEXT,
-                schema_version INT NOT NULL DEFAULT 1,
-                user_id TEXT,
-                event_name TEXT NOT NULL,
-                source TEXT,
-                product_key TEXT,
-                taca_item_id BIGINT,
-                properties JSONB NOT NULL DEFAULT '{}'::jsonb,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-            CREATE INDEX IF NOT EXISTS idx_promotion_funnel_events_time
-                ON promotion_funnel_events(created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_promotion_funnel_events_user_time
-                ON promotion_funnel_events(user_id, created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_promotion_funnel_events_name_time
-                ON promotion_funnel_events(event_name, created_at DESC);
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_promotion_funnel_events_event_id
-                ON promotion_funnel_events(event_id) WHERE event_id IS NOT NULL;
-            ALTER TABLE promotion_funnel_events ADD COLUMN IF NOT EXISTS event_id TEXT;
-            ALTER TABLE promotion_funnel_events ADD COLUMN IF NOT EXISTS schema_version INT NOT NULL DEFAULT 1;
-
             ALTER TABLE experiments ADD COLUMN IF NOT EXISTS unit TEXT NOT NULL DEFAULT 'user';
             ALTER TABLE experiments ADD COLUMN IF NOT EXISTS alpha DOUBLE PRECISION NOT NULL DEFAULT 0.05;
             ALTER TABLE experiments ADD COLUMN IF NOT EXISTS power DOUBLE PRECISION NOT NULL DEFAULT 0.8;
@@ -164,9 +199,46 @@ async def init_database() -> None:
             ALTER TABLE experiments ADD COLUMN IF NOT EXISTS min_sample_size INT;
             ALTER TABLE experiments ADD COLUMN IF NOT EXISTS analysis_plan JSONB NOT NULL DEFAULT '{}'::jsonb;
             ALTER TABLE experiment_assignments ADD COLUMN IF NOT EXISTS first_exposed_at TIMESTAMPTZ;
-            ALTER TABLE experiment_events ADD COLUMN IF NOT EXISTS event_id TEXT;
-            ALTER TABLE experiment_events ADD COLUMN IF NOT EXISTS source TEXT;
-            CREATE UNIQUE INDEX IF NOT EXISTS uq_experiment_events_event_id
-                ON experiment_events(event_id) WHERE event_id IS NOT NULL;
+
+            -- One-time compatibility migration from the old split event tables.
+            DO $$ BEGIN
+                IF to_regclass('public.experiment_events') IS NOT NULL THEN
+                    INSERT INTO user_events
+                        (event_id, schema_version, user_id, event_name, source,
+                         experiment_id, experiment_key, variant_key, product_key,
+                         properties, created_at)
+                    SELECT event_id, 1, user_id, event_name, source,
+                           experiment_id, experiment_key, variant_key,
+                           properties->>'product_key', properties, created_at
+                    FROM experiment_events
+                    ON CONFLICT DO NOTHING;
+                END IF;
+                IF to_regclass('public.promotion_funnel_events') IS NOT NULL THEN
+                    INSERT INTO user_events
+                        (event_id, schema_version, user_id, event_name, source,
+                         product_key, taca_item_id, properties, created_at)
+                    SELECT event_id, schema_version, user_id, event_name, source,
+                           product_key, taca_item_id, properties, created_at
+                    FROM promotion_funnel_events
+                    ON CONFLICT DO NOTHING;
+                END IF;
+                IF to_regclass('public.recommendation_item_events') IS NOT NULL THEN
+                    INSERT INTO user_events
+                        (user_id, event_name, surface, taca_item_id, properties, created_at)
+                    SELECT user_id,
+                           CASE WHEN event_type = 'exposure' THEN 'recommendation_exposure'
+                                ELSE 'recommendation_click' END,
+                           surface, taca_item_id,
+                           jsonb_build_object('category_ids', category_ids), created_at
+                    FROM recommendation_item_events;
+                END IF;
+            END $$;
+
+            DROP TABLE IF EXISTS experiment_events;
+            DROP TABLE IF EXISTS promotion_funnel_events;
+            DROP TABLE IF EXISTS recommendation_item_events;
+            DROP TABLE IF EXISTS meal_reactions;
+            DROP TABLE IF EXISTS meal_snapshots;
+            DROP TABLE IF EXISTS cafeteria_favorites;
             """
         )

@@ -218,22 +218,26 @@ def _insights_page(data: dict[str, Any]) -> str:
     totals = data["totals"]
     exposed = totals.get("exposed_users") or 0
     clicked = totals.get("clicked_users") or 0
+    entry_exposed_users = totals.get("entry_exposed_users") or 0
+    entry_exposure_events = totals.get("entry_exposure_events") or 0
+    entry_users = totals.get("entry_users") or 0
+    entry_events = totals.get("entry_events") or 0
     exposure_events = totals.get("exposure_events") or 0
     click_events = totals.get("click_events") or 0
     ctr = clicked / exposed * 100 if exposed else 0
-    data_status = "수집 중" if exposure_events or click_events else "데이터 대기 중"
+    entry_ctr = entry_users / entry_exposed_users * 100 if entry_exposed_users else 0
+    exposure_after_entry = exposed / entry_users * 100 if entry_users else 0
+    data_status = "수집 중" if entry_exposure_events or entry_events or exposure_events or click_events else "데이터 대기 중"
     product_rows = "".join(
         f"<tr><td><b style=\"font-size:14px\">{html.escape(row.get('product_name') or _insight_label(row['product_key']))}</b>"
         f"<span style=\"display:block;margin-top:5px;color:#71809b;font-size:11px;line-height:1.45\">"
         f"카테고리 · {html.escape(row.get('category_name') or '미상')}</span>"
         f"<small><code>{html.escape(row['product_key'])}</code></small></td>"
-        f"<td data-label=\"진입 버튼\"><b>{_insight_entry_button_label(row)}</b>"
-        f"<small>{_insight_entry_label(row)}</small></td>"
         f"<td data-label=\"노출\">{row['exposed_users']:,}</td><td data-label=\"클릭\">{row['clicked_users']:,}</td>"
         f"<td data-label=\"CTR\"><b>{(row['clicked_users'] / row['exposed_users'] * 100 if row['exposed_users'] else 0):.2f}%</b></td>"
         f"<td data-label=\"최종 클릭\"><b style=\"color:#147342\">{_insight_surfaces(row.get('click_surfaces'))}</b><small>{row['click_events']:,}건</small></td></tr>"
         for row in data["products"]
-    ) or '<tr><td colspan="6" class="sub">아직 수집된 프로모션 데이터가 없습니다.</td></tr>'
+    ) or '<tr><td colspan="5" class="sub">아직 수집된 프로모션 데이터가 없습니다.</td></tr>'
     surface_labels = {
         "menu_button": "학식 메뉴 버튼",
         "quick_reply": "스케줄 퀵리플라이",
@@ -245,15 +249,31 @@ def _insights_page(data: dict[str, Any]) -> str:
         f"<td data-label=\"사용자\">{row['users']:,}명</td><td data-label=\"이벤트\">{row['events']:,}건</td></tr>"
         for row in data["surfaces"]
     ) or '<tr><td colspan="3" class="sub">아직 클릭 데이터가 없습니다.</td></tr>'
+    message_rows = "".join(
+        f"<tr><td><b>{html.escape(row['label'])}</b><small>{html.escape(_insight_sources(row.get('source')))}</small></td>"
+        f"<td data-label=\"버튼 노출\">{row['exposed_users']:,}명</td>"
+        f"<td data-label=\"버튼 클릭\">{row['entry_users']:,}명</td>"
+        f"<td data-label=\"버튼 CTR\"><b>{(row['entry_users'] / row['exposed_users'] * 100 if row['exposed_users'] else 0):.2f}%</b></td>"
+        f"<td data-label=\"상품 클릭\">{row['card_clicked_users']:,}명</td>"
+        f"<td data-label=\"상품 CTR\"><b>{(row['card_clicked_users'] / row['entry_users'] * 100 if row['entry_users'] else 0):.2f}%</b></td></tr>"
+        for row in data.get("entry_labels", [])
+    ) or '<tr><td colspan="6" class="sub">문구별 버튼 노출 데이터가 아직 없습니다.</td></tr>'
+    position_rows = "".join(
+        f"<div class=\"position-cell\"><b>{row['row']}행 {row['column']}열</b>"
+        f"<strong>{(row['clicked_users'] / row['exposed_users'] * 100 if row['exposed_users'] else 0):.2f}%</strong>"
+        f"<small>노출 사용자 {row['exposed_users']:,}명 · 클릭 사용자 {row['clicked_users']:,}명</small>"
+        f"<small>노출 이벤트 {row['exposed_events']:,}회 · 클릭 이벤트 {row['click_events']:,}건</small></div>"
+        for row in data.get("positions", [])
+    ) or '<div class="sub">위치가 기록된 commerceCard 데이터가 아직 없습니다. 배포 후부터 집계됩니다.</div>'
     daily_rows = "".join(
         f"<tr><td data-label=\"날짜\">{html.escape(str(row['day']))}</td><td data-label=\"노출\">{row['exposed_users']:,}명</td>"
         f"<td data-label=\"클릭 사용자\">{row['clicked_users']:,}명</td><td data-label=\"클릭 이벤트\">{row['click_events']:,}건</td></tr>"
         for row in data["daily"]
     ) or '<tr><td colspan="4" class="sub">아직 일별 데이터가 없습니다.</td></tr>'
     product_sql = """WITH normalized AS (
-  SELECT COALESCE(e.properties->>'product_key', v.config->>'product_key', 'unknown') AS product_key,
+  SELECT COALESCE(e.product_key, e.properties->>'product_key', v.config->>'product_key', 'unknown') AS product_key,
          e.user_id, e.event_name
-  FROM experiment_events e
+  FROM user_events e
   LEFT JOIN experiment_variants v ON v.experiment_id = e.experiment_id
     AND v.variant_key = e.variant_key
 )
@@ -267,34 +287,54 @@ FROM normalized GROUP BY product_key;"""
   WHEN event_name = 'promotion_button_click' THEN 'menu_button'
   ELSE 'promotion_block' END AS surface,
   COUNT(DISTINCT user_id) AS users, COUNT(*) AS events
-FROM experiment_events
+FROM user_events
 WHERE event_name IN ('promotion_button_click', 'promotion_quick_reply_click', 'commerce_card_click')
 GROUP BY 1;"""
     daily_sql = """SELECT (created_at AT TIME ZONE 'Asia/Seoul')::date AS day,
   COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_exposure') AS exposed_users,
   COUNT(DISTINCT user_id) FILTER (WHERE event_name IN ('promotion_click', 'promotion_button_click', 'promotion_quick_reply_click', 'promotion_block_click', 'commerce_card_click')) AS clicked_users
-FROM experiment_events
+FROM user_events
 GROUP BY day ORDER BY day DESC LIMIT 30;"""
+    button_sql = """SELECT
+  COALESCE(properties->>'button_label', properties->>'entry_button_label') AS button_label,
+  COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_entry_exposure') AS exposed_users,
+  COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_entry_click') AS clicked_users,
+  COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'commerce_card_click') AS product_clicked_users
+FROM qualified_promotion_events
+WHERE event_name IN ('promotion_entry_exposure', 'promotion_entry_click', 'commerce_card_click')
+GROUP BY 1 ORDER BY exposed_users DESC;"""
+    position_sql = """SELECT (properties->>'position')::int AS position,
+  COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_exposure') AS exposed_users,
+  COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'commerce_card_click') AS clicked_users
+FROM qualified_promotion_events
+WHERE event_name IN ('promotion_exposure', 'commerce_card_click')
+GROUP BY 1 ORDER BY position;"""
     start_value = html.escape(str(data.get("start_date") or ""))
     end_value = html.escape(str(data.get("end_date") or ""))
-    details = lambda query: '<details><summary>집계 기준 보기</summary><pre>A/B 실험 이벤트와 독립 퍼널 이벤트를 함께 집계합니다.\npromotion_funnel_events · experiment_events\n사용자별 중복 제거 · 기간 필터 적용</pre></details>'
     summary_sql = """SELECT
   COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_exposure') AS exposed_users,
   COUNT(DISTINCT user_id) FILTER (WHERE event_name IN ('promotion_click', 'promotion_button_click', 'promotion_quick_reply_click', 'promotion_block_click', 'commerce_card_click')) AS clicked_users
-FROM experiment_events
+FROM user_events
 WHERE created_at >= :start_date AND created_at < (:end_date + INTERVAL '1 day');"""
+    def details(query: str) -> str:
+        return (
+            '<details><summary>SQL 펼쳐보기</summary>'
+            f'<pre style="white-space:pre;overflow:auto;max-height:360px">{html.escape(query)}</pre></details>'
+        )
     page = f"""<!doctype html>
-<html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CNU 인사이트</title>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CNU 인사이트</title>
 <style>
-*{{box-sizing:border-box}}body{{font-family:Inter,system-ui,sans-serif;margin:0;background:#f5f7fb;color:#172033}}.shell{{max-width:1120px;margin:auto;padding:28px 20px 64px}}header{{display:flex;justify-content:space-between;align-items:end;margin-bottom:24px}}h1{{font-size:30px;margin:4px 0 8px;letter-spacing:-.04em}}h2{{font-size:18px;margin:28px 0 10px}}p{{line-height:1.5}}.sub{{color:#71809b}}.eyebrow{{font-size:11px;color:#71809b;font-family:ui-monospace,monospace}}nav{{display:flex;gap:8px}}nav a{{color:#3767e8;text-decoration:none;font-size:13px;font-weight:700;padding:8px 10px;border-radius:8px}}nav a.active{{background:#3767e8;color:#fff}}.grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}}.metric,.panel{{background:#fff;border:1px solid #e3e8f0;border-radius:14px;box-shadow:0 8px 24px #1720330a}}.metric{{padding:17px}}.metric span{{display:block;color:#71809b;font-size:12px}}.metric b{{display:block;font-size:25px;margin-top:7px;letter-spacing:-.04em}}.metric small{{color:#71809b}}.panel{{padding:18px;overflow:hidden}}.panel-head{{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}}.panel-head h2{{margin:0}}.hint{{font-size:12px;color:#71809b}}.filters{{display:flex;align-items:end;gap:10px;background:#fff;border:1px solid #e3e8f0;border-radius:14px;padding:14px;margin:0 0 18px;box-shadow:0 8px 24px #1720330a}}.filters label{{display:block;color:#71809b;font-size:11px;margin-bottom:5px}}.filters input{{font:inherit;border:1px solid #d4dbe7;border-radius:8px;padding:9px 10px;color:#172033}}.filters button{{border:0;border-radius:8px;padding:10px 13px;background:#3767e8;color:#fff;font-weight:700;cursor:pointer}}.filters a{{font-size:12px;color:#3767e8;padding:10px 4px;text-decoration:none;white-space:nowrap}}.tilde{{color:#71809b;padding-bottom:10px}}table{{width:100%;border-collapse:collapse;font-size:13px}}th,td{{padding:12px 8px;text-align:left;border-bottom:1px solid #edf0f5;white-space:nowrap}}th{{font-size:11px;color:#71809b;font-weight:650}}td small{{display:block;color:#8a94a6;margin-top:3px}}code{{font-size:11px;color:#71809b}}details{{margin-top:14px;border-top:1px solid #edf0f5;padding-top:10px}}summary{{cursor:pointer;color:#3767e8;font-size:12px;font-weight:700}}pre{{white-space:pre-wrap;word-break:break-word;background:#f7f9fc;color:#536078;border-radius:9px;padding:12px;font:11px/1.55 ui-monospace,monospace;margin:10px 0 0}}.two{{display:grid;grid-template-columns:1fr 1fr;gap:14px}}@media(max-width:720px){{.shell{{padding:20px 14px 40px}}header{{display:block}}nav{{margin-top:16px;flex-wrap:wrap}}nav a{{padding:8px 9px}}.filters{{display:grid;grid-template-columns:1fr 20px 1fr;gap:7px;padding:12px}}.filters button,.filters a{{grid-column:1/-1;text-align:center}}.tilde{{align-self:end;text-align:center}}h1{{font-size:26px}}.grid,.two{{grid-template-columns:1fr}}.panel{{padding:12px;overflow:visible}}table,thead,tbody,tr,td{{display:block}}thead{{display:none}}tr{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px;padding:10px 2px;border-bottom:1px solid #edf0f5}}tr:last-child{{border-bottom:0}}td{{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:7px 2px;border:0;white-space:normal;text-align:right}}td::before{{content:attr(data-label);color:#71809b;font-size:11px;text-align:left}}td:first-child{{grid-column:1/-1;display:block;text-align:left;font-size:14px;padding-top:3px}}td:first-child::before{{display:none}}.metric b{{font-size:23px}}}}
-</style><style>.hero{{background:linear-gradient(135deg,#263f9e,#3767e8 65%,#6f8fff);border-radius:20px;padding:24px;margin-bottom:14px;color:#fff;box-shadow:0 14px 34px #0003}}.hero-row{{display:flex;justify-content:space-between;gap:20px;align-items:end}}.hero .sub{{color:#dce5ff;margin:0}}.live{{padding:8px 12px;border-radius:99px;background:#ffffff22;border:1px solid #ffffff44;font-size:12px;font-weight:800;white-space:nowrap}}.live i{{display:inline-block;width:7px;height:7px;background:#7dffb2;border-radius:50%;margin-right:6px}}.funnel{{background:#fff;border:1px solid #e3e8f0;border-radius:14px;padding:18px;margin-top:14px;box-shadow:0 8px 24px #1720330a}}.funnel h2{{margin:0 0 4px}}.funnel-track{{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px}}.funnel-step{{background:#f4f7ff;border-radius:12px;padding:14px}}.funnel-step strong{{display:block;color:#3767e8;font-size:12px}}.funnel-step b{{display:block;font-size:24px;margin-top:4px}}.funnel-step small{{display:block;color:#71809b;margin-top:4px}}@media(max-width:720px){{.hero-row{{display:block}}.live{{display:inline-block;margin-top:16px}}.funnel-track{{grid-template-columns:1fr}}}}</style><body><main class="shell"><header><div><span class="eyebrow">CNU PROMOTION INSIGHTS</span><h1>인사이트 대시보드</h1><p class="sub">추천 상품의 노출부터 클릭까지, 지금 반응을 한눈에 확인합니다.</p></div><nav><a class="active" href="/admin/insights">인사이트</a><a href="/admin/experiments">실험 목록</a><a href="/admin/experiments/new">＋ 새 실험</a></nav></header>
-<form class="filters" method="get" action="/admin/insights"><div><label for="start_date">시작일</label><input id="start_date" name="start_date" type="date" value="{start_value}"></div><span class="tilde">~</span><div><label for="end_date">종료일</label><input id="end_date" name="end_date" type="date" value="{end_value}"></div><button type="submit">기간 적용</button><a href="/admin/insights?all_time=true">전체 기간</a></form>
-<section class="hero"><div class="hero-row"><div><span class="eyebrow">CNU PROMOTION INSIGHTS</span><h1>추천 상품 반응판</h1><p class="sub">A/B 실험과 관계없이 전체 프로모션 퍼널을 집계합니다.</p></div><span class="live"><i></i>{data_status}</span></div></section>
-<section class="grid"><div class="metric"><span>고유 노출 사용자</span><b>{exposed:,}명</b><small>{exposure_events:,}회 노출 기록</small>{details(summary_sql)}</div><div class="metric"><span>고유 클릭 사용자</span><b>{clicked:,}명</b><small>{click_events:,}회 클릭 기록</small>{details(summary_sql)}</div><div class="metric"><span>전체 CTR</span><b>{ctr:.2f}%</b><small>노출 후 클릭 전환율</small>{details(summary_sql)}</div><div class="metric"><span>전체 이벤트</span><b>{totals.get('events') or 0:,}건</b><small>A/B 무관 통합 집계</small>{details(summary_sql)}</div></section>
-<section class="funnel"><h2>실시간 퍼널</h2><span class="hint">고유 사용자 기준 · 중복 노출·클릭은 한 번으로 계산</span><div class="funnel-track"><div class="funnel-step"><strong>01 · 상품 노출</strong><b>{exposed:,}명</b><small>{exposure_events:,}회 기록</small></div><div class="funnel-step"><strong>02 · 클릭</strong><b>{clicked:,}명</b><small>노출 대비 {ctr:.2f}%</small></div><div class="funnel-step"><strong>03 · 다음 행동</strong><b>측정 중</b><small>토스 이동 이후 전환은 제휴 데이터 연동 필요</small></div></div></section>
-<h2>상품별 반응 TOP</h2><section class="panel"><div class="panel-head"><h2>어떤 상품이 반응이 좋은가</h2><span class="hint">상품명 · 진입 버튼 · 최종 클릭</span></div><div class="product-scroll" style="max-height:420px;overflow:auto"><table><thead><tr><th>상품 정보</th><th>진입 버튼</th><th>노출</th><th>클릭</th><th>CTR</th><th>최종 클릭</th></tr></thead><tbody>{product_rows}</tbody></table></div>{details(product_sql)}</section>
-<section class="two"><div><h2>접점별 클릭</h2><section class="panel"><table><thead><tr><th>위치</th><th>사용자</th><th>이벤트</th></tr></thead><tbody>{surface_rows}</tbody></table>{details(surface_sql)}</section></div><div><h2>최근 일별 추이</h2><section class="panel"><table><thead><tr><th>날짜</th><th>노출</th><th>클릭 사용자</th><th>클릭 이벤트</th></tr></thead><tbody>{daily_rows}</tbody></table>{details(daily_sql)}</section></div></section>
+*{{box-sizing:border-box}}body{{margin:0;background:#f6f8fc;color:#14213d;font-family:Inter,system-ui,sans-serif}}.shell{{max-width:1180px;margin:auto;padding:30px 22px 72px}}header{{display:flex;justify-content:space-between;align-items:end;gap:24px;margin-bottom:24px}}h1{{font-size:30px;letter-spacing:-.045em;margin:5px 0 8px}}h2{{font-size:18px;letter-spacing:-.025em;margin:30px 0 10px}}.sub,.hint{{color:#71809b}}.sub{{line-height:1.5;margin:0}}.eyebrow{{font:700 11px ui-monospace,monospace;color:#6680b8;letter-spacing:.08em}}nav{{display:flex;gap:6px;flex-wrap:wrap}}nav a{{padding:9px 11px;border-radius:9px;color:#5270aa;text-decoration:none;font-size:13px;font-weight:700}}nav a.active{{background:#e9efff;color:#315dcc}}.filters,.hero,.card,.funnel{{border:1px solid #e3e9f3;border-radius:18px;background:#fff;box-shadow:0 10px 30px #1b31500b}}.filters{{display:flex;align-items:end;gap:10px;padding:14px;margin-bottom:16px}}.filters label{{display:block;color:#71809b;font-size:11px;margin-bottom:5px}}.filters input{{font:inherit;border:1px solid #d7deea;border-radius:9px;padding:9px 10px;color:#14213d}}.filters button{{border:0;border-radius:9px;padding:10px 15px;background:#315dcc;color:#fff;font-weight:800;cursor:pointer}}.filters a{{padding:10px 4px;color:#315dcc;font-size:12px;text-decoration:none;white-space:nowrap}}.tilde{{color:#9aa6b9;padding-bottom:10px}}.hero{{background:linear-gradient(135deg,#233d91,#315dcc 65%,#6688f2);color:#fff;padding:25px;margin-bottom:16px}}.hero .eyebrow,.hero .sub{{color:#dce6ff}}.hero-row{{display:flex;justify-content:space-between;align-items:end;gap:20px}}.hero h1{{margin-top:7px}}.live{{padding:9px 12px;border:1px solid #ffffff40;border-radius:99px;background:#ffffff1c;font-size:12px;font-weight:800;white-space:nowrap}}.live i{{display:inline-block;width:7px;height:7px;border-radius:50%;background:#7dffb2;margin-right:6px}}.kpis{{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}}.card{{padding:17px}}.kpi-label{{font-size:12px;color:#71809b}}.kpi-value{{font-size:25px;font-weight:850;letter-spacing:-.05em;margin:8px 0 3px}}.kpi-note{{font-size:11px;color:#8b98ac}}.funnel{{padding:19px;margin-top:16px}}.section-head{{display:flex;justify-content:space-between;align-items:end;gap:16px}}.section-head h2{{margin:0}}.funnel-track{{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:16px}}.funnel-step{{position:relative;background:#f3f6ff;border-radius:13px;padding:14px;min-height:118px}}.funnel-step:not(:last-child)::after{{content:'›';position:absolute;right:-8px;top:43px;color:#9aace0;font-size:25px;font-weight:800;z-index:1}}.funnel-step strong{{display:block;color:#315dcc;font-size:11px}}.funnel-step b{{display:block;font-size:25px;letter-spacing:-.05em;margin:8px 0 4px}}.funnel-step small{{display:block;color:#71809b;font-size:11px;line-height:1.45}}.layout{{display:grid;grid-template-columns:1.35fr 1fr;gap:14px}}.panel{{padding:18px;border:1px solid #e3e9f3;border-radius:16px;background:#fff;box-shadow:0 10px 30px #1b31500b;overflow:hidden}}.panel h2{{margin:0}}.panel-head{{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px}}.scroll{{max-height:390px;overflow:auto}}table{{width:100%;border-collapse:collapse;font-size:13px}}th,td{{padding:12px 8px;text-align:left;border-bottom:1px solid #edf0f5;white-space:nowrap}}th{{font-size:11px;color:#71809b;font-weight:750}}td small{{display:block;color:#8a96a8;font-size:11px;margin-top:3px}}code{{font-size:11px;color:#71809b}}.two{{display:grid;grid-template-columns:1fr 1fr;gap:14px}}.position-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}}.position-cell{{background:#f4f7ff;border:1px solid #e1e8ff;border-radius:12px;padding:14px;min-height:108px}}.position-cell b,.position-cell strong,.position-cell small{{display:block}}.position-cell b{{color:#315dcc;font-size:12px}}.position-cell strong{{font-size:22px;margin:8px 0 5px}}.position-cell small{{color:#71809b;font-size:11px;line-height:1.5}}details{{margin-top:12px;border-top:1px solid #edf0f5;padding-top:10px}}summary{{cursor:pointer;color:#315dcc;font-size:12px;font-weight:750}}pre{{white-space:pre-wrap;word-break:break-word;background:#f7f9fc;color:#536078;border-radius:9px;padding:12px;font:11px/1.55 ui-monospace,monospace}}
+@media(max-width:900px){{.kpis{{grid-template-columns:repeat(3,1fr)}}.funnel-track{{grid-template-columns:repeat(3,1fr)}}.funnel-step:not(:last-child)::after{{display:none}}.layout,.two{{grid-template-columns:1fr}}}}
+@media(max-width:620px){{.shell{{padding:20px 14px 48px}}header{{display:block}}nav{{margin-top:16px}}h1{{font-size:26px}}.filters{{display:grid;grid-template-columns:1fr 20px 1fr}}.filters button,.filters a{{grid-column:1/-1;text-align:center}}.kpis,.funnel-track{{grid-template-columns:1fr}}.hero-row,.section-head{{display:block}}.live{{display:inline-block;margin-top:18px}}.funnel-step{{min-height:auto}}table,thead,tbody,tr,td{{display:block}}thead{{display:none}}tr{{padding:9px 0;border-bottom:1px solid #edf0f5}}td{{display:flex;justify-content:space-between;gap:14px;padding:7px 2px;border:0;white-space:normal;text-align:right}}td::before{{content:attr(data-label);color:#71809b;text-align:left}}td:first-child{{display:block;text-align:left;font-size:14px;padding-top:5px}}td:first-child::before{{display:none}}}}
+</style></head><body><main class="shell"><header><div><span class="eyebrow">CNU / PROMOTION INTELLIGENCE</span><h1>프로모션 인사이트</h1><p class="sub">사용자가 버튼을 본 순간부터 상품을 클릭하기까지의 흐름을 확인합니다.</p></div><nav><a class="active" href="/admin/insights">인사이트</a><a href="/admin/experiments">실험 목록</a><a href="/admin/experiments/new">＋ 새 실험</a></nav></header>
+<form class="filters" method="get" action="/admin/insights"><div><label for="start_date">시작일</label><input id="start_date" name="start_date" type="date" value="{start_value}"></div><span class="tilde">~</span><div><label for="end_date">종료일</label><input id="end_date" name="end_date" type="date" value="{end_value}"></div><button type="submit">기간 적용</button><a href="/admin/insights?all_time=true">전체 기간 보기</a></form>
+<section class="hero"><div class="hero-row"><div><span class="eyebrow">DECISION DASHBOARD</span><h1>어디서 사용자가 이탈하는가?</h1><p class="sub">순차 코호트 기준 · 관리자 및 테스트 사용자 제외 · {start_value or '전체'} ~ {end_value or '현재'}</p></div><span class="live"><i></i>{data_status}</span></div></section>
+<section class="kpis"><div class="card"><span class="kpi-label">버튼 노출 사용자</span><div class="kpi-value">{entry_exposed_users:,}명</div><span class="kpi-note">{entry_exposure_events:,}회 노출</span></div><div class="card"><span class="kpi-label">버튼 CTR</span><div class="kpi-value">{entry_ctr:.2f}%</div><span class="kpi-note">노출 → 버튼 클릭</span></div><div class="card"><span class="kpi-label">상품 도달 사용자</span><div class="kpi-value">{exposed:,}명</div><span class="kpi-note">진입 후 상품 노출</span></div><div class="card"><span class="kpi-label">상품 클릭 사용자</span><div class="kpi-value">{clicked:,}명</div><span class="kpi-note">{click_events:,}회 클릭</span></div><div class="card"><span class="kpi-label">상품 CTR</span><div class="kpi-value">{ctr:.2f}%</div><span class="kpi-note">상품 노출 → 클릭</span></div></section>
+<section class="funnel"><div class="section-head"><h2>사용자 퍼널</h2><span class="hint">각 단계는 이전 단계를 통과한 사용자 기준</span></div><div class="funnel-track"><div class="funnel-step"><strong>01 · 버튼 노출</strong><b>{entry_exposed_users:,}</b><small>{entry_exposure_events:,}회 · 진입점에 버튼이 표시됨</small></div><div class="funnel-step"><strong>02 · 버튼 클릭</strong><b>{entry_users:,}</b><small>{entry_ctr:.2f}% 전환 · {entry_events:,}회</small></div><div class="funnel-step"><strong>03 · 상품 노출</strong><b>{exposed:,}</b><small>{exposure_after_entry:.2f}% 도달 · {exposure_events:,}회</small></div><div class="funnel-step"><strong>04 · 상품 클릭</strong><b>{clicked:,}</b><small>{ctr:.2f}% 전환 · {click_events:,}회</small></div><div class="funnel-step"><strong>05 · 외부 전환</strong><b>측정 중</b><small>토스 제휴 데이터 연동 필요</small></div></div>{details(summary_sql)}</section>
+<h2>무엇이 성과를 만들었나</h2><section class="layout"><section class="panel"><div class="panel-head"><h2>상품별 성과</h2><span class="hint">노출·클릭·CTR</span></div><div class="scroll"><table><thead><tr><th>상품</th><th>노출</th><th>클릭</th><th>CTR</th><th>주요 접점</th></tr></thead><tbody>{product_rows}</tbody></table></div>{details(product_sql)}</section><section class="panel"><div class="panel-head"><h2>버튼 문구 성과</h2><span class="hint">버튼 노출 → 버튼 클릭 → 상품 클릭</span></div><div class="scroll"><table><thead><tr><th>문구</th><th>버튼 노출</th><th>버튼 클릭</th><th>버튼 CTR</th><th>상품 클릭</th><th>상품 CTR</th></tr></thead><tbody>{message_rows}</tbody></table></div>{details(button_sql)}</section></section>
+<section class="panel"><div class="panel-head"><h2>최근 추이</h2><span class="hint">KST · 최근 30일</span></div><div class="scroll"><table><thead><tr><th>날짜</th><th>노출</th><th>클릭 사용자</th><th>클릭 이벤트</th></tr></thead><tbody>{daily_rows}</tbody></table></div>{details(daily_sql)}</section>
+<h2>상품 카드 위치 효과</h2><section class="panel"><div class="panel-head"><h2>어느 위치가 강한가?</h2><span class="hint">commerceCard 순서별 클릭률</span></div><div class="position-grid">{position_rows}</div>{details(position_sql)}</section>
 </main></body></html>"""
     return page
 

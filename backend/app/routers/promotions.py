@@ -2,11 +2,14 @@ from app.services import promotions
 from app.services import recommendations
 from app.services import experiments
 from app.schemas.kakao_request import KakaoRequest
+import logging
+import uuid
 from fastapi import APIRouter, Body
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi import Query
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/toss-shopping")
@@ -14,6 +17,7 @@ async def get_toss_shopping_promotion(req: KakaoRequest | None = Body(default=No
     user_id = req.userRequest.user.id if req and req.userRequest.user else None
     entry = _promotion_entry_metadata(req)
     source = entry["source"]
+    request_id = str(uuid.uuid4())
     try:
         await experiments.record_funnel_event(
             user_id,
@@ -25,44 +29,41 @@ async def get_toss_shopping_promotion(req: KakaoRequest | None = Body(default=No
                 "entry_button_id": entry["button_id"],
                 "entry_button_label": entry["button_label"],
             },
+            request_id=request_id,
         )
     except Exception:
-        pass
+        logger.exception("failed to record promotion entry click")
     try:
-        product_pairs = await promotions.get_live_toss_products(user_id, source, limit=6)
+        product_pairs = await promotions.get_live_toss_products(
+            user_id, source, limit=6, request_id=request_id
+        )
     except Exception:
+        logger.exception("failed to load live promotion products")
         product_pairs = []
     if not product_pairs:
         product_pairs = list(promotions.TOSS_SHOPPING_PRODUCTS.items())[:6]
+        for product_key, product in product_pairs:
+            try:
+                await recommendations.record_exposure(
+                    user_id,
+                    source,
+                    int(product["taca_item_id"]) if product.get("taca_item_id") else 0,
+                    product.get("category_ids") or [],
+                    product_key=product_key,
+                    properties={"product_name": product.get("title")},
+                    request_id=request_id,
+                )
+            except Exception:
+                logger.exception("failed to record fallback product exposure")
     products = [product for _, product in product_pairs]
-    for product_key, product in product_pairs:
-        try:
-            await experiments.record_funnel_event(
-                user_id,
-                "promotion_exposure",
-                source=source,
-                product_key=product_key,
-                taca_item_id=product.get("taca_item_id"),
-                properties={
-                    "surface": "commerce_card",
-                    "entry_source": source,
-                    "entry_button_id": entry["button_id"],
-                    "entry_button_label": entry["button_label"],
-                    "product_name": product.get("title"),
-                    "category_name": ", ".join(product.get("category_names") or []),
-                    "candidate_sources": product.get("candidate_sources") or [],
-                },
-            )
-        except Exception:
-            pass
     click_urls = [
         (
             f"{promotions.common.SERVER_URL}/promotions/toss-shopping/click?token="
-            f"{promotions.create_tracking_token(user_id, product_key, source, product.get('category_ids'), product.get('url'), product.get('taca_item_id'), 'commerce_card', entry['button_id'], entry['button_label'])}"
+            f"{promotions.create_tracking_token(user_id, product_key, source, product.get('category_ids'), product.get('url'), product.get('taca_item_id'), 'commerce_card', entry['button_id'], entry['button_label'], position, request_id)}"
             if user_id
             else None
         )
-        for product_key, product in product_pairs
+        for position, (product_key, product) in enumerate(product_pairs, 1)
     ]
     return JSONResponse(promotions.create_toss_shopping_list_response(products, click_urls))
 
@@ -92,8 +93,13 @@ async def track_toss_shopping_click(token: str = Query(..., min_length=20)):
     decoded = promotions.read_tracking_token(token)
     if not decoded:
         return JSONResponse({"detail": "유효하지 않거나 만료된 링크입니다."}, status_code=400)
-    user_id, product_key, _source, category_ids, target_url, taca_item_id, surface, button_id, button_label = decoded
-    await recommendations.record_category_click(user_id, category_ids, taca_item_id, surface)
+    user_id, product_key, _source, category_ids, target_url, taca_item_id, surface, button_id, button_label, position, request_id = decoded
+    try:
+        await recommendations.record_category_click(
+            user_id, category_ids, taca_item_id, surface, request_id
+        )
+    except Exception:
+        logger.exception("failed to record recommendation click")
     try:
         product = promotions.get_product(product_key)
         await experiments.record_funnel_event(
@@ -110,10 +116,15 @@ async def track_toss_shopping_click(token: str = Query(..., min_length=20)):
                 "product_name": product.get("title"),
                 "category_name": ", ".join(product.get("category_names") or []),
                 "candidate_sources": product.get("candidate_sources") or [],
+                "position": position,
+                "card_position": position,
+                "row": (position - 1) // promotions.COMMERCE_CARDS_PER_ROW + 1 if position else None,
+                "column": (position - 1) % promotions.COMMERCE_CARDS_PER_ROW + 1 if position else None,
             },
+            request_id=request_id,
         )
     except Exception:
-        pass
+        logger.exception("failed to record commerce card click")
     # 302 is handled more consistently than 307 by Kakao's in-app browser
     # when redirecting from our tracking endpoint to an external Toss URL.
     return RedirectResponse(target_url or promotions.get_product(product_key)["url"], status_code=302)

@@ -5,6 +5,8 @@ import hmac
 import json
 import os
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from app.utils import common, kakao_json_response
 from app.services import toss_sharelink
@@ -15,8 +17,44 @@ DEFAULT_PROMOTION_PRODUCT_KEY = "pepsi_lime"
 TOSS_MENU_BUTTON_LABEL = "🛍️ 토스 제휴 특가"
 TOSS_DORM_MENU_BUTTON_LABEL = "🏠 기숙사생 특가"
 TOSS_LIVING_MENU_BUTTON_LABEL = "🛍️ 기숙사·자취생 특가"
+QUICK_REPLY_LABELS = (
+    "🔥최대93%할인",
+    "🎓대학생최대93%",
+    "🏠기숙사생특가",
+    "🛍️자취생추천특가",
+    "💸9900원부터특가",
+    "⚡오늘의TOP3특가",
+    "🎁학생인기상품",
+    "🚚무료배송특가",
+    "💰1만원이하추천",
+    "⏰오늘만이가격",
+    "🔥오늘의초특가",
+    "👑역대급특가",
+)
+MENU_BUTTON_LABELS = (
+    "🔥93%초특가",
+    "🎓대학생특가",
+    "🏠기숙사특가",
+    "🛍️자취생특가",
+    "💸9900원부터",
+    "⚡오늘의TOP3",
+    "🎁인기상품",
+    "🚚무료배송",
+    "💰1만원이하",
+    "⏰오늘만이가격",
+    "🔥오늘의초특가",
+    "👑역대급특가",
+)
 TOSS_CANDIDATE_POOL_SIZE = 100
 COMMERCE_CARDS_PER_ROW = 3
+KST = ZoneInfo("Asia/Seoul")
+
+
+def _rotating_label(labels: tuple[str, ...]) -> str:
+    """Keep one label stable for a 2-hour KST slot, then rotate sequentially."""
+    now = datetime.now(KST)
+    slot_number = now.date().toordinal() * 12 + now.hour // 2
+    return labels[slot_number % len(labels)]
 
 TOSS_SHOPPING_PRODUCTS = {
     "yellow_cheese_buttering": {
@@ -218,6 +256,7 @@ async def get_live_toss_product(
     user_id: str | None = None,
     surface: str = "default",
     preferred_item_id: int | None = None,
+    request_id: str | None = None,
 ) -> tuple[str, dict]:
     candidates = await _candidate_pool()
     affinity = await recommendations.category_affinity(user_id)
@@ -267,6 +306,9 @@ async def get_live_toss_product(
         surface,
         item_id,
         TOSS_SHOPPING_PRODUCTS[product_key]["category_ids"],
+        product_key=product_key,
+        properties={"product_name": TOSS_SHOPPING_PRODUCTS[product_key]["title"]},
+        request_id=request_id,
     )
     return product_key, TOSS_SHOPPING_PRODUCTS[product_key]
 
@@ -275,6 +317,7 @@ async def get_live_toss_products(
     user_id: str | None = None,
     surface: str = "quick_reply",
     limit: int = 5,
+    request_id: str | None = None,
 ) -> list[tuple[str, dict]]:
     candidates = await _candidate_pool()
     affinity = await recommendations.category_affinity(user_id)
@@ -317,7 +360,20 @@ async def get_live_toss_products(
                 "candidate_sources": item.get("_candidate_sources", []),
             }
             product = TOSS_SHOPPING_PRODUCTS[product_key]
-            await recommendations.record_exposure(user_id, surface, item_id, category_ids)
+            await recommendations.record_exposure(
+                user_id,
+                surface,
+                item_id,
+                category_ids,
+                product_key=product_key,
+                properties={
+                    "product_name": product["title"],
+                    "position": len(products) + 1,
+                    "row": len(products) // 3 + 1,
+                    "column": len(products) % 3 + 1,
+                },
+                request_id=request_id,
+            )
             products.append((product_key, product))
         except (KeyError, TypeError, ValueError, toss_sharelink.TossSharelinkError):
             continue
@@ -340,6 +396,8 @@ def create_tracking_token(
     surface: str = "unknown",
     button_id: str = "unknown",
     button_label: str = "unknown",
+    position: int | None = None,
+    request_id: str | None = None,
 ) -> str:
     payload = base64.urlsafe_b64encode(
         json.dumps(
@@ -353,6 +411,8 @@ def create_tracking_token(
                 "v": surface,
                 "b": button_id,
                 "n": button_label,
+                "o": position,
+                "r": request_id,
                 "e": int(time.time()) + 86400,
             }
         ).encode()
@@ -361,7 +421,7 @@ def create_tracking_token(
     return f"{payload}.{signature}"
 
 
-def read_tracking_token(token: str) -> tuple[str, str, str, list[int], str | None, int | None, str, str, str] | None:
+def read_tracking_token(token: str) -> tuple[str, str, str, list[int], str | None, int | None, str, str, str, int | None, str | None] | None:
     try:
         payload, signature = token.split(".", 1)
         expected = hmac.new(_tracking_secret(), payload.encode(), hashlib.sha256).hexdigest()
@@ -382,6 +442,8 @@ def read_tracking_token(token: str) -> tuple[str, str, str, list[int], str | Non
             data.get("v", "unknown"),
             data.get("b", "unknown"),
             data.get("n", "unknown"),
+            int(data["o"]) if data.get("o") is not None else None,
+            data.get("r"),
         )
     except (ValueError, KeyError, TypeError, json.JSONDecodeError):
         return None
@@ -392,6 +454,7 @@ def create_toss_promotion_button(
     click_url: str | None = None,
     label: str = TOSS_LIVING_MENU_BUTTON_LABEL,
 ):
+    label = _rotating_label(MENU_BUTTON_LABELS)
     return {
         "label": label,
         "action": "message",
@@ -409,7 +472,7 @@ def get_product(product_key: str | None = None) -> dict:
 
 
 def create_toss_promotion_quick_reply(kakao_response, product: dict | None = None):
-    label = (product or {}).get("button_label", TOSS_LIVING_MENU_BUTTON_LABEL)
+    label = _rotating_label(QUICK_REPLY_LABELS)
     if common.KAKAO_TOSS_PROMOTION_BLOCK_ID:
         return kakao_response.create_quick_reply(
             label=label,

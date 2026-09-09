@@ -1,5 +1,6 @@
 import hashlib
 import json
+import uuid
 from datetime import datetime, timezone
 from collections.abc import Sequence
 from datetime import date
@@ -60,9 +61,9 @@ async def recent_item_ids(user_id: str | None, hours: int = 24) -> dict[int, obj
     rows = await pool.fetch(
         """
         SELECT taca_item_id, MAX(created_at) AS last_exposed_at
-        FROM recommendation_item_events
+        FROM user_events
         WHERE user_id = $1
-          AND event_type = 'exposure'
+          AND event_name = 'promotion_exposure'
           AND created_at >= NOW() - ($2 * INTERVAL '1 hour')
         GROUP BY taca_item_id
         """,
@@ -82,10 +83,10 @@ async def latest_item_id(user_id: str | None, surface: str) -> int | None:
     row = await pool.fetchrow(
         """
         SELECT taca_item_id
-        FROM recommendation_item_events
+        FROM user_events
         WHERE user_id = $1
           AND surface = $2
-          AND event_type = 'exposure'
+          AND event_name = 'promotion_exposure'
           AND created_at >= NOW() - INTERVAL '24 hours'
         ORDER BY created_at DESC
         LIMIT 1
@@ -101,6 +102,9 @@ async def record_exposure(
     surface: str,
     taca_item_id: int,
     category_ids: Sequence[int],
+    product_key: str | None = None,
+    properties: dict | None = None,
+    request_id: str | None = None,
 ) -> None:
     if not user_id:
         return
@@ -110,14 +114,14 @@ async def record_exposure(
         return
     await pool.execute(
         """
-        INSERT INTO recommendation_item_events
-            (user_id, surface, taca_item_id, event_type, category_ids)
-        VALUES ($1, $2, $3, 'exposure', $4::jsonb)
+        INSERT INTO user_events
+            (event_id, user_id, surface, taca_item_id, event_name,
+             product_key, request_id, properties)
+        VALUES ($1, $2, $3, $4, 'promotion_exposure', $5, $6, $7::jsonb)
         """,
-        user_id,
-        surface,
-        taca_item_id,
-        json.dumps(list(category_ids)),
+        str(uuid.uuid4()),
+        user_id, surface, taca_item_id, product_key, request_id,
+        json.dumps({"category_ids": list(category_ids), **(properties or {})}),
     )
 
 
@@ -126,8 +130,9 @@ async def record_category_click(
     category_ids: Sequence[int],
     taca_item_id: int | None = None,
     surface: str = "unknown",
+    request_id: str | None = None,
 ) -> None:
-    if not user_id or not category_ids:
+    if not user_id:
         return
     try:
         pool = get_pool()
@@ -137,15 +142,16 @@ async def record_category_click(
         if taca_item_id:
             await conn.execute(
                 """
-                INSERT INTO recommendation_item_events
-                    (user_id, surface, taca_item_id, event_type, category_ids)
-                VALUES ($1, $2, $3, 'click', $4::jsonb)
+                INSERT INTO user_events
+                    (event_id, user_id, surface, taca_item_id, event_name, request_id, properties)
+                VALUES ($1, $2, $3, $4, 'recommendation_click', $5, $6::jsonb)
                 """,
-                user_id,
-                surface,
-                taca_item_id,
-                json.dumps(list(category_ids)),
+                str(uuid.uuid4()),
+                user_id, surface, taca_item_id, request_id,
+                json.dumps({"category_ids": list(category_ids)}),
             )
+        if not category_ids:
+            return
         for category_id in set(int(value) for value in category_ids):
             await conn.execute(
                 """

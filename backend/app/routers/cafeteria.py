@@ -1,13 +1,16 @@
 import os
+import logging
+import uuid
 
 from app.schemas.kakao_request import KakaoRequest
-from app.services import cafeteria, promotions
+from app.services import cafeteria, experiments, promotions
 from app.utils import common, kakao_json_response
 from fastapi import APIRouter, Body, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/schedule")
@@ -15,6 +18,7 @@ async def get_schedule(req: KakaoRequest | None = Body(default=None)):
     """
     return: 식당 시간표 (static meal_schedule.json + 동적 운영 날짜 추가)
     """
+    user_id = req.userRequest.user.id if req and req.userRequest.user else None
     utterance = req.userRequest.utterance.strip() if req else ""
     if _is_dorm_crowding_utterance(utterance):
         return await get_dorm_crowding()
@@ -28,6 +32,7 @@ async def get_schedule(req: KakaoRequest | None = Body(default=None)):
                 cafeteria_data["date"] = operating_date
 
     response = cafeteria.create_schedule_response(schedule_data)
+    await _record_promotion_button_exposures(user_id, response)
     return JSONResponse(response)
 
 
@@ -57,6 +62,7 @@ async def get_today_menu(req: KakaoRequest):
         menu_data,
         place,
     )
+    await _record_promotion_button_exposures(req.userRequest.user.id, response)
     return JSONResponse(response)
 
 
@@ -104,6 +110,7 @@ async def get_menu_by_day(req: KakaoRequest):
         menu_data,
         place,
     )
+    await _record_promotion_button_exposures(req.userRequest.user.id, response)
     return JSONResponse(response)
 
 
@@ -122,3 +129,39 @@ async def get_image(image_name: str):
 def _is_dorm_crowding_utterance(utterance: str) -> bool:
     normalized = utterance.replace(" ", "")
     return "기숙사" in normalized and "혼잡도" in normalized
+
+
+async def _record_promotion_button_exposures(user_id: str | None, response: dict) -> None:
+    """Record promotion buttons that were included in the response sent to a user."""
+    seen: set[tuple[str, str]] = set()
+    request_id = str(uuid.uuid4())
+
+    def walk(value):
+        if isinstance(value, dict):
+            extra = value.get("extra")
+            if isinstance(extra, dict) and extra.get("source") in {"quick_reply", "menu_button"}:
+                key = (extra.get("source", "unknown"), extra.get("button_id", "unknown"))
+                if key not in seen:
+                    seen.add(key)
+                    yield extra
+            for child in value.values():
+                yield from walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                yield from walk(child)
+
+    for extra in walk(response):
+        try:
+            await experiments.record_funnel_event(
+                user_id,
+                "promotion_entry_exposure",
+                source=extra.get("source"),
+                properties={
+                    "surface": extra.get("source"),
+                    "button_id": extra.get("button_id"),
+                    "button_label": extra.get("button_label"),
+                },
+                request_id=request_id,
+            )
+        except Exception:
+            logger.exception("failed to record promotion button exposure")
