@@ -1,7 +1,7 @@
 import os
 
 from app.schemas.kakao_request import KakaoRequest
-from app.services import cafeteria, experiments, promotions
+from app.services import cafeteria, promotions
 from app.utils import common, kakao_json_response
 from fastapi import APIRouter, Body, HTTPException
 from fastapi.concurrency import run_in_threadpool
@@ -52,26 +52,10 @@ async def get_today_menu(req: KakaoRequest):
     if not menu_data:
         raise HTTPException(status_code=404, detail="해당 요일에 메뉴가 없습니다.")
 
-    user_id = _get_user_id(req)
-    product_key, promotion_product = await _personalized_product(user_id, "menu_card")
-    await _record_menu_promotion_exposure(
-        user_id,
-        product_key,
-        promotion_product,
-        promotions.TOSS_DORM_MENU_BUTTON_LABEL if common.get_eng_place(place) == "dorm" else promotions.TOSS_LIVING_MENU_BUTTON_LABEL,
-    )
-    click_url = (
-        f"{common.SERVER_URL}/promotions/toss-shopping/click?token="
-        f"{promotions.create_tracking_token(user_id, product_key, source='menu_button', category_ids=promotion_product.get('category_ids'), target_url=promotion_product.get('url'), taca_item_id=promotion_product.get('taca_item_id'), surface='commerce_card', button_id='toss_promotion_menu_button', button_label=(promotions.TOSS_DORM_MENU_BUTTON_LABEL if common.get_eng_place(place) == 'dorm' else promotions.TOSS_LIVING_MENU_BUTTON_LABEL))}"
-        if user_id and product_key
-        else None
-    )
     response = cafeteria.create_menu_response(
         kor_day,
         menu_data,
         place,
-        promotion_product=promotion_product,
-        promotion_click_url=click_url,
     )
     return JSONResponse(response)
 
@@ -115,26 +99,10 @@ async def get_menu_by_day(req: KakaoRequest):
 
         return kakao_response.get_response()
 
-    user_id = _get_user_id(req)
-    product_key, promotion_product = await _personalized_product(user_id, "menu_card")
-    await _record_menu_promotion_exposure(
-        user_id,
-        product_key,
-        promotion_product,
-        promotions.TOSS_DORM_MENU_BUTTON_LABEL if common.get_eng_place(place) == "dorm" else promotions.TOSS_LIVING_MENU_BUTTON_LABEL,
-    )
-    click_url = (
-        f"{common.SERVER_URL}/promotions/toss-shopping/click?token="
-        f"{promotions.create_tracking_token(user_id, product_key, source='menu_button', category_ids=promotion_product.get('category_ids'), target_url=promotion_product.get('url'), taca_item_id=promotion_product.get('taca_item_id'), surface='commerce_card', button_id='toss_promotion_menu_button', button_label=(promotions.TOSS_DORM_MENU_BUTTON_LABEL if common.get_eng_place(place) == 'dorm' else promotions.TOSS_LIVING_MENU_BUTTON_LABEL))}"
-        if user_id and product_key
-        else None
-    )
     response = cafeteria.create_menu_response(
         kor_day,
         menu_data,
         place,
-        promotion_product=promotion_product,
-        promotion_click_url=click_url,
     )
     return JSONResponse(response)
 
@@ -149,47 +117,6 @@ async def get_image(image_name: str):
     if os.path.exists(file_path):
         return FileResponse(file_path)
     raise HTTPException(status_code=404, detail="이미지를 찾을 수 없습니다.")
-
-
-def _get_user_id(req: KakaoRequest | None) -> str | None:
-    if not req or not req.userRequest.user:
-        return None
-    return req.userRequest.user.id
-
-
-async def _record_menu_promotion_exposure(
-    user_id: str | None,
-    product_key: str,
-    product: dict,
-    button_label: str,
-) -> None:
-    try:
-        await experiments.record_funnel_event(
-            user_id,
-            "promotion_exposure",
-            source="menu_button",
-            product_key=product_key,
-            taca_item_id=product.get("taca_item_id"),
-            properties={
-                "surface": "commerce_card",
-                "entry_source": "menu_button",
-                "entry_button_id": "toss_promotion_menu_button",
-                "entry_button_label": button_label,
-                "product_name": product.get("title"),
-                "category_name": ", ".join(product.get("category_names") or []),
-                "candidate_sources": product.get("candidate_sources") or [],
-            },
-        )
-    except Exception:
-        pass
-
-
-async def _personalized_product(user_id: str | None, surface: str) -> tuple[str, dict]:
-    try:
-        return await promotions.get_live_toss_product(user_id, surface)
-    except Exception:
-        key = promotions.DEFAULT_PROMOTION_PRODUCT_KEY
-        return key, promotions.get_product(key)
 
 
 def _is_dorm_crowding_utterance(utterance: str) -> bool:
