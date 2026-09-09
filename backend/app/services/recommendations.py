@@ -19,14 +19,15 @@ _STUDENT_POSITIVE_KEYWORDS = (
     "간편", "자취", "기숙사", "소형", "미니", "휴대", "일회용", "정리", "세탁",
     "텀블러", "도시락", "수건", "침구", "옷걸이", "이어폰", "키보드", "마우스",
 )
-_STUDENT_LOW_FIT_KEYWORDS = (
-    "가구", "소파", "침대", "대형", "자동차", "골프", "유아", "출산", "산업용",
-    "곤충", "사육", "홈세트", "도자기",
+_STUDENT_LOW_FIT_CATEGORIES = (
+    "가구/홈데코", "반려/애완용품", "유아동", "자동차", "스포츠/레저", "산업용품",
+    "교자상/다용도상", "식탁/테이블", "거실테이블", "침대", "매트리스",
+    "곤충/생물학", "생물실험세트", "홈세트/식기세트",
 )
-_STUDENT_EXCLUDED_KEYWORDS = (
-    "곤충", "사육", "교자상", "식탁", "테이블", "가구", "소파", "침대",
-    "장롱", "매트리스", "대형", "산업용", "자동차", "골프", "유아", "출산",
-    "도자기", "홈세트", "남원",
+_STUDENT_EXCLUDED_CATEGORIES = (
+    "가구/홈데코", "반려/애완용품", "유아동", "자동차", "산업용품",
+    "교자상/다용도상", "식탁/테이블", "거실테이블", "침대", "매트리스",
+    "곤충/생물학", "생물실험세트", "홈세트/식기세트",
 )
 
 
@@ -175,6 +176,7 @@ def _category_group(item: dict) -> str | None:
 
 
 def _student_fit_score(item: dict) -> float:
+    categories = " ".join(str(value) for value in item.get("_category_names", []))
     text = " ".join(
         [str(item.get("displayName", ""))]
         + [str(value) for value in item.get("_category_names", [])]
@@ -184,21 +186,19 @@ def _student_fit_score(item: dict) -> float:
         sum(keyword in text for keyword in _STUDENT_POSITIVE_KEYWORDS) * 0.5,
         2.0,
     )
-    score -= min(
-        sum(keyword in text for keyword in _STUDENT_LOW_FIT_KEYWORDS),
-        3.0,
-    )
+    score -= min(sum(category in categories for category in _STUDENT_LOW_FIT_CATEGORIES) * 1.5, 4.0)
     score += min(float(item.get("discountRate") or 0), 50.0) / 25.0
     score += min(float(item.get("reviewScore") or 0), 5.0) / 5.0
     return score
 
 
 def _is_student_excluded(item: dict) -> bool:
-    text = " ".join(
-        [str(item.get("displayName", ""))]
-        + [str(value) for value in item.get("_category_names", [])]
-    ).lower()
-    return any(keyword in text for keyword in _STUDENT_EXCLUDED_KEYWORDS)
+    categories = [str(value) for value in item.get("_category_names", [])]
+    return any(
+        excluded in category
+        for category in categories
+        for excluded in _STUDENT_EXCLUDED_CATEGORIES
+    )
 
 
 def _candidate_source_score(item: dict) -> float:
