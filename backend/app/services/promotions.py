@@ -354,6 +354,7 @@ def create_toss_promotion_quick_reply(kakao_response, product: dict | None = Non
     return kakao_response.create_quick_reply(
         label=label,
         message_text="쇼핑 특가",
+        extra={"source": "quick_reply"},
     )
 
 

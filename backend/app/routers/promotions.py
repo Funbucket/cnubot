@@ -12,11 +12,7 @@ router = APIRouter()
 @router.post("/toss-shopping")
 async def get_toss_shopping_promotion(req: KakaoRequest | None = Body(default=None)):
     user_id = req.userRequest.user.id if req and req.userRequest.user else None
-    source = (
-        ((req.action.clientExtra or {}) if req and req.action else {}).get("source")
-        if req and req.action
-        else None
-    ) or ((req.action.extra or {}).get("source") if req and req.action else None) or "promotion_list"
+    source = _promotion_entry_source(req)
     try:
         product_pairs = await promotions.get_live_toss_products(user_id, source, limit=6)
     except Exception:
@@ -34,6 +30,7 @@ async def get_toss_shopping_promotion(req: KakaoRequest | None = Body(default=No
                 taca_item_id=product.get("taca_item_id"),
                 properties={
                     "surface": "commerce_card",
+                    "entry_source": source,
                     "product_name": product.get("title"),
                     "category_name": ", ".join(product.get("category_names") or []),
                 },
@@ -50,6 +47,16 @@ async def get_toss_shopping_promotion(req: KakaoRequest | None = Body(default=No
         for product_key, product in product_pairs
     ]
     return JSONResponse(promotions.create_toss_shopping_list_response(products, click_urls))
+
+
+def _promotion_entry_source(req: KakaoRequest | None) -> str:
+    if not req or not req.action:
+        return "unknown"
+    for payload in (req.action.clientExtra, req.action.extra):
+        value = (payload or {}).get("source")
+        if value in {"menu_button", "quick_reply"}:
+            return value
+    return "unknown"
 
 
 @router.get("/toss-shopping/click")
@@ -69,6 +76,7 @@ async def track_toss_shopping_click(token: str = Query(..., min_length=20)):
             taca_item_id=taca_item_id,
             properties={
                 "surface": surface,
+                "entry_source": _source,
                 "product_name": product.get("title"),
                 "category_name": ", ".join(product.get("category_names") or []),
             },

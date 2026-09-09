@@ -317,7 +317,7 @@ def _insight_sources(sources: str | None) -> str:
         "promotion_button": "식단 메뉴 버튼",
         "menu_card": "식단 메뉴 버튼",
         "menu_button": "식단 메뉴 버튼",
-        "promotion_list": "쇼핑 특가 메뉴",
+        "promotion_list": "기존 데이터(경로 미상)",
         "commerce_card": "commerceCard",
     }
     values = [value.strip() for value in (sources or "").split(",") if value.strip()]
