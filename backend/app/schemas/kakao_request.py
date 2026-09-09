@@ -20,6 +20,7 @@ class KakaoAction(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     detailParams: dict[str, Any] = Field(default_factory=dict)
     clientExtra: dict[str, Any] | None = None
+    extra: dict[str, Any] | None = None
 
 
 class KakaoRequest(BaseModel):

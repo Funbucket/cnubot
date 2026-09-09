@@ -203,6 +203,7 @@ async def get_live_toss_product(
         "image_url": source.get("thumbnailUrl") or item.get("thumbnailUrl", ""),
         "taca_item_id": item_id,
         "category_ids": category_ids,
+        "category_names": category_names,
     }
     await recommendations.record_exposure(
         user_id,
@@ -256,6 +257,7 @@ async def get_live_toss_products(
                 "image_url": source.get("thumbnailUrl") or item.get("thumbnailUrl", ""),
                 "taca_item_id": item_id,
                 "category_ids": category_ids,
+                "category_names": category_names,
             }
             product = TOSS_SHOPPING_PRODUCTS[product_key]
             await recommendations.record_exposure(user_id, surface, item_id, category_ids)
@@ -331,6 +333,7 @@ def create_toss_promotion_button(
         "label": label,
         "action": "message",
         "messageText": "쇼핑 특가",
+        "extra": {"source": "menu_button"},
     }
 
 

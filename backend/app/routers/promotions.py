@@ -12,18 +12,18 @@ router = APIRouter()
 @router.post("/toss-shopping")
 async def get_toss_shopping_promotion(req: KakaoRequest | None = Body(default=None)):
     user_id = req.userRequest.user.id if req and req.userRequest.user else None
+    source = (
+        ((req.action.clientExtra or {}) if req and req.action else {}).get("source")
+        if req and req.action
+        else None
+    ) or ((req.action.extra or {}).get("source") if req and req.action else None) or "promotion_list"
     try:
-        product_pairs = await promotions.get_live_toss_products(user_id, "quick_reply", limit=6)
+        product_pairs = await promotions.get_live_toss_products(user_id, source, limit=6)
     except Exception:
         product_pairs = []
     if not product_pairs:
         product_pairs = list(promotions.TOSS_SHOPPING_PRODUCTS.items())[:6]
     products = [product for _, product in product_pairs]
-    source = (
-        (req.action.clientExtra or {}).get("source")
-        if req and req.action
-        else None
-    ) or "promotion_list"
     for product_key, product in product_pairs:
         try:
             await experiments.record_funnel_event(
@@ -32,14 +32,18 @@ async def get_toss_shopping_promotion(req: KakaoRequest | None = Body(default=No
                 source=source,
                 product_key=product_key,
                 taca_item_id=product.get("taca_item_id"),
-                properties={"surface": "commerce_card"},
+                properties={
+                    "surface": "commerce_card",
+                    "product_name": product.get("title"),
+                    "category_name": ", ".join(product.get("category_names") or []),
+                },
             )
         except Exception:
             pass
     click_urls = [
         (
             f"{promotions.common.SERVER_URL}/promotions/toss-shopping/click?token="
-            f"{promotions.create_tracking_token(user_id, product_key, 'commerce_card', product.get('category_ids'), product.get('url'), product.get('taca_item_id'), 'quick_reply')}"
+            f"{promotions.create_tracking_token(user_id, product_key, source, product.get('category_ids'), product.get('url'), product.get('taca_item_id'), 'commerce_card')}"
             if user_id
             else None
         )
@@ -56,13 +60,18 @@ async def track_toss_shopping_click(token: str = Query(..., min_length=20)):
     user_id, product_key, _source, category_ids, target_url, taca_item_id, surface = decoded
     await recommendations.record_category_click(user_id, category_ids, taca_item_id, surface)
     try:
+        product = promotions.get_product(product_key)
         await experiments.record_funnel_event(
             user_id,
             "commerce_card_click",
             source=_source,
             product_key=product_key,
             taca_item_id=taca_item_id,
-            properties={"surface": surface},
+            properties={
+                "surface": surface,
+                "product_name": product.get("title"),
+                "category_name": ", ".join(product.get("category_names") or []),
+            },
         )
     except Exception:
         pass

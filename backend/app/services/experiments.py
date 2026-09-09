@@ -389,7 +389,7 @@ async def get_promotion_insights(start_date=None, end_date=None) -> dict[str, An
             """
             WITH normalized AS (
                 SELECT COALESCE(e.properties->>'product_key', v.config->>'product_key', 'unknown') AS product_key,
-                       e.user_id, e.event_name
+                       e.user_id, e.event_name, e.properties, e.source
                 FROM experiment_events e
                 LEFT JOIN experiment_variants v
                   ON v.experiment_id = e.experiment_id AND v.variant_key = e.variant_key
@@ -397,7 +397,7 @@ async def get_promotion_insights(start_date=None, end_date=None) -> dict[str, An
                   AND ($3::date IS NULL OR e.created_at < ($3::date + INTERVAL '1 day'))
                 UNION ALL
                 SELECT COALESCE(product_key, 'unknown') AS product_key,
-                       user_id, event_name
+                       user_id, event_name, properties, source
                 FROM promotion_funnel_events
                 WHERE ($2::date IS NULL OR created_at >= $2::date)
                   AND ($3::date IS NULL OR created_at < ($3::date + INTERVAL '1 day'))
@@ -405,7 +405,10 @@ async def get_promotion_insights(start_date=None, end_date=None) -> dict[str, An
             SELECT product_key,
                    COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_exposure')::int AS exposed_users,
                    COUNT(DISTINCT user_id) FILTER (WHERE event_name = ANY($1::text[]))::int AS clicked_users,
-                   COUNT(*) FILTER (WHERE event_name = ANY($1::text[]))::int AS click_events
+                   COUNT(*) FILTER (WHERE event_name = ANY($1::text[]))::int AS click_events,
+                   COALESCE(MAX(properties->>'product_name') FILTER (WHERE properties->>'product_name' IS NOT NULL), '') AS product_name,
+                   COALESCE(MAX(properties->>'category_name') FILTER (WHERE properties->>'category_name' IS NOT NULL), '') AS category_name,
+                   COALESCE(string_agg(DISTINCT NULLIF(source, ''), ', '), '') AS sources
             FROM normalized
             GROUP BY product_key
             ORDER BY clicked_users DESC, exposed_users DESC, product_key
