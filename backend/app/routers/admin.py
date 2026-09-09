@@ -223,8 +223,12 @@ def _insights_page(data: dict[str, Any]) -> str:
     ctr = clicked / exposed * 100 if exposed else 0
     data_status = "수집 중" if exposure_events or click_events else "데이터 대기 중"
     product_rows = "".join(
-        f"<tr><td><b>{html.escape(row.get('product_name') or _insight_label(row['product_key']))}</b>"
-        f"<small>{html.escape(row.get('category_name') or '카테고리 미상')} · {html.escape(_insight_sources(row.get('sources')))}</small>"
+        f"<tr><td><b style=\"font-size:14px\">{html.escape(row.get('product_name') or _insight_label(row['product_key']))}</b>"
+        f"<span style=\"display:block;margin-top:5px;color:#71809b;font-size:11px;line-height:1.45\">"
+        f"카테고리 · {html.escape(row.get('category_name') or '미상')}</span>"
+        f"<span style=\"display:block;margin-top:5px;font-size:11px;line-height:1.6\">"
+        f"<b style=\"color:#3767e8\">진입</b> {_insight_sources(row.get('entry_sources'))}"
+        f"<br><b style=\"color:#147342\">최종 클릭</b> {_insight_surfaces(row.get('click_surfaces'))}</span>"
         f"<small><code>{html.escape(row['product_key'])}</code></small></td>"
         f"<td data-label=\"노출\">{row['exposed_users']:,}</td><td data-label=\"클릭\">{row['clicked_users']:,}</td>"
         f"<td data-label=\"CTR\"><b>{(row['clicked_users'] / row['exposed_users'] * 100 if row['exposed_users'] else 0):.2f}%</b></td>"
@@ -309,12 +313,23 @@ def _insight_label(product_key: str) -> str:
 def _insight_sources(sources: str | None) -> str:
     labels = {
         "quick_reply": "퀵리플라이",
+        "menu_card": "식단 메뉴 버튼",
+        "promotion_button": "식단 메뉴 버튼",
+        "menu_card": "식단 메뉴 버튼",
         "menu_button": "식단 메뉴 버튼",
         "promotion_list": "쇼핑 특가 메뉴",
         "commerce_card": "commerceCard",
     }
     values = [value.strip() for value in (sources or "").split(",") if value.strip()]
     return ", ".join(labels.get(value, value) for value in values) or "유입 경로 미상"
+
+
+def _insight_surfaces(surfaces: str | None) -> str:
+    labels = {
+        "commerce_card": "commerceCard",
+    }
+    values = [value.strip() for value in (surfaces or "").split(",") if value.strip()]
+    return ", ".join(labels.get(value, value) for value in values) or "commerceCard"
 
 
 def _page(cards: str, experiment_count: int, show_form: bool = True, show_list: bool = True) -> str:

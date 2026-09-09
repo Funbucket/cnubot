@@ -408,7 +408,8 @@ async def get_promotion_insights(start_date=None, end_date=None) -> dict[str, An
                    COUNT(*) FILTER (WHERE event_name = ANY($1::text[]))::int AS click_events,
                    COALESCE(MAX(properties->>'product_name') FILTER (WHERE properties->>'product_name' IS NOT NULL), '') AS product_name,
                    COALESCE(MAX(properties->>'category_name') FILTER (WHERE properties->>'category_name' IS NOT NULL), '') AS category_name,
-                   COALESCE(string_agg(DISTINCT NULLIF(source, ''), ', '), '') AS sources
+                   COALESCE(string_agg(DISTINCT NULLIF(source, ''), ', ') FILTER (WHERE event_name = 'promotion_exposure'), '') AS entry_sources,
+                   COALESCE(string_agg(DISTINCT CASE WHEN event_name = 'commerce_card_click' THEN 'commerce_card' ELSE NULLIF(properties->>'surface', '') END, ', ') FILTER (WHERE event_name = ANY($1::text[])), '') AS click_surfaces
             FROM normalized
             GROUP BY product_key
             ORDER BY clicked_users DESC, exposed_users DESC, product_key
