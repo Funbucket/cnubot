@@ -226,15 +226,14 @@ def _insights_page(data: dict[str, Any]) -> str:
         f"<tr><td><b style=\"font-size:14px\">{html.escape(row.get('product_name') or _insight_label(row['product_key']))}</b>"
         f"<span style=\"display:block;margin-top:5px;color:#71809b;font-size:11px;line-height:1.45\">"
         f"카테고리 · {html.escape(row.get('category_name') or '미상')}</span>"
-        f"<span style=\"display:block;margin-top:5px;font-size:11px;line-height:1.6\">"
-        f"<b style=\"color:#3767e8\">진입</b> {_insight_entry_label(row)}"
-        f"<br><b style=\"color:#147342\">최종 클릭</b> {_insight_surfaces(row.get('click_surfaces'))}</span>"
         f"<small><code>{html.escape(row['product_key'])}</code></small></td>"
+        f"<td data-label=\"진입 버튼\"><b>{_insight_entry_button_label(row)}</b>"
+        f"<small>{_insight_entry_label(row)}</small></td>"
         f"<td data-label=\"노출\">{row['exposed_users']:,}</td><td data-label=\"클릭\">{row['clicked_users']:,}</td>"
         f"<td data-label=\"CTR\"><b>{(row['clicked_users'] / row['exposed_users'] * 100 if row['exposed_users'] else 0):.2f}%</b></td>"
-        f"<td data-label=\"클릭 이벤트\">{row['click_events']:,}건</td></tr>"
+        f"<td data-label=\"최종 클릭\"><b style=\"color:#147342\">{_insight_surfaces(row.get('click_surfaces'))}</b><small>{row['click_events']:,}건</small></td></tr>"
         for row in data["products"]
-    ) or '<tr><td colspan="5" class="sub">아직 수집된 프로모션 데이터가 없습니다.</td></tr>'
+    ) or '<tr><td colspan="6" class="sub">아직 수집된 프로모션 데이터가 없습니다.</td></tr>'
     surface_labels = {
         "menu_button": "학식 메뉴 버튼",
         "quick_reply": "스케줄 퀵리플라이",
@@ -294,7 +293,7 @@ WHERE created_at >= :start_date AND created_at < (:end_date + INTERVAL '1 day');
 <section class="hero"><div class="hero-row"><div><span class="eyebrow">CNU PROMOTION INSIGHTS</span><h1>추천 상품 반응판</h1><p class="sub">A/B 실험과 관계없이 전체 프로모션 퍼널을 집계합니다.</p></div><span class="live"><i></i>{data_status}</span></div></section>
 <section class="grid"><div class="metric"><span>고유 노출 사용자</span><b>{exposed:,}명</b><small>{exposure_events:,}회 노출 기록</small>{details(summary_sql)}</div><div class="metric"><span>고유 클릭 사용자</span><b>{clicked:,}명</b><small>{click_events:,}회 클릭 기록</small>{details(summary_sql)}</div><div class="metric"><span>전체 CTR</span><b>{ctr:.2f}%</b><small>노출 후 클릭 전환율</small>{details(summary_sql)}</div><div class="metric"><span>전체 이벤트</span><b>{totals.get('events') or 0:,}건</b><small>A/B 무관 통합 집계</small>{details(summary_sql)}</div></section>
 <section class="funnel"><h2>실시간 퍼널</h2><span class="hint">고유 사용자 기준 · 중복 노출·클릭은 한 번으로 계산</span><div class="funnel-track"><div class="funnel-step"><strong>01 · 상품 노출</strong><b>{exposed:,}명</b><small>{exposure_events:,}회 기록</small></div><div class="funnel-step"><strong>02 · 클릭</strong><b>{clicked:,}명</b><small>노출 대비 {ctr:.2f}%</small></div><div class="funnel-step"><strong>03 · 다음 행동</strong><b>측정 중</b><small>토스 이동 이후 전환은 제휴 데이터 연동 필요</small></div></div></section>
-<h2>상품별 반응 TOP</h2><section class="panel"><div class="panel-head"><h2>어떤 상품이 반응이 좋은가</h2><span class="hint">상품명 · 카테고리 · 유입 경로</span></div><div class="product-scroll" style="max-height:420px;overflow:auto"><table><thead><tr><th>상품 정보</th><th>노출</th><th>클릭</th><th>CTR</th><th>클릭 이벤트</th></tr></thead><tbody>{product_rows}</tbody></table></div>{details(product_sql)}</section>
+<h2>상품별 반응 TOP</h2><section class="panel"><div class="panel-head"><h2>어떤 상품이 반응이 좋은가</h2><span class="hint">상품명 · 진입 버튼 · 최종 클릭</span></div><div class="product-scroll" style="max-height:420px;overflow:auto"><table><thead><tr><th>상품 정보</th><th>진입 버튼</th><th>노출</th><th>클릭</th><th>CTR</th><th>최종 클릭</th></tr></thead><tbody>{product_rows}</tbody></table></div>{details(product_sql)}</section>
 <section class="two"><div><h2>노출 위치별 클릭</h2><section class="panel"><table><thead><tr><th>위치</th><th>사용자</th><th>이벤트</th></tr></thead><tbody>{surface_rows}</tbody></table>{details(surface_sql)}</section></div><div><h2>최근 일별 추이</h2><section class="panel"><table><thead><tr><th>날짜</th><th>노출</th><th>클릭 사용자</th><th>클릭 이벤트</th></tr></thead><tbody>{daily_rows}</tbody></table>{details(daily_sql)}</section></div></section>
 </main></body></html>"""
     return page
@@ -330,6 +329,11 @@ def _insight_entry_label(row: dict[str, Any]) -> str:
     if button_label and button_label != "unknown":
         return f"{html.escape(button_label)} <span style=\"color:#71809b\">({html.escape(source)})</span>"
     return source
+
+
+def _insight_entry_button_label(row: dict[str, Any]) -> str:
+    label = (row.get("entry_button_label") or "").strip()
+    return html.escape(label if label and label != "unknown" else "버튼명 미상")
 
 
 def _insight_surfaces(surfaces: str | None) -> str:
