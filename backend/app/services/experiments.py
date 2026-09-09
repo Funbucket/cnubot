@@ -436,6 +436,7 @@ async def get_promotion_insights(start_date=None, end_date=None) -> dict[str, An
                 FROM promotion_funnel_events
             )
             SELECT CASE
+                       WHEN event_name = 'promotion_entry_click' THEN COALESCE(properties->>'entry_source', source, 'unknown')
                        WHEN event_name = 'promotion_quick_reply_click' THEN 'quick_reply'
                        WHEN event_name = 'commerce_card_click' THEN 'commerce_card'
                        WHEN event_name = 'promotion_button_click' THEN 'menu_button'
@@ -446,7 +447,7 @@ async def get_promotion_insights(start_date=None, end_date=None) -> dict[str, An
                    COUNT(*)::int AS events
             FROM all_events
             WHERE event_name = ANY($1::text[])
-              AND event_name IN ('promotion_button_click', 'promotion_quick_reply_click', 'commerce_card_click')
+              AND event_name IN ('promotion_entry_click', 'promotion_button_click', 'promotion_quick_reply_click', 'commerce_card_click')
               AND ($2::date IS NULL OR created_at >= $2::date)
               AND ($3::date IS NULL OR created_at < ($3::date + INTERVAL '1 day'))
             GROUP BY 1

@@ -15,6 +15,20 @@ async def get_toss_shopping_promotion(req: KakaoRequest | None = Body(default=No
     entry = _promotion_entry_metadata(req)
     source = entry["source"]
     try:
+        await experiments.record_funnel_event(
+            user_id,
+            "promotion_entry_click",
+            source=source,
+            properties={
+                "surface": source,
+                "entry_source": source,
+                "entry_button_id": entry["button_id"],
+                "entry_button_label": entry["button_label"],
+            },
+        )
+    except Exception:
+        pass
+    try:
         product_pairs = await promotions.get_live_toss_products(user_id, source, limit=6)
     except Exception:
         product_pairs = []
