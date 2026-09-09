@@ -54,10 +54,15 @@ async def get_today_menu(req: KakaoRequest):
 
     user_id = _get_user_id(req)
     product_key, promotion_product = await _personalized_product(user_id, "menu_card")
-    await _record_menu_promotion_exposure(user_id, product_key, promotion_product)
+    await _record_menu_promotion_exposure(
+        user_id,
+        product_key,
+        promotion_product,
+        promotions.TOSS_DORM_MENU_BUTTON_LABEL if common.get_eng_place(place) == "dorm" else promotions.TOSS_LIVING_MENU_BUTTON_LABEL,
+    )
     click_url = (
         f"{common.SERVER_URL}/promotions/toss-shopping/click?token="
-        f"{promotions.create_tracking_token(user_id, product_key, source='menu_button', category_ids=promotion_product.get('category_ids'), target_url=promotion_product.get('url'), taca_item_id=promotion_product.get('taca_item_id'), surface='commerce_card')}"
+        f"{promotions.create_tracking_token(user_id, product_key, source='menu_button', category_ids=promotion_product.get('category_ids'), target_url=promotion_product.get('url'), taca_item_id=promotion_product.get('taca_item_id'), surface='commerce_card', button_id='toss_promotion_menu_button', button_label=(promotions.TOSS_DORM_MENU_BUTTON_LABEL if common.get_eng_place(place) == 'dorm' else promotions.TOSS_LIVING_MENU_BUTTON_LABEL))}"
         if user_id and product_key
         else None
     )
@@ -112,10 +117,15 @@ async def get_menu_by_day(req: KakaoRequest):
 
     user_id = _get_user_id(req)
     product_key, promotion_product = await _personalized_product(user_id, "menu_card")
-    await _record_menu_promotion_exposure(user_id, product_key, promotion_product)
+    await _record_menu_promotion_exposure(
+        user_id,
+        product_key,
+        promotion_product,
+        promotions.TOSS_DORM_MENU_BUTTON_LABEL if common.get_eng_place(place) == "dorm" else promotions.TOSS_LIVING_MENU_BUTTON_LABEL,
+    )
     click_url = (
         f"{common.SERVER_URL}/promotions/toss-shopping/click?token="
-        f"{promotions.create_tracking_token(user_id, product_key, source='menu_button', category_ids=promotion_product.get('category_ids'), target_url=promotion_product.get('url'), taca_item_id=promotion_product.get('taca_item_id'), surface='commerce_card')}"
+        f"{promotions.create_tracking_token(user_id, product_key, source='menu_button', category_ids=promotion_product.get('category_ids'), target_url=promotion_product.get('url'), taca_item_id=promotion_product.get('taca_item_id'), surface='commerce_card', button_id='toss_promotion_menu_button', button_label=(promotions.TOSS_DORM_MENU_BUTTON_LABEL if common.get_eng_place(place) == 'dorm' else promotions.TOSS_LIVING_MENU_BUTTON_LABEL))}"
         if user_id and product_key
         else None
     )
@@ -151,6 +161,7 @@ async def _record_menu_promotion_exposure(
     user_id: str | None,
     product_key: str,
     product: dict,
+    button_label: str,
 ) -> None:
     try:
         await experiments.record_funnel_event(
@@ -162,6 +173,8 @@ async def _record_menu_promotion_exposure(
             properties={
                 "surface": "commerce_card",
                 "entry_source": "menu_button",
+                "entry_button_id": "toss_promotion_menu_button",
+                "entry_button_label": button_label,
                 "product_name": product.get("title"),
                 "category_name": ", ".join(product.get("category_names") or []),
             },

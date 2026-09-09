@@ -135,6 +135,8 @@ async def init_database() -> None:
 
             CREATE TABLE IF NOT EXISTS promotion_funnel_events (
                 id BIGSERIAL PRIMARY KEY,
+                event_id TEXT,
+                schema_version INT NOT NULL DEFAULT 1,
                 user_id TEXT,
                 event_name TEXT NOT NULL,
                 source TEXT,
@@ -147,6 +149,12 @@ async def init_database() -> None:
                 ON promotion_funnel_events(created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_promotion_funnel_events_user_time
                 ON promotion_funnel_events(user_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_promotion_funnel_events_name_time
+                ON promotion_funnel_events(event_name, created_at DESC);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_promotion_funnel_events_event_id
+                ON promotion_funnel_events(event_id) WHERE event_id IS NOT NULL;
+            ALTER TABLE promotion_funnel_events ADD COLUMN IF NOT EXISTS event_id TEXT;
+            ALTER TABLE promotion_funnel_events ADD COLUMN IF NOT EXISTS schema_version INT NOT NULL DEFAULT 1;
 
             ALTER TABLE experiments ADD COLUMN IF NOT EXISTS unit TEXT NOT NULL DEFAULT 'user';
             ALTER TABLE experiments ADD COLUMN IF NOT EXISTS alpha DOUBLE PRECISION NOT NULL DEFAULT 0.05;

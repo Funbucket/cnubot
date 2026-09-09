@@ -227,7 +227,7 @@ def _insights_page(data: dict[str, Any]) -> str:
         f"<span style=\"display:block;margin-top:5px;color:#71809b;font-size:11px;line-height:1.45\">"
         f"카테고리 · {html.escape(row.get('category_name') or '미상')}</span>"
         f"<span style=\"display:block;margin-top:5px;font-size:11px;line-height:1.6\">"
-        f"<b style=\"color:#3767e8\">진입</b> {_insight_sources(row.get('entry_sources'))}"
+        f"<b style=\"color:#3767e8\">진입</b> {_insight_entry_label(row)}"
         f"<br><b style=\"color:#147342\">최종 클릭</b> {_insight_surfaces(row.get('click_surfaces'))}</span>"
         f"<small><code>{html.escape(row['product_key'])}</code></small></td>"
         f"<td data-label=\"노출\">{row['exposed_users']:,}</td><td data-label=\"클릭\">{row['clicked_users']:,}</td>"
@@ -322,6 +322,14 @@ def _insight_sources(sources: str | None) -> str:
     }
     values = [value.strip() for value in (sources or "").split(",") if value.strip()]
     return ", ".join(labels.get(value, value) for value in values) or "유입 경로 미상"
+
+
+def _insight_entry_label(row: dict[str, Any]) -> str:
+    button_label = (row.get("entry_button_label") or "").strip()
+    source = _insight_sources(row.get("entry_sources"))
+    if button_label and button_label != "unknown":
+        return f"{html.escape(button_label)} <span style=\"color:#71809b\">({html.escape(source)})</span>"
+    return source
 
 
 def _insight_surfaces(surfaces: str | None) -> str:

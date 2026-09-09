@@ -281,6 +281,8 @@ def create_tracking_token(
     target_url: str | None = None,
     taca_item_id: int | None = None,
     surface: str = "unknown",
+    button_id: str = "unknown",
+    button_label: str = "unknown",
 ) -> str:
     payload = base64.urlsafe_b64encode(
         json.dumps(
@@ -292,6 +294,8 @@ def create_tracking_token(
                 "l": target_url,
                 "i": taca_item_id,
                 "v": surface,
+                "b": button_id,
+                "n": button_label,
                 "e": int(time.time()) + 86400,
             }
         ).encode()
@@ -300,7 +304,7 @@ def create_tracking_token(
     return f"{payload}.{signature}"
 
 
-def read_tracking_token(token: str) -> tuple[str, str, str, list[int], str | None, int | None, str] | None:
+def read_tracking_token(token: str) -> tuple[str, str, str, list[int], str | None, int | None, str, str, str] | None:
     try:
         payload, signature = token.split(".", 1)
         expected = hmac.new(_tracking_secret(), payload.encode(), hashlib.sha256).hexdigest()
@@ -319,6 +323,8 @@ def read_tracking_token(token: str) -> tuple[str, str, str, list[int], str | Non
             data.get("l"),
             data.get("i"),
             data.get("v", "unknown"),
+            data.get("b", "unknown"),
+            data.get("n", "unknown"),
         )
     except (ValueError, KeyError, TypeError, json.JSONDecodeError):
         return None
@@ -333,7 +339,11 @@ def create_toss_promotion_button(
         "label": label,
         "action": "message",
         "messageText": "쇼핑 특가",
-        "extra": {"source": "menu_button"},
+        "extra": {
+            "source": "menu_button",
+            "button_id": "toss_promotion_menu_button",
+            "button_label": label,
+        },
     }
 
 
@@ -349,12 +359,20 @@ def create_toss_promotion_quick_reply(kakao_response, product: dict | None = Non
             message_text="쇼핑 특가",
             action="block",
             block_id=common.KAKAO_TOSS_PROMOTION_BLOCK_ID,
-            extra={"source": "quick_reply"},
+            extra={
+                "source": "quick_reply",
+                "button_id": "toss_promotion_quick_reply",
+                "button_label": label,
+            },
         )
     return kakao_response.create_quick_reply(
         label=label,
         message_text="쇼핑 특가",
-        extra={"source": "quick_reply"},
+        extra={
+            "source": "quick_reply",
+            "button_id": "toss_promotion_quick_reply",
+            "button_label": label,
+        },
     )
 
 
