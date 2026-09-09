@@ -1,8 +1,12 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from app.utils import common, kakao_json_response
 
 CNU_SHUTTLE_URL = "https://plus.cnu.ac.kr/html/kr/sub05/sub05_050403.html"
+ACADEMIC_CALENDAR_URL = (
+    "https://plus.cnu.ac.kr/_prog/academic_calendar/"
+    "?site_dvs_cd=kr&menu_dvs_cd=&year={year}"
+)
 
 
 def parse_times(schedule):
@@ -32,10 +36,14 @@ def calculate_bus_times(times, current_kst):
     first_bus_time = times_with_bus_time[0]["time"]
     last_bus_time = times_with_bus_time[-1]["time"]
 
-    if current_kst < first_bus_time or current_kst > last_bus_time + timedelta(
-        minutes=16
-    ):
-        return "운행 종료", []
+    if current_kst < first_bus_time:
+        return {
+            "status": "before_first",
+            "past": [],
+            "future": [{"time": first_bus_time.strftime("%H:%M")}],
+        }
+    if current_kst > last_bus_time + timedelta(minutes=16):
+        return {"status": "ended", "past": [], "future": []}
 
     past_buses = [
         {
@@ -58,25 +66,147 @@ def calculate_bus_times(times, current_kst):
         key=lambda x: x["minutes_left"],
     )[:2]
 
-    return past_buses, future_buses
+    return {"status": "operating", "past": past_buses, "future": future_buses}
+
+
+def _event_date(value: str) -> date:
+    return date.fromisoformat(value)
+
+
+def _calendar_event_on(calendar: dict, target: date) -> list[dict]:
+    return [
+        event
+        for event in calendar.get("events", [])
+        if _event_date(event["start"]) <= target <= _event_date(event["end"])
+    ]
+
+
+def _is_holiday(event: dict) -> bool:
+    title = event.get("title", "")
+    return any(
+        keyword in title
+        for keyword in (
+            "공휴일",
+            "대체공휴일",
+            "개교기념일",
+            "선거일",
+            "설날",
+            "추석",
+            "어린이날",
+            "현충일",
+            "광복절",
+            "한글날",
+            "개천절",
+            "부처님오신날",
+            "기독탄신일",
+            "삼일절",
+            "신정",
+        )
+    )
+
+
+def _is_break(calendar: dict, target: date) -> bool:
+    phase_events = [
+        event
+        for event in calendar.get("events", [])
+        if "방학" in event.get("title", "") or "개강일" in event.get("title", "")
+    ]
+    phase_events.sort(key=lambda event: _event_date(event["start"]))
+    first_term_start = next(
+        (
+            _event_date(event["start"])
+            for event in phase_events
+            if "제1학기 개강일" in event.get("title", "")
+        ),
+        None,
+    )
+    if first_term_start and target < first_term_start:
+        return True
+    latest = next(
+        (event for event in reversed(phase_events) if _event_date(event["start"]) <= target),
+        None,
+    )
+    return bool(latest and "방학" in latest.get("title", ""))
+
+
+def _next_service_date(calendar: dict, target: date) -> date:
+    candidate = target + timedelta(days=1)
+    for _ in range(370):
+        if (
+            candidate.weekday() < 5
+            and not _is_break(calendar, candidate)
+            and not any(_is_holiday(event) for event in _calendar_event_on(calendar, candidate))
+        ):
+            return candidate
+        candidate += timedelta(days=1)
+    return target + timedelta(days=1)
+
+
+def _non_operation_reason(calendar: dict, target: date) -> str | None:
+    if target.weekday() >= 5:
+        return "주말"
+    events = _calendar_event_on(calendar, target)
+    holiday = next((event for event in events if _is_holiday(event)), None)
+    if holiday:
+        return holiday["title"]
+    if _is_break(calendar, target):
+        return "방학"
+    return None
+
+
+def _date_label(target: date) -> str:
+    weekdays = "월화수목금토일"
+    return f"{target.month}월 {target.day}일 {weekdays[target.weekday()]}요일"
+
+
+def _first_departure(data: dict) -> str:
+    times = [
+        time
+        for route in data.get("bus_schedule", {}).values()
+        for time in route.get("times", [])
+    ]
+    return min(times, key=lambda value: tuple(int(part) for part in value.split(":"))) if times else "08:30"
+
+
+def _status_buttons(route: str):
+    buttons = []
+    if route == "교내 순환":
+        buttons.append(
+            {
+                "action": "webLink",
+                "label": "노선·정류장 보기",
+                "webLinkUrl": f"{common.SERVER_URL}/shuttle/images/shuttle_route.png",
+            }
+        )
+    buttons.append(
+        {
+            "action": "webLink",
+            "label": "학교 공지 보기",
+            "webLinkUrl": CNU_SHUTTLE_URL,
+        }
+    )
+    return buttons
 
 
 def create_nearby_shuttles_response(data):
     current_kst = common.get_current_kr_time()
-    # current_kst = datetime(2025, 3, 4, 17, 31, tzinfo=current_kst.tzinfo)  # test time
-
-    if current_kst.weekday() >= 5:
+    today = current_kst.date()
+    calendar = data.get("academic_calendar", {})
+    reason = _non_operation_reason(calendar, today)
+    first_departure = _first_departure(data)
+    if reason:
+        next_date = _next_service_date(calendar, today)
         kakao_response = kakao_json_response.KakaoJsonResponse()
         kakao_response.add_output_to_response(
             {
                 "textCard": kakao_response.create_text_card(
-                    title="주말은 운영하지 않아요.",
-                    description=" ",
+                    title="🚌 오늘은 셔틀 휴무일이에요",
+                    description=f"사유: {reason}\n다음 운행: {_date_label(next_date)} {first_departure}",
                     buttons=[
                         {
                             "action": "webLink",
                             "label": "학교 공지 보기",
-                            "webLinkUrl": f"{CNU_SHUTTLE_URL}",
+                            "webLinkUrl": CNU_SHUTTLE_URL,
                         }
                     ],
                 )
@@ -92,17 +222,20 @@ def create_nearby_shuttles_response(data):
 
     kakao_response = kakao_json_response.KakaoJsonResponse()
 
-    if all(v == "운행 종료" for v, _ in result.values()):
+    if all(state["status"] == "ended" for state in result.values()):
         kakao_response.add_output_to_response(
             {
                 "textCard": kakao_response.create_text_card(
-                    title="셔틀 버스 운행이 종료되었습니다.",
-                    description=" ",
+                    title="🌙 오늘 셔틀 운행이 종료됐어요",
+                    description=(
+                        f"다음 운행: {_date_label(_next_service_date(calendar, today))} "
+                        f"{first_departure}"
+                    ),
                     buttons=[
                         {
                             "action": "webLink",
                             "label": "학교 공지 보기",
-                            "webLinkUrl": f"{CNU_SHUTTLE_URL}",
+                            "webLinkUrl": CNU_SHUTTLE_URL,
                         }
                     ],
                 )
@@ -112,43 +245,37 @@ def create_nearby_shuttles_response(data):
         items = [
             kakao_response.create_text_card(
                 title=f"{route} 노선",
-                description=(
-                    f"🚌 운행중 ({len(buses[0])}대)\n"
-                    + "\n".join(
-                        [
-                            f"{bus['time']} 출발 ({bus['minutes_ago']}분 전)"
-                            for bus in buses[0]
-                        ]
-                    )
-                    + f"\n\n💤 대기중 ({len(buses[1])}대)\n"
-                    + "\n".join(
-                        [
-                            f"{bus['time']} 출발 ({bus['minutes_left']}분 후)"
-                            for bus in buses[1]
-                        ]
-                    )
-                ),
-                buttons=[
-                    {
-                        "action": "webLink",
-                        "label": "노선도 보기",
-                        "webLinkUrl": f"{common.SERVER_URL}/shuttle/images/shuttle_route.png",
-                    },
-                    {
-                        "action": "webLink",
-                        "label": "노선 지도 보기",
-                        "webLinkUrl": f"{common.SERVER_URL}/shuttle/images/shuttle_map.png",
-                    },
-                    {
-                        "action": "webLink",
-                        "label": "학교 공지 보기",
-                        "webLinkUrl": f"{CNU_SHUTTLE_URL}",
-                    },
-                ],
+                description=_route_description(buses),
+                buttons=_status_buttons(route),
             )
             for route, buses in result.items()
-            if buses != "운행 종료"
+            if buses["status"] != "ended" or len(result) == 1
         ]
         kakao_response.add_output_to_response(kakao_response.create_carousel(items))
 
     return kakao_response.get_response()
+
+
+def _route_description(state: dict) -> str:
+    if state["status"] == "before_first":
+        return f"🌅 운행 전\n첫차 {state['future'][0]['time']}"
+    if state["status"] == "ended":
+        return "🌙 운행 종료\n오늘 운행이 끝났어요"
+    sections = []
+    if state["past"]:
+        sections.append(
+            f"🚌 운행중 ({len(state['past'])}대)\n"
+            + "\n".join(
+                f"{bus['time']} 출발 ({bus['minutes_ago']}분 전)"
+                for bus in state["past"]
+            )
+        )
+    if state["future"]:
+        sections.append(
+            f"💤 대기중 ({len(state['future'])}대)\n"
+            + "\n".join(
+                f"{bus['time']} 출발 ({bus['minutes_left']}분 후)"
+                for bus in state["future"]
+            )
+        )
+    return "\n\n".join(sections)
