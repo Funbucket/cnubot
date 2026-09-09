@@ -177,6 +177,7 @@ async def _record_menu_promotion_exposure(
                 "entry_button_label": button_label,
                 "product_name": product.get("title"),
                 "category_name": ", ".join(product.get("category_names") or []),
+                "candidate_sources": product.get("candidate_sources") or [],
             },
         )
     except Exception:

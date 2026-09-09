@@ -36,6 +36,7 @@ async def get_toss_shopping_promotion(req: KakaoRequest | None = Body(default=No
                     "entry_button_label": entry["button_label"],
                     "product_name": product.get("title"),
                     "category_name": ", ".join(product.get("category_names") or []),
+                    "candidate_sources": product.get("candidate_sources") or [],
                 },
             )
         except Exception:
@@ -94,6 +95,7 @@ async def track_toss_shopping_click(token: str = Query(..., min_length=20)):
                 "entry_button_label": button_label,
                 "product_name": product.get("title"),
                 "category_name": ", ".join(product.get("category_names") or []),
+                "candidate_sources": product.get("candidate_sources") or [],
             },
         )
     except Exception:

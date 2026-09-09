@@ -1,5 +1,6 @@
 import hashlib
 import json
+from datetime import datetime, timezone
 from collections.abc import Sequence
 from datetime import date
 
@@ -20,6 +21,7 @@ _STUDENT_POSITIVE_KEYWORDS = (
 )
 _STUDENT_LOW_FIT_KEYWORDS = (
     "가구", "소파", "침대", "대형", "자동차", "골프", "유아", "출산", "산업용",
+    "곤충", "사육", "홈세트", "도자기",
 )
 
 
@@ -186,6 +188,30 @@ def _student_fit_score(item: dict) -> float:
     return score
 
 
+def _candidate_source_score(item: dict) -> float:
+    """Give each feed a modest bonus without letting one feed dominate."""
+    sources = set(item.get("_candidate_sources") or [])
+    score = 0.0
+    if "best_selling" in sources:
+        score += 0.8
+    if "category_best" in sources:
+        score += 1.1
+    if "today_deals" in sources:
+        score += 1.3
+        end_at = item.get("_deal_end_at")
+        if end_at:
+            try:
+                remaining_hours = (
+                    datetime.fromisoformat(end_at).astimezone(timezone.utc)
+                    - datetime.now(timezone.utc)
+                ).total_seconds() / 3600
+                if 0 < remaining_hours <= 24:
+                    score += 0.6
+            except (TypeError, ValueError):
+                pass
+    return score
+
+
 def rank_candidates(
     items: list[dict],
     affinity: dict[int, float],
@@ -231,8 +257,9 @@ def rank_candidates(
         candidates,
         key=lambda item: (
             sum(affinity.get(int(category_id), 0) for category_id in item.get("categoryIds", [])) * 10
-            + (total - int(item.get("rank", total))) * 0.1
+            + (total - int(item.get("rank") or total)) * 0.1
             + _student_fit_score(item)
+            + _candidate_source_score(item)
             - (
                 1.5
                 if selected_groups

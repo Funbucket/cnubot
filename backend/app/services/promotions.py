@@ -1,4 +1,5 @@
 import base64
+import asyncio
 import hashlib
 import hmac
 import json
@@ -143,7 +144,7 @@ def promotion_label(title: str, category_names: list[str] | None = None) -> str:
 async def _annotate_candidate_categories(candidates: list[dict]) -> list[dict]:
     try:
         category_tree = await toss_sharelink.categories()
-    except toss_sharelink.TossSharelinkError:
+    except Exception:
         return candidates
     annotated = []
     for candidate in candidates:
@@ -157,13 +158,68 @@ async def _annotate_candidate_categories(candidates: list[dict]) -> list[dict]:
     return annotated
 
 
+async def _candidate_pool() -> list[dict]:
+    """Merge cached Toss sources into one deduplicated recommendation pool."""
+    try:
+        category_tree = await toss_sharelink.categories()
+    except Exception:
+        category_tree = {}
+
+    category_ids: list[int] = []
+    category_keywords = ("식품", "생활", "주방", "가전", "문구", "뷰티")
+    for keyword in category_keywords:
+        matches = [
+            (category_id, path)
+            for category_id, path in category_tree.items()
+            if any(keyword in name for name in path)
+        ]
+        # Prefer a deeper category so its best ranking is more specific.
+        matches.sort(key=lambda pair: len(pair[1]), reverse=True)
+        if matches:
+            category_ids.append(matches[0][0])
+
+    async def safe_call(factory, *args):
+        try:
+            return await factory(*args)
+        except Exception:
+            return []
+
+    requests = [
+        safe_call(toss_sharelink.best_selling, TOSS_CANDIDATE_POOL_SIZE),
+        safe_call(toss_sharelink.today_deals, 30),
+    ]
+    requests.extend(safe_call(toss_sharelink.best_categories, category_id, 20) for category_id in category_ids)
+    results = await asyncio.gather(*requests)
+    merged: dict[int, dict] = {}
+    for index, items in enumerate(results):
+        source = "best_selling" if index == 0 else "today_deals" if index == 1 else "category_best"
+        for rank, item in enumerate(items, 1):
+            try:
+                item_id = int(item["tacaItemId"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if item_id not in merged:
+                candidate = dict(item)
+                candidate["_candidate_sources"] = []
+                candidate["_source_ranks"] = {}
+                merged[item_id] = candidate
+            candidate = merged[item_id]
+            if source not in candidate["_candidate_sources"]:
+                candidate["_candidate_sources"].append(source)
+            candidate["_source_ranks"][source] = min(
+                rank, candidate["_source_ranks"].get(source, rank)
+            )
+            if source == "today_deals" and item.get("endAt"):
+                candidate["_deal_end_at"] = item["endAt"]
+    return await _annotate_candidate_categories(list(merged.values()))
+
+
 async def get_live_toss_product(
     user_id: str | None = None,
     surface: str = "default",
     preferred_item_id: int | None = None,
 ) -> tuple[str, dict]:
-    candidates = await toss_sharelink.best_selling(size=TOSS_CANDIDATE_POOL_SIZE)
-    candidates = await _annotate_candidate_categories(candidates)
+    candidates = await _candidate_pool()
     affinity = await recommendations.category_affinity(user_id)
     recent_ids = await recommendations.recent_item_ids(user_id)
     item = next(
@@ -204,6 +260,7 @@ async def get_live_toss_product(
         "taca_item_id": item_id,
         "category_ids": category_ids,
         "category_names": category_names,
+        "candidate_sources": item.get("_candidate_sources", []),
     }
     await recommendations.record_exposure(
         user_id,
@@ -219,8 +276,7 @@ async def get_live_toss_products(
     surface: str = "quick_reply",
     limit: int = 5,
 ) -> list[tuple[str, dict]]:
-    candidates = await toss_sharelink.best_selling(size=TOSS_CANDIDATE_POOL_SIZE)
-    candidates = await _annotate_candidate_categories(candidates)
+    candidates = await _candidate_pool()
     affinity = await recommendations.category_affinity(user_id)
     recent_ids = await recommendations.recent_item_ids(user_id)
     ranked_items = recommendations.rank_candidates_ordered(
@@ -258,6 +314,7 @@ async def get_live_toss_products(
                 "taca_item_id": item_id,
                 "category_ids": category_ids,
                 "category_names": category_names,
+                "candidate_sources": item.get("_candidate_sources", []),
             }
             product = TOSS_SHOPPING_PRODUCTS[product_key]
             await recommendations.record_exposure(user_id, surface, item_id, category_ids)
