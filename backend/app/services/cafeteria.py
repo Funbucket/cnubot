@@ -122,7 +122,8 @@ def create_menu_response(
             kakao_response.create_text_card(
                 title=f"{day_label} • {get_kor_meal_time(meal_time)} • {meal['type']}",
                 description="{}{}".format(
-                    (
+                    (f"💰 {meal['price']:,}원\n\n" if meal.get("price") is not None else "")
+                    + (
                         f"칼로리: {meal['calorie']} kcal\n\n"
                         if "calorie" in meal and meal["calorie"]
                         else ""
@@ -160,7 +161,10 @@ def create_menu_response(
             kakao_response.add_output_to_response(carousel)
 
     quick_replies = [
-        kakao_response.create_quick_reply(label=day, message_text=f"{day}요일{place}")
+        kakao_response.create_quick_reply(
+            label=(f"• {day}" if f"{day}요일" == today_kor else day),
+            message_text=f"{day}요일{place}",
+        )
         for day in common.DAYS_OF_WEEK_KOREAN
     ]
 

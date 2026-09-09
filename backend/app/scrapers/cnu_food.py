@@ -1,4 +1,5 @@
 import json
+import re
 
 import requests
 from bs4 import BeautifulSoup as bs
@@ -31,7 +32,11 @@ def scrape_mobile_food_menu(url: str, place: str) -> dict:
         ]
 
         for raw_data, meal_type, meal_list in meal_data:
-            meal_list.append({"type": meal_type, "menu": _extract_menu_items(raw_data)})
+            price, menu = _extract_menu(raw_data)
+            meal = {"type": meal_type, "menu": menu}
+            if price is not None:
+                meal["price"] = price
+            meal_list.append(meal)
 
         menu_data["menu"].append(
             {
@@ -67,8 +72,12 @@ def _extract_date_range(table) -> str:
     return f"{start_parts[1]}/{start_parts[2]} ~ {end_parts[1]}/{end_parts[2]}"
 
 
-def _extract_menu_items(raw_data) -> list[str]:
+def _extract_menu(raw_data) -> tuple[int | None, list[str]]:
+    price = None
     for h3 in raw_data.find_all("h3", class_="menu-tit03"):
+        match = re.search(r"\((\d[\d,]*)\)\s*$", h3.get_text(" ", strip=True))
+        if match:
+            price = int(match.group(1).replace(",", ""))
         h3.extract()
     menu = [item.strip() for item in raw_data.find_all(string=True)]
-    return [] if "운영안함" in menu else list(filter(bool, menu))
+    return price, ([] if "운영안함" in menu else list(filter(bool, menu)))
