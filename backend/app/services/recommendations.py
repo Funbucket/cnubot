@@ -23,6 +23,11 @@ _STUDENT_LOW_FIT_KEYWORDS = (
     "가구", "소파", "침대", "대형", "자동차", "골프", "유아", "출산", "산업용",
     "곤충", "사육", "홈세트", "도자기",
 )
+_STUDENT_EXCLUDED_KEYWORDS = (
+    "곤충", "사육", "교자상", "식탁", "테이블", "가구", "소파", "침대",
+    "장롱", "매트리스", "대형", "산업용", "자동차", "골프", "유아", "출산",
+    "도자기", "홈세트", "남원",
+)
 
 
 async def category_affinity(user_id: str | None) -> dict[int, float]:
@@ -188,6 +193,14 @@ def _student_fit_score(item: dict) -> float:
     return score
 
 
+def _is_student_excluded(item: dict) -> bool:
+    text = " ".join(
+        [str(item.get("displayName", ""))]
+        + [str(value) for value in item.get("_category_names", [])]
+    ).lower()
+    return any(keyword in text for keyword in _STUDENT_EXCLUDED_KEYWORDS)
+
+
 def _candidate_source_score(item: dict) -> float:
     """Give each feed a modest bonus without letting one feed dominate."""
     sources = set(item.get("_candidate_sources") or [])
@@ -220,7 +233,13 @@ def rank_candidates(
     surface: str = "default",
     selected_groups: set[str] | None = None,
 ) -> dict | None:
-    available = [item for item in items if not item.get("isSoldOut")]
+    available = [
+        item for item in items
+        if not item.get("isSoldOut") and not _is_student_excluded(item)
+    ]
+    # Prefer a shorter relevant list to filling slots with clearly unsuitable goods.
+    if not available:
+        available = [item for item in items if not item.get("isSoldOut")]
     if not available:
         return None
     recent_ids = recent_ids or {}
