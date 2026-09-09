@@ -146,7 +146,7 @@ def create_menu_response(
                     promotion_click_url,
                     label=(
                         promotions.TOSS_DORM_MENU_BUTTON_LABEL
-                        if place == "dorm"
+                        if common.get_eng_place(place) == "dorm"
                         else promotions.TOSS_LIVING_MENU_BUTTON_LABEL
                     ),
                 )

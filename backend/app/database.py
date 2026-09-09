@@ -133,6 +133,21 @@ async def init_database() -> None:
             CREATE INDEX IF NOT EXISTS idx_recommendation_item_events_user_time
                 ON recommendation_item_events(user_id, created_at DESC);
 
+            CREATE TABLE IF NOT EXISTS promotion_funnel_events (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT,
+                event_name TEXT NOT NULL,
+                source TEXT,
+                product_key TEXT,
+                taca_item_id BIGINT,
+                properties JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_promotion_funnel_events_time
+                ON promotion_funnel_events(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_promotion_funnel_events_user_time
+                ON promotion_funnel_events(user_id, created_at DESC);
+
             ALTER TABLE experiments ADD COLUMN IF NOT EXISTS unit TEXT NOT NULL DEFAULT 'user';
             ALTER TABLE experiments ADD COLUMN IF NOT EXISTS alpha DOUBLE PRECISION NOT NULL DEFAULT 0.05;
             ALTER TABLE experiments ADD COLUMN IF NOT EXISTS power DOUBLE PRECISION NOT NULL DEFAULT 0.8;
