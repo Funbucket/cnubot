@@ -144,10 +144,27 @@ async def _menu_response(
 
     response = cafeteria.create_menu_response(kor_day, menu_data, place, **inline_product)
 
-    if chosen and _inline_card_placed(response, inline_product):
+    placed = bool(chosen) and _inline_card_placed(response, inline_product)
+    if placed:
         await promotions.record_inline_exposure(user_id, product_key, product, request_id)
+    await _record_menu_view(user_id, place_key, kor_day, placed)
     await _record_promotion_button_exposures(user_id, response)
     return response
+
+
+async def _record_menu_view(
+    user_id: str | None, place_key: str, kor_day: str, inline_card: bool
+) -> None:
+    """Log every menu view, ad or not, so guardrails are not measured on ads only."""
+    try:
+        await experiments.record_funnel_event(
+            user_id,
+            "menu_view",
+            source=place_key,
+            properties={"place": place_key, "day": kor_day, "inline_card": inline_card},
+        )
+    except Exception:
+        logger.exception("failed to record menu view")
 
 
 def _inline_card_placed(response: dict, inline_product: dict) -> bool:

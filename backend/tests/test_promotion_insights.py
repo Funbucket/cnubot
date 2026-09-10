@@ -112,3 +112,42 @@ class PathSummaryTest(unittest.TestCase):
         )])[0]
         self.assertEqual(empty["action_rate"], 0)
         self.assertEqual(empty["impressions_per_user"], 0)
+
+
+class GuardrailSummaryTest(unittest.TestCase):
+    def _row(self, day, active, returned, views=0, view_users=0):
+        return {
+            "day": date(2026, 9, day), "active_users": active, "returned_users": returned,
+            "menu_views": views, "menu_view_users": view_users,
+        }
+
+    def test_computes_return_rate_and_views_per_user(self):
+        rows = [self._row(10, 100, 0), self._row(9, 200, 80, views=500, view_users=200)]
+
+        summaries = {item["day"].day: item for item in experiments._summarize_guardrails(rows)}
+
+        self.assertAlmostEqual(summaries[9]["return_rate"], 40.0)
+        self.assertAlmostEqual(summaries[9]["views_per_user"], 2.5)
+        self.assertTrue(summaries[9]["return_rate_measurable"])
+
+    def test_latest_day_is_still_pending(self):
+        rows = [self._row(10, 100, 0), self._row(9, 200, 80)]
+
+        summaries = {item["day"].day: item for item in experiments._summarize_guardrails(rows)}
+
+        self.assertTrue(summaries[10]["return_rate_pending"])
+        self.assertFalse(summaries[10]["return_rate_measurable"])
+
+    def test_a_collection_gap_is_not_reported_as_zero_retention(self):
+        # 9/8 데이터가 통째로 없으면 9/7 재방문율은 0%가 아니라 측정 불가다.
+        rows = [self._row(10, 100, 0), self._row(9, 200, 80), self._row(7, 1200, 0)]
+
+        summaries = {item["day"].day: item for item in experiments._summarize_guardrails(rows)}
+
+        self.assertFalse(summaries[7]["return_rate_measurable"])
+        self.assertFalse(summaries[7]["return_rate_pending"])
+
+    def test_days_without_menu_view_instrumentation_report_no_views(self):
+        summaries = experiments._summarize_guardrails([self._row(9, 200, 80)])
+
+        self.assertEqual(summaries[0]["views_per_user"], 0)

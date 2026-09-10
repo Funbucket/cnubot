@@ -5,6 +5,7 @@ import os
 import re
 import secrets
 import uuid
+from datetime import timedelta
 from typing import Any
 
 from app.database import get_pool
@@ -583,6 +584,41 @@ async def get_promotion_insights(start_date=None, end_date=None) -> dict[str, An
             """,
             list(click_events), start_date, end_date, excluded_user_ids,
         )
+        # 가드레일: 광고를 본 응답만이 아니라 학식 사용 전체를 기준으로 본다.
+        guardrail_rows = await conn.fetch(
+            """
+            WITH visit_events AS (
+                SELECT user_id, event_name,
+                       (created_at AT TIME ZONE 'Asia/Seoul')::date AS day
+                FROM user_events
+                WHERE user_id IS NOT NULL
+                  AND event_name IN ('menu_view', 'promotion_entry_exposure', 'promotion_exposure')
+                  AND ($1::date IS NULL OR created_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Seoul'))
+                  AND ($2::date IS NULL OR created_at < (($2::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
+                  AND NOT (user_id = ANY($3::text[]))
+            ), visits AS (
+                SELECT DISTINCT user_id, day FROM visit_events
+            ), menu_views AS (
+                SELECT day, user_id, COUNT(*)::int AS views
+                FROM visit_events WHERE event_name = 'menu_view'
+                GROUP BY day, user_id
+            )
+            SELECT v.day,
+                   COUNT(DISTINCT v.user_id)::int AS active_users,
+                   COUNT(DISTINCT v.user_id) FILTER (WHERE EXISTS (
+                       SELECT 1 FROM visits n
+                       WHERE n.user_id = v.user_id AND n.day = v.day + 1
+                   ))::int AS returned_users,
+                   COALESCE(SUM(m.views), 0)::int AS menu_views,
+                   COUNT(DISTINCT m.user_id)::int AS menu_view_users
+            FROM visits v
+            LEFT JOIN menu_views m ON m.user_id = v.user_id AND m.day = v.day
+            GROUP BY v.day
+            ORDER BY v.day DESC
+            LIMIT 14
+            """,
+            start_date, end_date, excluded_user_ids,
+        )
         totals = await conn.fetchrow(
             """
             WITH filtered_events AS (
@@ -634,6 +670,7 @@ async def get_promotion_insights(start_date=None, end_date=None) -> dict[str, An
         )
     return {
         "paths": _summarize_paths(path_rows),
+        "guardrails": _summarize_guardrails(guardrail_rows),
         "fatigue": [dict(row) for row in fatigue_rows],
         "products": [dict(row) for row in product_rows],
         "surfaces": [dict(row) for row in surface_rows],
@@ -672,6 +709,30 @@ def _summarize_paths(rows) -> list[dict[str, Any]]:
         )
         summaries.append(item)
     return sorted(summaries, key=lambda item: item["reach_users"], reverse=True)
+
+
+def _summarize_guardrails(rows) -> list[dict[str, Any]]:
+    """Daily retention and re-query volume.
+
+    다음 날 활동이 통째로 비어 있으면 0%가 아니라 측정 불가로 다뤄야 한다.
+    수집이 멈춘 날을 이탈로 읽으면 가드레일이 거짓 경보를 낸다.
+    """
+    summaries = []
+    active_days = {row["day"] for row in rows if row["active_users"]}
+    latest_day = max(active_days, default=None)
+    for row in rows:
+        item = dict(row)
+        next_day = item["day"] + timedelta(days=1)
+        item["return_rate"] = _rate(item["returned_users"], item["active_users"])
+        item["views_per_user"] = (
+            item["menu_views"] / item["menu_view_users"] if item["menu_view_users"] else 0
+        )
+        item["return_rate_pending"] = item["day"] == latest_day
+        item["return_rate_measurable"] = (
+            next_day in active_days and item["day"] != latest_day
+        )
+        summaries.append(item)
+    return summaries
 
 
 def _rate(numerator: int, denominator: int) -> float:

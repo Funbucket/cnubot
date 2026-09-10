@@ -269,6 +269,7 @@ def _insights_page(data: dict[str, Any]) -> str:
     all_reach = sum(item["reach_users"] for item in paths)
     path_rows = _insight_path_rows(paths)
     fatigue_rows = _insight_fatigue_rows(data.get("fatigue", []))
+    guardrail_rows = _insight_guardrail_rows(data.get("guardrails", []))
     path_funnels = _insight_path_funnels(paths, totals)
     entry_reach = entry_path.get("reach_users") or 0
     entry_reach_events = entry_path.get("reach_events") or 0
@@ -342,6 +343,22 @@ SELECT path,
   COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_exposure') AS exposed_users,
   COUNT(DISTINCT user_id) FILTER (WHERE event_name IN ('promotion_click', 'promotion_button_click', 'promotion_quick_reply_click', 'promotion_block_click', 'commerce_card_click')) AS clicked_users
 FROM events GROUP BY path;"""
+    guardrail_sql = """WITH visit_events AS (
+  SELECT user_id, event_name, (created_at AT TIME ZONE 'Asia/Seoul')::date AS day
+  FROM user_events
+  WHERE user_id IS NOT NULL
+    AND event_name IN ('menu_view', 'promotion_entry_exposure', 'promotion_exposure')
+), visits AS (SELECT DISTINCT user_id, day FROM visit_events
+), menu_views AS (
+  SELECT day, user_id, COUNT(*) AS views FROM visit_events
+  WHERE event_name = 'menu_view' GROUP BY day, user_id
+)
+SELECT v.day, COUNT(DISTINCT v.user_id) AS active_users,
+  COUNT(DISTINCT v.user_id) FILTER (WHERE EXISTS (
+    SELECT 1 FROM visits n WHERE n.user_id = v.user_id AND n.day = v.day + 1)) AS returned_users,
+  COALESCE(SUM(m.views), 0) AS menu_views
+FROM visits v LEFT JOIN menu_views m ON m.user_id = v.user_id AND m.day = v.day
+GROUP BY v.day ORDER BY v.day DESC;"""
     fatigue_sql = """WITH events AS (
   SELECT user_id, event_name, created_at,
          CASE WHEN surface = 'menu_inline_card' THEN 'inline' ELSE 'entry' END AS path
@@ -425,7 +442,7 @@ WHERE created_at >= :start_date AND created_at < (:end_date + INTERVAL '1 day');
 <form class="filters" method="get" action="/admin/insights"><div><label for="start_date">시작일</label><input id="start_date" name="start_date" type="date" value="{start_value}"></div><span class="tilde">~</span><div><label for="end_date">종료일</label><input id="end_date" name="end_date" type="date" value="{end_value}"></div><button type="submit">기간 적용</button><a href="/admin/insights?all_time=true">전체 기간 보기</a></form>
 <section class="hero"><div class="hero-row"><div><span class="eyebrow">DECISION DASHBOARD</span><h1>어디서 사용자가 이탈하는가?</h1><p class="sub">순차 코호트 기준 · 관리자 및 테스트 사용자 제외 · {start_value or '전체'} ~ {end_value or '현재'}</p></div><span class="live"><i></i>{data_status}</span></div></section>
 <section class="kpis"><div class="card"><span class="kpi-label">진입형 접점 노출</span><div class="kpi-value">{entry_reach:,}명</div><span class="kpi-note">{entry_reach_events:,}회 · 버튼 CTR {entry_action_rate:.2f}%</span></div><div class="card"><span class="kpi-label">진입형 최종 CTR</span><div class="kpi-value">{entry_click_rate:.2f}%</div><span class="kpi-note">버튼 본 사람 → 상품 클릭</span></div><div class="card"><span class="kpi-label">인라인형 카드 노출</span><div class="kpi-value">{inline_reach:,}명</div><span class="kpi-note">{inline_reach_events:,}회 · 진입 클릭 없음</span></div><div class="card"><span class="kpi-label">인라인형 최종 CTR</span><div class="kpi-value">{inline_click_rate:.2f}%</div><span class="kpi-note">카드 본 사람 → 상품 클릭</span></div><div class="card"><span class="kpi-label">상품 클릭 사용자</span><div class="kpi-value">{all_clicked:,}명</div><span class="kpi-note">두 경로 합계 · 접점 {all_reach:,}명</span></div></section>
-<section class="funnel"><div class="section-head"><h2>경로별 사용자 퍼널</h2><span class="hint">각 단계는 이전 단계를 통과한 사용자 기준 · 경로마다 단계 수가 다릅니다</span></div>{path_funnels}{details(summary_sql)}</section><section class="panel"><div class="panel-head"><h2>경로 비교</h2><span class="hint">접점을 본 사람 기준 · 기간 내 고유 사용자(순차 코호트 아님)</span></div><div class="scroll"><table><thead><tr><th>경로</th><th>접점 노출</th><th>1인당 노출</th><th>반응</th><th>상품 클릭</th><th>최종 CTR</th></tr></thead><tbody>{path_rows}</tbody></table></div>{details(path_sql)}</section><section class="panel"><div class="panel-head"><h2>노출 피로도</h2><span class="hint">같은 사람에게 반복 노출될수록 반응률이 어떻게 변하는가</span></div><div class="scroll"><table><thead><tr><th>경로</th><th>노출 회차</th><th>노출</th><th>반응</th><th>반응률</th></tr></thead><tbody>{fatigue_rows}</tbody></table></div>{details(fatigue_sql)}</section>
+<section class="funnel"><div class="section-head"><h2>경로별 사용자 퍼널</h2><span class="hint">각 단계는 이전 단계를 통과한 사용자 기준 · 경로마다 단계 수가 다릅니다</span></div>{path_funnels}{details(summary_sql)}</section><section class="panel"><div class="panel-head"><h2>경로 비교</h2><span class="hint">접점을 본 사람 기준 · 기간 내 고유 사용자(순차 코호트 아님)</span></div><div class="scroll"><table><thead><tr><th>경로</th><th>접점 노출</th><th>1인당 노출</th><th>반응</th><th>상품 클릭</th><th>최종 CTR</th></tr></thead><tbody>{path_rows}</tbody></table></div>{details(path_sql)}</section><section class="panel"><div class="panel-head"><h2>가드레일 · 학식 경험</h2><span class="hint">광고가 붙은 응답만이 아니라 학식 사용 전체 기준 · 나빠지면 광고를 줄여야 합니다</span></div><div class="scroll"><table><thead><tr><th>날짜</th><th>활성 사용자</th><th>1인당 학식 조회</th><th>다음날 재방문</th></tr></thead><tbody>{guardrail_rows}</tbody></table></div>{details(guardrail_sql)}</section><section class="panel"><div class="panel-head"><h2>노출 피로도</h2><span class="hint">같은 사람에게 반복 노출될수록 반응률이 어떻게 변하는가</span></div><div class="scroll"><table><thead><tr><th>경로</th><th>노출 회차</th><th>노출</th><th>반응</th><th>반응률</th></tr></thead><tbody>{fatigue_rows}</tbody></table></div>{details(fatigue_sql)}</section>
 <h2>무엇이 성과를 만들었나</h2><p class="sub">기간은 한국 시간 기준입니다. 아래 상세 표는 기간 내 전체 이벤트의 고유 사용자 수이며, 위 요약은 같은 기간 안에 순서대로 진입한 사용자만 집계합니다. 버튼·상품 노출은 응답에 포함된 횟수로, 실제 화면 열람을 보장하지 않습니다. 문구별 노출 시간대가 달라 CTR 차이만으로 문구의 우열을 단정할 수 없습니다.</p><section class="layout"><section class="panel"><div class="panel-head"><h2>상품별 성과</h2><span class="hint">노출·클릭·CTR</span></div><div class="scroll"><table><thead><tr><th>상품</th><th>노출</th><th>클릭</th><th>CTR</th><th>주요 접점</th></tr></thead><tbody>{product_rows}</tbody></table></div>{details(product_sql)}</section><section class="panel"><div class="panel-head"><h2>버튼 문구 성과</h2><span class="hint">버튼 노출 → 버튼 클릭 → 상품 클릭</span></div><div class="scroll"><table><thead><tr><th>문구</th><th>버튼 노출</th><th>버튼 클릭</th><th>버튼 CTR</th><th>상품 클릭</th><th>상품 CTR</th></tr></thead><tbody>{message_rows}</tbody></table></div>{details(button_sql)}</section></section>
 <section class="panel"><div class="panel-head"><h2>최근 추이</h2><span class="hint">KST · 최근 30일</span></div><div class="scroll"><table><thead><tr><th>날짜</th><th>노출</th><th>클릭 사용자</th><th>클릭 이벤트</th></tr></thead><tbody>{daily_rows}</tbody></table></div>{details(daily_sql)}</section>
 <h2>상품 카드 위치 효과</h2><section class="panel"><div class="panel-head"><h2>어느 위치가 강한가?</h2><span class="hint">commerceCard 순서별 클릭률</span></div><div class="position-grid">{position_rows}</div>{details(position_sql)}</section>
@@ -458,6 +475,29 @@ def _insight_path_rows(paths: list[dict[str, Any]]) -> str:
             f"<small>노출당 {path['impression_click_rate']:.2f}%</small></td></tr>"
         )
     return "".join(rows) or '<tr><td colspan="6" class="sub">아직 경로별 데이터가 없습니다.</td></tr>'
+
+
+def _insight_guardrail_rows(guardrails: list[dict[str, Any]]) -> str:
+    rows = []
+    for item in guardrails:
+        if item["return_rate_pending"]:
+            retention = '<span class="sub">집계 중</span>'
+        elif not item["return_rate_measurable"]:
+            retention = '<span class="sub">측정 불가</span>'
+        else:
+            retention = f"<b>{item['return_rate']:.2f}%</b><small>{item['returned_users']:,}명 복귀</small>"
+        views = (
+            f"{item['views_per_user']:.2f}회<small>{item['menu_views']:,}회 / {item['menu_view_users']:,}명</small>"
+            if item["menu_view_users"]
+            else '<span class="sub">계측 전</span>'
+        )
+        rows.append(
+            f"<tr><td data-label=\"날짜\">{html.escape(str(item['day']))}</td>"
+            f"<td data-label=\"활성 사용자\">{item['active_users']:,}명</td>"
+            f"<td data-label=\"1인당 학식 조회\">{views}</td>"
+            f"<td data-label=\"다음날 재방문\">{retention}</td></tr>"
+        )
+    return "".join(rows) or '<tr><td colspan="4" class="sub">아직 가드레일 데이터가 없습니다.</td></tr>'
 
 
 def _insight_fatigue_rows(fatigue: list[dict[str, Any]]) -> str:
