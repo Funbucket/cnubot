@@ -16,7 +16,7 @@ from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 
 DISCLOSURE = "이 포스팅은 토스쇼핑 쉐어링크 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다."
-FIXED_PRODUCT_BUTTON_LABEL = "특가 구경하기"
+FIXED_PRODUCT_BUTTON_LABEL = "특가 바로가기"
 FIXED_PROMOTION_INTRO = (
     "🛍️  오늘의 추천 상품\n"
     "✱ 츠누봇이 토스와 준비한 특가예요.\n"
@@ -39,6 +39,8 @@ class Product(BaseModel):
     description: str = Field(default="", max_length=180)
     image_url: str = Field(default="", max_length=2000)
     enabled: bool = True
+    show_unit_price: bool = False
+    unit_count: int | None = Field(default=None, gt=1, le=100000)
     taca_item_id: int | None = Field(default=None, gt=0)
 
     _link = field_validator("url")(validate_link)
@@ -123,7 +125,22 @@ def parse_share_text(text: str) -> Product:
     url = validate_link(urls[0])
     lines = [line.strip() for line in text.replace(url, "").splitlines()
              if line.strip() and not any(word in line for word in ("수수료", "쉐어링크 활동"))]
-    return Product(title=" ".join(lines) or "토스쇼핑 상품", url=url)
+    title = " ".join(lines) or "토스쇼핑 상품"
+    return Product(title=title, url=url, unit_count=infer_unit_count(title))
+
+
+def infer_unit_count(title: str) -> int | None:
+    """Infer a bundle count for the optional per-item price message.
+
+    For titles such as ``100매 10팩`` the last package count (10팩) is used.
+    The editor keeps this value editable because product titles are not a
+    reliable source of merchandising quantity.
+    """
+    matches = re.findall(r"(?<!\d)(\d{1,5})\s*(?:개입|개|입|팩|매|롤|캔|병|봉|포)\b", title.lower())
+    if not matches:
+        return None
+    count = int(matches[-1])
+    return count if count > 1 else None
 
 
 def enrich_product(product: Product) -> Product:
@@ -192,10 +209,12 @@ async def market_product(product: Product, force: bool = False) -> dict:
                 raise ValueError("상품 가격을 확인하지 못했습니다.")
             original = original if isinstance(original, int) and original >= price else price
             rate = rate if isinstance(rate, (int, float)) and 0 <= rate <= 100 else round((original-price)/original*100) if original else 0
+            api_unit_count = infer_unit_count(str(item.get("displayName") or ""))
             metadata = {"taca_item_id": resolved.taca_item_id,
                         "price": price, "original_price": original,
                         "discount_rate": rate, "discount": original-price,
                         "is_sold_out": bool(item.get("isSoldOut")),
+                        "unit_count": resolved.unit_count or api_unit_count,
                         "category_ids": item.get("categoryIds") or [],
                         "market_image_url": item.get("thumbnailUrl") or resolved.image_url,
                         "price_checked_at": int(time.time()), "price_error": ""}

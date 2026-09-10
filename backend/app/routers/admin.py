@@ -3,7 +3,7 @@ import asyncio
 import os
 import secrets
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -132,7 +132,7 @@ async def insights(
 ):
     if not all_time and start_date is None and end_date is None:
         end_date = datetime.now(ZoneInfo("Asia/Seoul")).date()
-        start_date = end_date - timedelta(days=29)
+        start_date = end_date
     if start_date and end_date and start_date > end_date:
         raise HTTPException(status_code=400, detail="시작일은 종료일보다 늦을 수 없습니다.")
     cache_key = (start_date, end_date)

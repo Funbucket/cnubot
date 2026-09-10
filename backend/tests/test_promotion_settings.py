@@ -176,7 +176,7 @@ class PromotionSettingsTest(unittest.TestCase):
         self.assertEqual(card["items"][0]["price"], 55800)
         self.assertEqual(card["items"][0]["discountedPrice"], 19900)
         self.assertEqual(card["items"][0]["discountRate"], 64)
-        self.assertEqual(card["items"][0]["description"], "64% 할인 · 최대할인가 19,900원")
+        self.assertEqual(card["items"][0]["description"], "")
         self.assertEqual(card["items"][0]["title"], item.title)
         api.assert_awaited_once()
 

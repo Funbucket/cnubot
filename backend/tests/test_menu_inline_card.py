@@ -213,8 +213,14 @@ class InlineProductOutputTest(unittest.TestCase):
     def test_matches_the_product_list_wording(self):
         card = promotions.create_inline_product_output(INLINE_PRODUCT)["commerceCard"]
 
-        self.assertEqual(card["description"], "74% 할인 · 최대할인가 7,500원")
+        self.assertEqual(card["description"], "")
         self.assertNotIn("운영비", card["description"])
+
+    def test_unit_price_copy_matches_the_product_list(self):
+        product = dict(INLINE_PRODUCT, show_unit_price=True, unit_count=10)
+        card = promotions.create_inline_product_output(product)["commerceCard"]
+
+        self.assertEqual(card["description"], "🏷️ 1개당 750원")
 
     def test_stays_inside_kakao_commerce_card_limits(self):
         product = dict(

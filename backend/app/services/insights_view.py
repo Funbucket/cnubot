@@ -33,7 +33,7 @@ def render_insights(data):
     presets += f'<a class="preset{" selected" if not start and not end else ""}" href="?all_time=true">전체</a>'
     cards = []
     for label, p, metric, note in [
-        ('버튼 경유 · 상품 클릭', entry, 'clicked_users', '버튼에서 상품 목록으로 이동한 경로'),
+        ('버튼 경유 · 목록 진입', entry, 'action_users', '버튼을 눌러 상품 목록으로 이동한 경로'),
         ('바로 노출 · 상품 클릭', inline, 'clicked_users', '학식 응답 안에 상품이 바로 보이는 경로'),
     ]:
         reach, clicked = p.get('reach_users', 0), p.get(metric, 0)
@@ -46,7 +46,7 @@ def render_insights(data):
         observations.append(('데이터를 기다리고 있어요', '기간을 넓혀 보세요. 데이터가 수집되면 경로별 성과와 상품 순위가 표시됩니다.'))
     else:
         if entry.get('reach_users'):
-            observations.append(('버튼에서 얼마나 이동했나요?', f"버튼을 본 {entry['reach_users']:,}명 중 {entry.get('action_users', 0):,}명이 반응했습니다. 버튼 반응률은 {rate(entry.get('action_users', 0), entry['reach_users'])}입니다."))
+            observations.append(('버튼에서 상품 목록으로 이동했나요?', f"버튼을 본 {entry['reach_users']:,}명 중 {entry.get('action_users', 0):,}명이 상품 목록으로 이동했습니다. 진입률은 {rate(entry.get('action_users', 0), entry['reach_users'])}입니다."))
         if products:
             best = max(products, key=lambda p: p.get('clicked_users', 0))
             if best.get('clicked_users'):

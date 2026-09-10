@@ -408,11 +408,8 @@ async def get_promotion_insights(start_date=None, end_date=None) -> dict[str, An
         "promotion_click", "promotion_button_click", "promotion_quick_reply_click",
         "promotion_block_click", "commerce_card_click",
     )
-    excluded_user_ids = [
-        value.strip()
-        for value in os.getenv("ANALYTICS_EXCLUDED_USER_IDS", "").split(",")
-        if value.strip()
-    ]
+    developer_id = os.getenv("DEVELOPER_ID", "").strip()
+    excluded_user_ids = [developer_id] if developer_id else []
     async with pool.acquire() as conn:
         product_rows = await conn.fetch(
             """

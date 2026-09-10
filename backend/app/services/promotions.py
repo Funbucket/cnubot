@@ -50,6 +50,13 @@ MENU_BUTTON_LABELS = (
 )
 TOSS_CANDIDATE_POOL_SIZE = 100
 COMMERCE_CARDS_PER_ROW = 3
+
+
+def commerce_grid_position(position: int) -> tuple[int, int]:
+    """Return Kakao's two-row, column-first visual coordinates for an item."""
+    zero_based = position - 1
+    return zero_based % 2 + 1, zero_based // 2 + 1
+
 KST = ZoneInfo("Asia/Seoul")
 
 # 학식 응답에 상품을 바로 끼워넣는 카드는 진입 버튼과 달리 무시 비용이 크므로,
@@ -349,12 +356,13 @@ async def get_live_toss_products(
         except asyncio.TimeoutError:
             products = promotion_settings.fixed_products(settings)[:limit]
         for position, (key, product) in enumerate(products, 1):
+            row, column = commerce_grid_position(position)
             TOSS_SHOPPING_PRODUCTS[key] = product
             try:
                 await recommendations.record_exposure(
                     user_id, surface, product.get("taca_item_id") or 0, product.get("category_ids") or [], product_key=key,
                     properties={"product_name": product["title"], "position": position,
-                                "row": (position - 1) // 3 + 1, "column": (position - 1) % 3 + 1,
+                                "row": row, "column": column,
                                 "selection_mode": "fixed", "settings_revision": settings.revision,
                                 "product_button_label": product["button_label"]},
                     request_id=request_id,
@@ -404,6 +412,8 @@ async def get_live_toss_products(
                 "candidate_sources": item.get("_candidate_sources", []),
             }
             product = TOSS_SHOPPING_PRODUCTS[product_key]
+            position = len(products) + 1
+            row, column = commerce_grid_position(position)
             await recommendations.record_exposure(
                 user_id,
                 surface,
@@ -412,9 +422,9 @@ async def get_live_toss_products(
                 product_key=product_key,
                 properties={
                     "product_name": product["title"],
-                    "position": len(products) + 1,
-                    "row": len(products) // 3 + 1,
-                    "column": len(products) % 3 + 1,
+                    "position": position,
+                    "row": row,
+                    "column": column,
                 },
                 request_id=request_id,
             )
@@ -664,13 +674,25 @@ def _trim_product_title(title: str, limit: int = COMMERCE_CARD_TITLE_LIMIT) -> s
 
 
 def inline_product_description(product: dict) -> str:
-    """Use the same wording as the product list shown after the entry button."""
-    custom = (product.get("description") or "").strip()
-    if custom:
-        return custom
-    if product.get("price") is None:
-        return "현재 가격과 구매 조건은 토스에서 확인해주세요."
-    return f"{product.get('discount_rate') or 0}% 할인 · 최대할인가 {product['price']:,}원"
+    """Match the fixed product list: show only an enabled unit-price callout."""
+    return unit_price_suffix(product).lstrip("\n")
+
+
+def unit_price_suffix(product: dict) -> str:
+    """Return an optional per-item price callout for fixed products."""
+    if not product.get("show_unit_price"):
+        return ""
+    count = product.get("unit_count")
+    price = product.get("price")
+    if not isinstance(count, int) or count <= 1 or not isinstance(price, (int, float)) or price <= 0:
+        return ""
+    return f"\n🏷️ 1개당 {round(price / count):,}원"
+
+
+def fixed_product_description(product: dict) -> str:
+    # commerceCard already renders original price, sale price, and discount
+    # rate above this area. The description is reserved for unit price only.
+    return unit_price_suffix(product).lstrip("\n")
 
 
 def _inline_product_button(product: dict, click_url: str | None) -> dict:
@@ -747,8 +769,7 @@ def create_toss_shopping_list_response(
         cards = []
         for product, click_url in zip(products, click_urls):
             card = {"title": product["title"][:50],
-                    "description": ("품절 · " if product.get("is_sold_out") else "") + (product.get("description") or
-                                    (f"{product['discount_rate']}% 할인 · 최대할인가 {product['price']:,}원" if product.get("price") is not None else "현재 가격과 구매 조건은 토스에서 확인해주세요.")),
+                    "description": ("품절 · " if product.get("is_sold_out") else "") + fixed_product_description(product),
                     "buttons": [{"action": "webLink", "label": product["button_label"],
                                  "webLinkUrl": click_url or product["url"]}]}
             if product.get("image_url"):
@@ -767,7 +788,7 @@ def create_toss_shopping_list_response(
         cards.append(
             {
                 "title": product["title"],
-                "description": product.get("description") if is_fixed and product.get("description") else f"{product['discount_rate']}% 할인 · 최대할인가 {product['price']:,}원",
+                "description": fixed_product_description(product) if is_fixed else f"{product['discount_rate']}% 할인 · 최대할인가 {product['price']:,}원",
                 "price": product["original_price"],
                 "currency": "won",
                 "discount": product["discount"],
