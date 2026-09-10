@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 
 DISCLOSURE = "이 포스팅은 토스쇼핑 쉐어링크 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다."
+FIXED_PRODUCT_BUTTON_LABEL = "특가 구경하기"
 FIXED_PROMOTION_INTRO = (
     "🛍️  오늘의 추천 상품\n"
     "✱ 츠누봇이 토스와 준비한 특가예요.\n"
@@ -110,7 +111,7 @@ def product_key(url: str) -> str:
 
 
 def fixed_products(settings: Settings) -> list[tuple[str, dict]]:
-    return [(product_key(p.url), {**p.model_dump(), "selection_mode": "fixed",
+    return [(product_key(p.url), {**p.model_dump(), "button_label": FIXED_PRODUCT_BUTTON_LABEL, "selection_mode": "fixed",
              "candidate_sources": ["admin_fixed"], "settings_revision": settings.revision})
             for p in settings.products if p.enabled]
 

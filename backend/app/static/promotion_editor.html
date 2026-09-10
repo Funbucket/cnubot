@@ -12,7 +12,7 @@
 <fieldset id="fields" disabled style="border:0;padding:0;margin:0;min-width:0">
 <section class="card"><h2>노출 방식</h2><label class="check"><input id="fixed" type="checkbox" role="switch">고정 상품 모드</label><p id="modeHelp" class="sub"></p><div class="cols"><div><label for="menuLabel">학식 메뉴 버튼 문구 · 최대 14자</label><input id="menuLabel" maxlength="14" placeholder="예: 🥤 하이뮨 가격 보기"></div><div><label for="quickLabel">스케줄 퀵리플라이 문구 · 최대 20자</label><input id="quickLabel" maxlength="20" placeholder="예: 🥤 하이뮨 18개 가격 보기"></div></div><p class="sub">빈칸이면 자동 추천 모드에서는 기존 시간대별 문구, 고정 모드에서는 ‘🛍️ 오늘의 추천 상품’을 사용합니다. 직접 입력한 문구는 두 모드 모두에 적용됩니다.</p></section>
 <section class="card"><h2>공유 문구로 상품 추가</h2><label for="shareText">토스에서 복사한 문구 전체 또는 공유 링크</label><textarea id="shareText" rows="5" maxlength="5000" placeholder="✱ 이 포스팅은 토스쇼핑 쉐어링크 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.&#10;일동후디스 하이뮨 프로틴 밸런스 액티브 밤티라미수 제로, 250ml, 18개&#10;https://toss.im/_m/l6bqsMls"></textarea><p class="sub">한 번에 상품 하나씩 추가하세요. 상품명과 링크를 추출하고 이미지를 조회합니다. 추가 후 ‘저장하고 적용’을 눌러야 반영됩니다.</p><button id="add" type="button">상품 불러오기</button></section>
-<section class="card"><h2>고정 상품과 순서</h2><p class="sub">위에서부터 노출합니다. ↑ ↓ 버튼으로 이동하세요. 노출은 최대 6개, 숨김을 포함해 30개까지 보관할 수 있습니다. 자동 추천 모드에서도 이 목록은 보관됩니다.</p><div id="products"></div></section>
+<section class="card"><h2>고정 상품과 순서</h2><p class="sub">위에서부터 노출합니다. ↑ ↓ 버튼으로 이동하세요. 노출은 최대 6개, 숨김을 포함해 30개까지 보관할 수 있습니다. 자동 추천 모드에서도 이 목록은 보관됩니다. 고정 모드의 상품 버튼은 <b>특가 구경하기</b>로 표시됩니다.</p><div id="products"></div></section>
 <section class="card"><div class="toolbar"><h2>카카오톡 상품 미리보기</h2><button id="refreshPreview" type="button" class="secondary">가격 새로고침</button></div><p id="previewNote" class="sub"></p><p id="previewStatus" class="preview-status" role="status" aria-live="polite"></p><div id="preview" class="preview"></div><p class="sub small">실제 챗봇과 같은 응답 데이터로 표시합니다. 한 줄에 3개씩 가로로 넘길 수 있습니다. 순서 번호는 상품명에 표시하지 않습니다. 기기의 글꼴과 화면 크기에 따라 줄바꿈은 달라질 수 있습니다.</p></section>
 </fieldset>
 <p id="message" role="status" aria-live="polite"></p>
@@ -39,7 +39,7 @@ function render(){
   const label=document.createElement('label');label.className='check';const checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.checked=p.enabled;checkbox.onchange=()=>{p.enabled=checkbox.checked;changed();render();};label.append(checkbox,'노출');toolbar.append(label);
   toolbar.append(button('삭제',()=>{state.products.splice(i,1);changed();render();},false,'danger'));article.append(toolbar);
   const grid=document.createElement('div');grid.className='cols';
-  grid.append(input('상품명',p.title,v=>p.title=v,200),input('상품 버튼 문구 · 최대 14자',p.button_label,v=>p.button_label=v,14),input('상품 설명 · 선택',p.description,v=>p.description=v,180),input('이미지 URL · 선택',p.image_url,v=>p.image_url=v,2000));
+  grid.append(input('상품명',p.title,v=>p.title=v,200),input('상품 버튼 문구 · 자동 모드에서 사용',p.button_label,v=>p.button_label=v,14),input('상품 설명 · 선택',p.description,v=>p.description=v,180),input('이미지 URL · 선택',p.image_url,v=>p.image_url=v,2000));
   const link=document.createElement('a');link.href=p.url;link.textContent=p.url;link.target='_blank';link.rel='noopener noreferrer';link.className='small';article.append(grid,link);$('products').append(article);
  });
  if(!state.products.length){const p=document.createElement('p');p.className='sub';p.textContent='등록된 고정 상품이 없습니다. 위에서 공유 문구를 붙여넣어 추가하세요.';$('products').append(p);}

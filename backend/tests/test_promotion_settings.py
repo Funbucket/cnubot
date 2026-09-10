@@ -59,6 +59,7 @@ class PromotionSettingsTest(unittest.TestCase):
         self.assertEqual(saved.revision, 1)
         read = settings.read_settings()
         self.assertEqual([p[1]["url"].split("/")[-1] for p in settings.fixed_products(read)], ["second", "first"])
+        self.assertEqual(settings.fixed_products(read)[0][1]["button_label"], settings.FIXED_PRODUCT_BUTTON_LABEL)
         with self.assertRaises(ValueError):
             settings.save_settings(initial)
         self.assertEqual(settings.read_settings(), saved)
