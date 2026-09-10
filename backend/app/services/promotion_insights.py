@@ -11,6 +11,61 @@ _PATH_EVENTS_CTE = """
                 WHERE ($2::date IS NULL OR created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
                   AND ($3::date IS NULL OR created_at < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
                   AND (user_id IS NULL OR NOT (user_id = ANY($4::text[])))
+                  -- Keep each funnel step inside the selected period. The
+                  -- qualification view intentionally looks at historical
+                  -- events, but a dashboard period must not inherit a
+                  -- button click from an exposure before that period.
+                  AND (
+                    event_name <> 'promotion_entry_click'
+                    OR EXISTS (
+                      SELECT 1 FROM qualified_promotion_events p
+                      WHERE p.user_id = qualified_promotion_events.user_id
+                        AND p.event_name = 'promotion_entry_exposure'
+                        AND p.created_at <= qualified_promotion_events.created_at
+                        AND ($2::date IS NULL OR p.created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
+                        AND ($3::date IS NULL OR p.created_at < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
+                    )
+                  )
+                  AND (
+                    event_name <> 'promotion_exposure'
+                    OR EXISTS (
+                      SELECT 1 FROM qualified_promotion_events c
+                      JOIN qualified_promotion_events p
+                        ON p.user_id = c.user_id
+                       AND p.event_name = 'promotion_entry_exposure'
+                       AND p.created_at <= c.created_at
+                      WHERE c.user_id = qualified_promotion_events.user_id
+                        AND c.event_name = 'promotion_entry_click'
+                        AND c.created_at <= qualified_promotion_events.created_at
+                        AND ($2::date IS NULL OR c.created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
+                        AND ($3::date IS NULL OR c.created_at < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
+                        AND ($2::date IS NULL OR p.created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
+                        AND ($3::date IS NULL OR p.created_at < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
+                    )
+                  )
+                  AND (
+                    event_name NOT IN ('promotion_click', 'promotion_button_click', 'promotion_quick_reply_click', 'promotion_block_click', 'commerce_card_click')
+                    OR EXISTS (
+                      SELECT 1 FROM qualified_promotion_events x
+                      JOIN qualified_promotion_events c
+                        ON c.user_id = x.user_id
+                       AND c.event_name = 'promotion_entry_click'
+                       AND c.created_at <= x.created_at
+                      JOIN qualified_promotion_events p
+                        ON p.user_id = c.user_id
+                       AND p.event_name = 'promotion_entry_exposure'
+                       AND p.created_at <= c.created_at
+                      WHERE x.user_id = qualified_promotion_events.user_id
+                        AND x.event_name = 'promotion_exposure'
+                        AND x.created_at <= qualified_promotion_events.created_at
+                        AND ($2::date IS NULL OR x.created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
+                        AND ($3::date IS NULL OR x.created_at < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
+                        AND ($2::date IS NULL OR c.created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
+                        AND ($3::date IS NULL OR c.created_at < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
+                        AND ($2::date IS NULL OR p.created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
+                        AND ($3::date IS NULL OR p.created_at < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
+                    )
+                  )
 """
 
 
