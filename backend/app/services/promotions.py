@@ -57,8 +57,7 @@ KST = ZoneInfo("Asia/Seoul")
 INLINE_CARD_SURFACE = "menu_inline_card"
 INLINE_CARD_MAX_PRICE = 20000
 INLINE_CARD_MIN_DISCOUNT_RATE = 30
-# textCard 캐러셀은 title 50자, description 128자, commerceCard는 30자/40자까지 노출한다.
-INLINE_CARD_TITLE_LIMIT = 50
+# commerceCard는 title 30자, description 40자까지 노출한다.
 INLINE_CARD_BUTTON_LIMIT = 14
 COMMERCE_CARD_TITLE_LIMIT = 30
 COMMERCE_CARD_DESCRIPTION_LIMIT = 40
@@ -655,31 +654,13 @@ async def get_inline_promotion_product(
     )
 
 
-def _trim_product_title(title: str, limit: int = INLINE_CARD_TITLE_LIMIT) -> str:
+def _trim_product_title(title: str, limit: int = COMMERCE_CARD_TITLE_LIMIT) -> str:
     """Cut a long Toss product name at an option boundary instead of mid-word."""
     if len(title) <= limit:
         return title
     head = title[:limit - 1]
     boundary = head.rfind(",")
     return (head[:boundary] if boundary > limit // 2 else head).rstrip(" ,") + "…"
-
-
-def _strikethrough(text: str) -> str:
-    """textCard는 서식을 못 쓰므로 결합 문자로 취소선을 흉내낸다."""
-    return "".join(f"{character}̶" for character in text)
-
-
-def _inline_price_lines(product: dict) -> str:
-    """Mimic the commerceCard price block: 할인율 + 취소선 정가, 그 아래 최종가."""
-    price = product.get("price") or 0
-    original_price = product.get("original_price") or price
-    final_line = f"{price:,}원"
-    if original_price <= price:
-        return final_line
-    original_line = _strikethrough(f"{original_price:,}원")
-    if product.get("discount_rate"):
-        return f"{product['discount_rate']}% {original_line}\n{final_line}"
-    return f"{original_line}\n{final_line}"
 
 
 def inline_product_description(product: dict) -> str:
@@ -692,12 +673,21 @@ def inline_product_description(product: dict) -> str:
     return f"{product.get('discount_rate') or 0}% 할인 · 최대할인가 {product['price']:,}원"
 
 
+def _inline_product_button(product: dict, click_url: str | None) -> dict:
+    label = (product.get("button_label") or "구매하러 가기").removesuffix(" · 제휴")
+    return {
+        "action": "webLink",
+        "label": label[:INLINE_CARD_BUTTON_LIMIT],
+        "webLinkUrl": click_url or product["url"],
+    }
+
+
 def create_inline_product_output(product: dict, click_url: str | None = None) -> dict:
-    """Build the commerceCard output used when a spare output slot is available."""
+    """Build the commerceCard output that takes an unused meal slot."""
     price = product.get("price") or 0
     original_price = product.get("original_price") or price
     commerce_card = {
-        "title": _trim_product_title(product["title"], COMMERCE_CARD_TITLE_LIMIT),
+        "title": _trim_product_title(product["title"]),
         "description": inline_product_description(product)[:COMMERCE_CARD_DESCRIPTION_LIMIT],
         "price": original_price,
         "currency": "won",
@@ -711,32 +701,6 @@ def create_inline_product_output(product: dict, click_url: str | None = None) ->
     elif original_price > price:
         commerce_card["discount"] = original_price - price
     return {"commerceCard": commerce_card}
-
-
-def _inline_product_button(product: dict, click_url: str | None) -> dict:
-    label = (product.get("button_label") or "구매하러 가기").removesuffix(" · 제휴")
-    return {
-        "action": "webLink",
-        "label": label[:INLINE_CARD_BUTTON_LIMIT],
-        "webLinkUrl": click_url or product["url"],
-    }
-
-
-def create_inline_product_card(product: dict, click_url: str | None = None) -> dict:
-    """Build the textCard that sits at the end of a meal row.
-
-    끼니별 3행 레이아웃을 지키려면 메뉴와 같은 carousel에 들어가야 하고,
-    carousel은 카드 타입이 하나뿐이라 textCard로 맞춘다.
-    """
-    # 취소선 가격 블록이 commerceCard의 가격 UI를 대신하므로, 같은 값을 반복하지 않는다.
-    custom = (product.get("description") or "").strip()
-    description = f"{_inline_price_lines(product)}\n\n{custom}" if custom else _inline_price_lines(product)
-    return kakao_json_response.KakaoJsonResponse.create_text_card(
-        title=_trim_product_title(product["title"]),
-        description=description,
-        buttons=[_inline_product_button(product, click_url)],
-        button_layout="vertical",
-    )
 
 
 def create_toss_shopping_response(product: dict | None = None, click_url: str | None = None):

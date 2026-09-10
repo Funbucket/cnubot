@@ -90,10 +90,7 @@ class MealTimeOverTest(unittest.TestCase):
 
 class BreakfastReplacementTest(unittest.TestCase):
     def _inline(self):
-        return {
-            "inline_product_card": promotions.create_inline_product_card(INLINE_PRODUCT),
-            "inline_product_output": promotions.create_inline_product_output(INLINE_PRODUCT),
-        }
+        return {"inline_product_output": promotions.create_inline_product_output(INLINE_PRODUCT)}
 
     def _run(self, menu_data, over):
         with mock.patch.object(

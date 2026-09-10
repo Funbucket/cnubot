@@ -125,73 +125,6 @@ class InlineCardAudienceTest(unittest.TestCase):
             self.assertFalse(cafeteria_router._inline_card_enabled("someone-else"))
 
 
-class InlineProductCardTest(unittest.TestCase):
-    def test_card_mimics_the_commerce_card_price_block(self):
-        card = promotions.create_inline_product_card(
-            INLINE_PRODUCT, "https://cnubot.example/click?token=x"
-        )
-        price_block = card["description"].split("\n\n")[0]
-
-        self.assertEqual(card["title"], INLINE_PRODUCT["title"])
-        # 할인율 + 취소선 정가, 그 아래 최종가.
-        self.assertTrue(price_block.startswith("74% "))
-        self.assertIn("2̶9̶,̶9̶0̶0̶원̶", price_block)
-        self.assertEqual(price_block.split("\n")[1], "7,500원")
-        self.assertEqual(
-            card["buttons"][0]["webLinkUrl"], "https://cnubot.example/click?token=x"
-        )
-
-    def test_card_matches_the_product_list_wording(self):
-        output = promotions.create_inline_product_output(INLINE_PRODUCT)
-        card = promotions.create_inline_product_card(INLINE_PRODUCT)
-
-        # 퀵리플라이 목록의 카드 설명과 같은 문구를 쓴다.
-        self.assertEqual(
-            output["commerceCard"]["description"], "74% 할인 · 최대할인가 7,500원"
-        )
-        for text in (output["commerceCard"]["description"], card["description"]):
-            self.assertNotIn("운영비", text)
-            self.assertNotIn("수수료", text)
-
-    def test_custom_product_description_is_kept(self):
-        product = dict(INLINE_PRODUCT, description="🧻 1매당 8원 · 무료배송 특가")
-
-        self.assertEqual(
-            promotions.create_inline_product_output(product)["commerceCard"]["description"],
-            "🧻 1매당 8원 · 무료배송 특가",
-        )
-        self.assertIn(
-            "🧻 1매당 8원 · 무료배송 특가",
-            promotions.create_inline_product_card(product)["description"],
-        )
-
-    def test_card_uses_the_product_button_label(self):
-        card = promotions.create_inline_product_card(
-            dict(INLINE_PRODUCT, button_label="🧻 물티슈 특가 · 제휴")
-        )
-
-        self.assertEqual(card["buttons"][0]["label"], "🧻 물티슈 특가")
-
-    def test_card_stays_inside_kakao_text_card_carousel_limits(self):
-        product = dict(
-            INLINE_PRODUCT,
-            title="일동후디스 하이뮨 프로틴 밸런스 액티브 밤티라미수 제로 250ml 18개입 대용량 기획세트 한정",
-        )
-        card = promotions.create_inline_product_card(product)
-
-        self.assertLessEqual(len(card["title"]), 50)
-        self.assertLessEqual(len(card["description"]), 128)
-        self.assertLessEqual(len(card["buttons"][0]["label"]), 14)
-
-    def test_card_falls_back_to_a_plain_price_without_a_discount(self):
-        product = dict(INLINE_PRODUCT, original_price=7500)
-        product.pop("discount_rate")
-        card = promotions.create_inline_product_card(product)
-
-        self.assertEqual(card["description"], "7,500원")
-        self.assertNotIn("̶", card["description"])
-
-
 class MenuInlineCardResponseTest(unittest.TestCase):
     def test_menu_keeps_three_meal_rows_without_inline_product(self):
         response = cafeteria.create_menu_response("월요일", MENU_DATA, "상록회관")
@@ -201,26 +134,8 @@ class MenuInlineCardResponseTest(unittest.TestCase):
         lunch_card = outputs[1]["carousel"]["items"][0]
         self.assertEqual(len(lunch_card["buttons"]), 2)
 
-    def test_inline_card_joins_the_lunch_row_and_keeps_three_rows(self):
-        card = promotions.create_inline_product_card(INLINE_PRODUCT)
-        response = cafeteria.create_menu_response(
-            "월요일", MENU_DATA, "상록회관", inline_product_card=card
-        )
-        outputs = response["template"]["outputs"]
-
-        # 끼니별 3행이 유지되고 상품 카드는 점심 행 끝에 붙는다.
-        self.assertEqual(len(outputs), 3)
-        self.assertTrue(all(o["carousel"]["type"] == "textCard" for o in outputs))
-        lunch_items = outputs[1]["carousel"]["items"]
-        self.assertEqual(len(lunch_items), 3)
-        self.assertIs(lunch_items[2], card)
-        self.assertEqual(
-            [button["label"] for button in lunch_items[0]["buttons"]], ["식단 공유하기"]
-        )
-
     def test_commerce_card_takes_the_empty_meal_slot(self):
         """빈 끼니 자리를 물려받아 아침·점심·저녁 순서가 유지된다."""
-        card = promotions.create_inline_product_card(INLINE_PRODUCT)
         output = promotions.create_inline_product_output(INLINE_PRODUCT)
         cases = {
             "breakfast": (dict(MENU_DATA, breakfast=[]), 0),
@@ -230,83 +145,44 @@ class MenuInlineCardResponseTest(unittest.TestCase):
         for empty_meal, (menu_data, expected_index) in cases.items():
             with self.subTest(empty_meal=empty_meal):
                 response = cafeteria.create_menu_response(
-                    "월요일", menu_data, "상록회관",
-                    inline_product_card=card, inline_product_output=output,
+                    "월요일", menu_data, "상록회관", inline_product_output=output
                 )
                 outputs = response["template"]["outputs"]
 
                 self.assertEqual(len(outputs), 3)
                 self.assertIs(outputs[expected_index], output)
-                self.assertEqual(
-                    outputs[expected_index]["commerceCard"]["thumbnails"],
-                    [{"imageUrl": INLINE_PRODUCT["image_url"]}],
-                )
 
-    def test_commerce_card_takes_the_first_empty_slot_when_several_are_free(self):
-        card = promotions.create_inline_product_card(INLINE_PRODUCT)
-        output = promotions.create_inline_product_output(INLINE_PRODUCT)
-        # 점심만 운영하는 식당: 아침 자리가 먼저 비어 있다.
-        response = cafeteria.create_menu_response(
-            "월요일", dict(MENU_DATA, breakfast=[], dinner=[]), "상록회관",
-            inline_product_card=card, inline_product_output=output,
-        )
-        outputs = response["template"]["outputs"]
-
-        self.assertEqual(len(outputs), 2)
-        self.assertIs(outputs[0], output)
-        self.assertNotIn(card, outputs[1]["carousel"]["items"])
-
-    def test_full_three_rows_fall_back_to_the_text_card(self):
-        card = promotions.create_inline_product_card(INLINE_PRODUCT)
+    def test_full_meal_rows_fall_back_to_the_entry_button(self):
+        """끼니가 다 차 있으면 메뉴 사이에 카드를 끼우지 않고 버튼으로 돌아간다."""
         output = promotions.create_inline_product_output(INLINE_PRODUCT)
         response = cafeteria.create_menu_response(
-            "월요일", MENU_DATA, "상록회관",
-            inline_product_card=card, inline_product_output=output,
+            "월요일", MENU_DATA, "상록회관", inline_product_output=output
         )
         outputs = response["template"]["outputs"]
 
         self.assertEqual(len(outputs), 3)
-        self.assertTrue(all("carousel" in output for output in outputs))
-        self.assertIs(outputs[1]["carousel"]["items"][-1], card)
-
-    def test_entry_button_returns_when_the_product_cannot_be_placed(self):
-        crowded = {
-            "breakfast": [{"type": f"조식{i}", "menu": ["밥"]} for i in range(3)],
-            "lunch": [{"type": f"중식{i}", "menu": ["밥"]} for i in range(3)],
-            "dinner": [{"type": f"석식{i}", "menu": ["밥"]} for i in range(3)],
-        }
-        card = promotions.create_inline_product_card(INLINE_PRODUCT)
-        output = promotions.create_inline_product_output(INLINE_PRODUCT)
-        response = cafeteria.create_menu_response(
-            "월요일", crowded, "상록회관",
-            inline_product_card=card, inline_product_output=output,
-        )
-        lunch_card = response["template"]["outputs"][1]["carousel"]["items"][0]
-
+        self.assertTrue(all("carousel" in item for item in outputs))
+        lunch_card = outputs[1]["carousel"]["items"][0]
         self.assertEqual(len(lunch_card["buttons"]), 2)
+        self.assertEqual(len(outputs[1]["carousel"]["items"]), 2)
 
     def test_placement_check_only_counts_a_card_that_survived(self):
         """노출 이벤트는 카드가 실제로 응답에 들어갔을 때만 기록되어야 한다."""
-        card = promotions.create_inline_product_card(INLINE_PRODUCT)
         output = promotions.create_inline_product_output(INLINE_PRODUCT)
-        inline_product = {"inline_product_card": card, "inline_product_output": output}
-        crowded = {
-            meal: [{"type": f"{meal}{i}", "menu": ["밥"]} for i in range(3)]
-            for meal in ("breakfast", "lunch", "dinner")
-        }
+        inline_product = {"inline_product_output": output}
 
         placed = cafeteria.create_menu_response(
-            "월요일", MENU_DATA, "상록회관", **inline_product
+            "월요일", dict(MENU_DATA, breakfast=[]), "상록회관", **inline_product
         )
         dropped = cafeteria.create_menu_response(
-            "월요일", crowded, "상록회관", **inline_product
+            "월요일", MENU_DATA, "상록회관", **inline_product
         )
 
         self.assertTrue(cafeteria_router._inline_card_placed(placed, inline_product))
         self.assertFalse(cafeteria_router._inline_card_placed(dropped, inline_product))
 
     def test_every_response_stays_within_the_three_output_limit(self):
-        card = promotions.create_inline_product_card(INLINE_PRODUCT)
+        output = promotions.create_inline_product_output(INLINE_PRODUCT)
         for label, menu_data in (
             ("lunch only", dict(MENU_DATA, breakfast=[], dinner=[])),
             ("all meals", MENU_DATA),
@@ -314,35 +190,50 @@ class MenuInlineCardResponseTest(unittest.TestCase):
         ):
             with self.subTest(label=label):
                 response = cafeteria.create_menu_response(
-                    "월요일", menu_data, "상록회관", inline_product_card=card
+                    "월요일", menu_data, "상록회관", inline_product_output=output
                 )
                 self.assertLessEqual(len(response["template"]["outputs"]), 3)
-                for output in response["template"]["outputs"]:
-                    self.assertLessEqual(len(output["carousel"]["items"]), 3)
 
-    def test_inline_card_is_dropped_when_no_row_has_space(self):
-        crowded = {
-            "breakfast": [{"type": f"조식{i}", "menu": ["밥"]} for i in range(3)],
-            "lunch": [{"type": f"중식{i}", "menu": ["밥"]} for i in range(3)],
-            "dinner": [{"type": f"석식{i}", "menu": ["밥"]} for i in range(3)],
-        }
-        card = promotions.create_inline_product_card(INLINE_PRODUCT)
-        response = cafeteria.create_menu_response(
-            "월요일", crowded, "상록회관", inline_product_card=card
-        )
-        items = [i for o in response["template"]["outputs"] for i in o["carousel"]["items"]]
 
-        self.assertEqual(len(response["template"]["outputs"]), 3)
-        self.assertNotIn(card, items)
+class InlineProductOutputTest(unittest.TestCase):
+    def test_commerce_card_carries_image_price_and_discount(self):
+        card = promotions.create_inline_product_output(
+            INLINE_PRODUCT, "https://cnubot.example/click?token=x"
+        )["commerceCard"]
 
-    def test_inline_card_falls_back_to_dinner_when_lunch_row_is_full(self):
-        menu_data = dict(MENU_DATA, lunch=[MENU_DATA["lunch"][0]] * 3)
-        card = promotions.create_inline_product_card(INLINE_PRODUCT)
-        response = cafeteria.create_menu_response(
-            "월요일", menu_data, "상록회관", inline_product_card=card
+        self.assertEqual(card["title"], INLINE_PRODUCT["title"])
+        self.assertEqual(card["price"], 29900)
+        self.assertEqual(card["discountedPrice"], 7500)
+        self.assertEqual(card["discountRate"], 74)
+        self.assertEqual(card["thumbnails"], [{"imageUrl": INLINE_PRODUCT["image_url"]}])
+        self.assertEqual(
+            card["buttons"][0]["webLinkUrl"], "https://cnubot.example/click?token=x"
         )
 
-        self.assertIs(response["template"]["outputs"][2]["carousel"]["items"][-1], card)
+    def test_matches_the_product_list_wording(self):
+        card = promotions.create_inline_product_output(INLINE_PRODUCT)["commerceCard"]
+
+        self.assertEqual(card["description"], "74% 할인 · 최대할인가 7,500원")
+        self.assertNotIn("운영비", card["description"])
+
+    def test_stays_inside_kakao_commerce_card_limits(self):
+        product = dict(
+            INLINE_PRODUCT,
+            title="일동후디스 하이뮨 프로틴 밸런스 액티브 밤티라미수 제로, 250ml, 18개",
+        )
+        card = promotions.create_inline_product_output(product)["commerceCard"]
+
+        self.assertLessEqual(len(card["title"]), 30)
+        self.assertLessEqual(len(card["description"]), 40)
+        self.assertLessEqual(len(card["buttons"][0]["label"]), 14)
+
+    def test_falls_back_to_discount_amount_without_a_rate(self):
+        product = dict(INLINE_PRODUCT)
+        product.pop("discount_rate")
+        card = promotions.create_inline_product_output(product)["commerceCard"]
+
+        self.assertNotIn("discountRate", card)
+        self.assertEqual(card["discount"], 22400)
 
 
 if __name__ == "__main__":

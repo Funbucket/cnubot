@@ -181,22 +181,12 @@ def _build_meal_rows(kakao_response, day_label: str, menu_data: dict) -> dict[st
     return rows_by_meal
 
 
-def _row_with_space(rows_by_meal: dict[str, list[list]]) -> list | None:
-    """Find a meal row the product card can join without splitting it in two."""
-    for meal_time in ["lunch", "dinner", "breakfast"]:
-        for items in rows_by_meal[meal_time]:
-            if len(items) < CAROUSEL_ROW_SIZE:
-                return items
-    return None
-
-
 def create_menu_response(
     day: str,
     menu_data: dict,
     place: str,
     promotion_product: dict | None = None,
     promotion_click_url: str | None = None,
-    inline_product_card: dict | None = None,
     inline_product_output: dict | None = None,
 ):
     kakao_response = kakao_json_response.KakaoJsonResponse()
@@ -206,17 +196,14 @@ def create_menu_response(
     rows_by_meal = _build_meal_rows(kakao_response, day_label, menu_data)
     row_count = sum(len(rows) for rows in rows_by_meal.values())
 
-    # 운영하지 않는 끼니 자리가 남으면 이미지가 붙는 commerceCard를 그 자리에 넣고,
-    # 자리가 없으면 끼니 행 끝에 카드로 끼운다.
+    # 운영하지 않는 끼니 자리가 남을 때만 상품 카드를 그 자리에 넣는다.
+    # 끼니 행 사이에 카드를 끼우면 메뉴를 비집는 모양이 되므로 하지 않는다.
     # 인라인 상품은 진입 버튼을 대체하므로 두 진입점을 함께 띄우지 않는다.
     product_output = None
-    hosting_row = _row_with_space(rows_by_meal) if inline_product_card else None
     if inline_product_output and row_count < MENU_OUTPUT_LIMIT:
         product_output = inline_product_output
-    elif hosting_row is not None:
-        hosting_row.append(inline_product_card)
     else:
-        # 상품을 어디에도 넣지 못하면 기존 진입 버튼으로 되돌린다.
+        # 상품 카드가 들어갈 자리가 없으면 기존 진입 버튼으로 되돌린다.
         # 점심 첫 번째 메뉴 카드에만 간식 특가 버튼을 노출합니다.
         lunch_rows = rows_by_meal["lunch"]
         if lunch_rows:

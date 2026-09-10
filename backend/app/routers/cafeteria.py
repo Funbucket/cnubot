@@ -133,11 +133,10 @@ async def _menu_response(
     if chosen:
         product_key, product, click_url, request_id = chosen
         inline_product = {
-            "inline_product_card": promotions.create_inline_product_card(product, click_url),
             "inline_product_output": promotions.create_inline_product_output(product, click_url),
         }
         # 시간표의 "식단 보기"는 오늘 날짜 발화로 /menu/day를 타므로 요일로 판단한다.
-        if place_key == "dorm" and f"{kor_day}" == common.get_today_in_korean():
+        if place_key == "dorm" and kor_day == common.get_today_in_korean():
             menu_data, inline_product = await _replace_finished_breakfast(
                 menu_data, inline_product, place
             )
@@ -169,15 +168,8 @@ async def _record_menu_view(
 
 def _inline_card_placed(response: dict, inline_product: dict) -> bool:
     """Only a card that survived placement counts as an exposure."""
-    card = inline_product.get("inline_product_card")
     output = inline_product.get("inline_product_output")
-    for rendered in response["template"]["outputs"]:
-        if rendered is output:
-            return True
-        for item in rendered.get("carousel", {}).get("items", []):
-            if item is card:
-                return True
-    return False
+    return any(rendered is output for rendered in response["template"]["outputs"])
 
 
 def _wants_breakfast(req: KakaoRequest) -> bool:
@@ -210,11 +202,10 @@ async def _replace_finished_breakfast(
         "messageText": place,
         "extra": {SHOW_BREAKFAST_KEY: True},
     }
-    for card in (inline_product.get("inline_product_card"), inline_product.get("inline_product_output")):
-        target = card.get("commerceCard", card) if card else None
-        if target is not None:
-            target.setdefault("buttons", []).append(restore_button)
-            target["buttonLayout"] = "vertical"
+    card = inline_product.get("inline_product_output", {}).get("commerceCard")
+    if card is not None:
+        card.setdefault("buttons", []).append(restore_button)
+        card["buttonLayout"] = "vertical"
     return {**menu_data, "breakfast": []}, inline_product
 
 
