@@ -18,6 +18,10 @@ SHARE = ("✱ " + settings.DISCLOSURE + "\n"
 
 class PromotionSettingsTest(unittest.TestCase):
     def setUp(self):
+        settings._market_cache.clear()
+        settings._market_locks.clear()
+        self.enrichment = patch.object(settings, "enrich_product", side_effect=lambda p:p)
+        self.enrichment.start()
         self.directory = tempfile.TemporaryDirectory()
         self.env = patch.dict(os.environ, {"MENU_DATA_DIR": self.directory.name,
             "ADMIN_USERNAME": "test-admin", "ADMIN_PASSWORD": "test-password",
@@ -28,6 +32,7 @@ class PromotionSettingsTest(unittest.TestCase):
         self.headers = {"X-Promotion-Editor": "1"}
 
     def tearDown(self):
+        self.enrichment.stop()
         self.client.close()
         self.env.stop()
         self.directory.cleanup()
@@ -153,6 +158,51 @@ class PromotionSettingsTest(unittest.TestCase):
         page = self.client.get("/admin/recommendations", auth=self.auth)
         self.assertEqual(page.status_code, 200)
         self.assertIn("저장하고 적용", page.text)
+
+    def test_preview_and_chat_use_identical_commerce_card_prices(self):
+        item = self.product(taca_item_id=149101033, image_url="https://shopping.toss.im/a.jpg")
+        value = settings.Settings(mode="fixed", products=[item])
+        settings.save_settings(value)
+        detail = {"tacaItemId":149101033,"displayPrice":19900,"originalPrice":55800,"discountRate":64,"isSoldOut":False}
+        with patch.object(promotions.toss_sharelink, "detail", new_callable=AsyncMock, return_value=detail) as api:
+            preview = self.client.post("/admin/promotion-settings/preview", auth=self.auth,
+                headers=self.headers, json=value.model_dump())
+            response = self.client.post("/promotions/toss-shopping")
+        self.assertEqual(preview.status_code, 200, preview.text)
+        self.assertEqual(preview.json()["response"], response.json())
+        card = response.json()["template"]["outputs"][1]["carousel"]
+        self.assertEqual(card["type"], "commerceCard")
+        self.assertEqual(card["items"][0]["price"], 55800)
+        self.assertEqual(card["items"][0]["discountedPrice"], 19900)
+        self.assertEqual(card["items"][0]["discountRate"], 64)
+        self.assertEqual(card["items"][0]["description"], "64% 할인 · 최대할인가 19,900원")
+        self.assertEqual(card["items"][0]["title"], item.title)
+        api.assert_awaited_once()
+
+    def test_price_refresh_and_failure_never_use_expired_price(self):
+        item = self.product(taca_item_id=1)
+        async def run():
+            with patch.object(promotions.toss_sharelink, "detail", new_callable=AsyncMock,
+                              return_value={"tacaItemId":1,"displayPrice":10000,"originalPrice":20000,"discountRate":50}) as api:
+                first = await settings.market_product(item)
+                await settings.market_product(item)
+                self.assertEqual(api.await_count,1)
+                api.return_value["displayPrice"] = 9000
+                changed = await settings.market_product(item,force=True)
+                self.assertEqual(changed["price"],9000)
+                self.assertEqual(first["price"],10000)
+                api.side_effect = RuntimeError("unavailable")
+                failed = await settings.market_product(item,force=True)
+                self.assertNotIn("price",failed)
+                self.assertTrue(failed["price_error"])
+        asyncio.run(run())
+
+    def test_sold_out_is_visible_and_not_advertised_as_available(self):
+        product = {**self.product().model_dump(),"selection_mode":"fixed","price":1000,
+                   "original_price":2000,"discount_rate":50,"discount":1000,"is_sold_out":True}
+        card = promotions.create_toss_shopping_list_response([product])["template"]["outputs"][1]["carousel"]
+        self.assertEqual(card["type"],"textCard")
+        self.assertTrue(card["items"][0]["description"].startswith("품절"))
 
 
 if __name__ == "__main__":

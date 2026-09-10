@@ -323,12 +323,15 @@ async def get_live_toss_products(
 ) -> list[tuple[str, dict]]:
     settings = promotion_settings.read_settings()
     if settings.mode == "fixed":
-        products = promotion_settings.fixed_products(settings)[:limit]
+        try:
+            products = (await asyncio.wait_for(promotion_settings.resolved_fixed_products(settings), timeout=3.5))[:limit]
+        except asyncio.TimeoutError:
+            products = promotion_settings.fixed_products(settings)[:limit]
         for position, (key, product) in enumerate(products, 1):
             TOSS_SHOPPING_PRODUCTS[key] = product
             try:
                 await recommendations.record_exposure(
-                    user_id, surface, 0, [], product_key=key,
+                    user_id, surface, product.get("taca_item_id") or 0, product.get("category_ids") or [], product_key=key,
                     properties={"product_name": product["title"], "position": position,
                                 "row": (position - 1) // 3 + 1, "column": (position - 1) % 3 + 1,
                                 "selection_mode": "fixed", "settings_revision": settings.revision,
@@ -561,15 +564,16 @@ def create_toss_shopping_list_response(
 ):
     kakao_response = kakao_json_response.KakaoJsonResponse()
     click_urls = click_urls or [None] * len(products)
-    if products and all(p.get("selection_mode") == "fixed" for p in products):
+    is_fixed = bool(products) and all(p.get("selection_mode") == "fixed" for p in products)
+    if is_fixed and any(p.get("price") is None or not p.get("image_url") or p.get("is_sold_out") for p in products):
         kakao_response.add_output_to_response(kakao_response.create_simple_text(
             "🛍️ 오늘의 추천 상품\n✱ " + promotion_settings.DISCLOSURE
         ))
-        # Price is intentionally omitted: pasted links do not guarantee a current price.
         cards = []
         for product, click_url in zip(products, click_urls):
             card = {"title": product["title"][:50],
-                    "description": product.get("description") or "현재 가격과 구매 조건은 토스에서 확인해주세요.",
+                    "description": ("품절 · " if product.get("is_sold_out") else "") + (product.get("description") or
+                                    (f"{product['discount_rate']}% 할인 · 최대할인가 {product['price']:,}원" if product.get("price") is not None else "현재 가격과 구매 조건은 토스에서 확인해주세요.")),
                     "buttons": [{"action": "webLink", "label": product["button_label"],
                                  "webLinkUrl": click_url or product["url"]}]}
             if product.get("image_url"):
@@ -588,7 +592,7 @@ def create_toss_shopping_list_response(
         cards.append(
             {
                 "title": product["title"],
-                "description": f"{product['discount_rate']}% 할인 · 최대할인가 {product['price']:,}원",
+                "description": product.get("description") if is_fixed and product.get("description") else f"{product['discount_rate']}% 할인 · 최대할인가 {product['price']:,}원",
                 "price": product["original_price"],
                 "currency": "won",
                 "discount": product["discount"],
@@ -606,6 +610,7 @@ def create_toss_shopping_list_response(
         )
     kakao_response.add_output_to_response(
         kakao_response.create_simple_text(
+            ("🛍️ 오늘의 추천 상품\n✱ " + promotion_settings.DISCLOSURE) if is_fixed else
             "츠누봇이 토스와 준비한 특가예요 🛍️\n"
             "• 이 링크를 통해서만 할인 혜택을 받을 수 있어요.\n"
             "• 구매 수수료는 챗봇 서버 운영비로 사용됩니다."

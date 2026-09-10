@@ -5,6 +5,8 @@ import json
 import os
 import re
 import tempfile
+import asyncio
+import time
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse, urljoin
@@ -31,6 +33,7 @@ class Product(BaseModel):
     description: str = Field(default="", max_length=180)
     image_url: str = Field(default="", max_length=2000)
     enabled: bool = True
+    taca_item_id: int | None = Field(default=None, gt=0)
 
     _link = field_validator("url")(validate_link)
 
@@ -144,5 +147,69 @@ def enrich_product(product: Product) -> Product:
             data["image_url"] = image.get("content", "")
         if product.title == "토스쇼핑 상품" and title:
             data["title"] = title.get("content", product.title)[:200]
+        # Next.js embeds the selected option ID in its serialized page data.
+        # Do not mistake /t/{tacaId} (a product group) for an option ID.
+        page = b"".join(chunks).decode("utf-8").replace('\\"', '"')
+        ids = set(re.findall(r'"tacaItemId"\s*:\s*(\d+)', page))
+        if len(ids) == 1:
+            data["taca_item_id"] = int(ids.pop())
         return Product.model_validate(data)
     raise ValueError("상품 링크 이동이 너무 많습니다.")
+
+
+_market_cache: dict[str, tuple[float, dict]] = {}
+_market_locks: dict[str, asyncio.Lock] = {}
+
+
+async def market_product(product: Product, force: bool = False) -> dict:
+    """Fetch prices from Toss, never accept price values from the editor."""
+    from app.services import toss_sharelink
+
+    async with _market_locks.setdefault(product.url, asyncio.Lock()):
+        cached = _market_cache.get(product.url)
+        if not force and cached and cached[0] > time.monotonic():
+            return {**product.model_dump(), **cached[1]}
+        metadata = {}
+        try:
+            resolved = product
+            if not resolved.taca_item_id:
+                resolved = await asyncio.to_thread(enrich_product, product)
+            if not resolved.taca_item_id:
+                raise ValueError("상품 옵션 ID를 확인하지 못했습니다.")
+            item = await toss_sharelink.detail(resolved.taca_item_id)
+            if not item or int(item.get("tacaItemId", 0)) != resolved.taca_item_id:
+                raise ValueError("상품 상세 정보를 확인하지 못했습니다.")
+            price = item.get("displayPrice")
+            original = item.get("originalPrice")
+            rate = item.get("discountRate")
+            if not isinstance(price, int) or price < 0:
+                raise ValueError("상품 가격을 확인하지 못했습니다.")
+            original = original if isinstance(original, int) and original >= price else price
+            rate = rate if isinstance(rate, (int, float)) and 0 <= rate <= 100 else round((original-price)/original*100) if original else 0
+            metadata = {"taca_item_id": resolved.taca_item_id,
+                        "price": price, "original_price": original,
+                        "discount_rate": rate, "discount": original-price,
+                        "is_sold_out": bool(item.get("isSoldOut")),
+                        "category_ids": item.get("categoryIds") or [],
+                        "market_image_url": item.get("thumbnailUrl") or resolved.image_url,
+                        "price_checked_at": int(time.time()), "price_error": ""}
+            _market_cache[product.url] = (time.monotonic() + 3600, metadata)
+        except Exception:
+            # Never silently display an expired cached price as a current price.
+            metadata = {"price_error": "가격 조회에 실패했습니다. 잠시 후 가격을 새로고침해주세요."}
+            _market_cache[product.url] = (time.monotonic() + 30, metadata)
+        return {**product.model_dump(), **metadata}
+
+
+async def resolved_fixed_products(settings: Settings, force: bool = False) -> list[tuple[str, dict]]:
+    semaphore = asyncio.Semaphore(3)
+
+    async def resolve(key, product):
+        async with semaphore:
+            market = await market_product(Product.model_validate({k: v for k, v in product.items()
+                        if k in Product.model_fields}), force=force)
+        merged = {**product, **market}
+        merged["image_url"] = merged["image_url"] or merged.get("market_image_url", "")
+        return key, merged
+
+    return list(await asyncio.gather(*(resolve(key, product) for key, product in fixed_products(settings))))

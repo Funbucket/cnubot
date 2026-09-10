@@ -108,6 +108,17 @@ async def parse_promotion(payload: ShareTextInput, _: str = Depends(require_admi
     return {"product": product.model_dump(), "warning": warning}
 
 
+@router.post("/promotion-settings/preview", dependencies=[Depends(require_editor)])
+async def preview_promotions(payload: promotion_settings.Settings, refresh: bool = False,
+                             _: str = Depends(require_admin)):
+    from app.services import promotions
+    pairs = await promotion_settings.resolved_fixed_products(payload, force=refresh)
+    return {"response": promotions.create_toss_shopping_list_response([p for _, p in pairs]),
+            "warnings": [{"title": p["title"], "message": p["price_error"]}
+                         for _, p in pairs if p.get("price_error")],
+            "checked_at": [p.get("price_checked_at") for _, p in pairs]}
+
+
 @router.get("/insights", response_class=HTMLResponse)
 async def insights(
     start_date: date | None = Query(default=None),
