@@ -410,8 +410,8 @@ async def get_promotion_insights(start_date=None, end_date=None) -> dict[str, An
                 FROM qualified_promotion_events e
                 LEFT JOIN experiment_variants v
                   ON v.experiment_id = e.experiment_id AND v.variant_key = e.variant_key
-                WHERE ($2::date IS NULL OR e.created_at >= $2::date)
-                  AND ($3::date IS NULL OR e.created_at < ($3::date + INTERVAL '1 day'))
+                WHERE ($2::date IS NULL OR e.created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
+                  AND ($3::date IS NULL OR e.created_at < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
                   AND (e.user_id IS NULL OR NOT (e.user_id = ANY($4::text[])))
             )
             SELECT product_key,
@@ -449,8 +449,8 @@ async def get_promotion_insights(start_date=None, end_date=None) -> dict[str, An
             FROM all_events
             WHERE event_name = ANY($1::text[])
               AND event_name IN ('promotion_entry_click', 'promotion_button_click', 'promotion_quick_reply_click', 'commerce_card_click')
-              AND ($2::date IS NULL OR created_at >= $2::date)
-              AND ($3::date IS NULL OR created_at < ($3::date + INTERVAL '1 day'))
+              AND ($2::date IS NULL OR created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
+              AND ($3::date IS NULL OR created_at < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
               AND (user_id IS NULL OR NOT (user_id = ANY($4::text[])))
             GROUP BY 1
             ORDER BY users DESC, surface
@@ -474,8 +474,8 @@ async def get_promotion_insights(start_date=None, end_date=None) -> dict[str, An
             FROM all_events
             WHERE event_name IN ('promotion_entry_exposure', 'promotion_entry_click', 'commerce_card_click')
               AND NULLIF(COALESCE(properties->>'button_label', properties->>'entry_button_label', ''), '') IS NOT NULL
-              AND ($1::date IS NULL OR created_at >= $1::date)
-              AND ($2::date IS NULL OR created_at < ($2::date + INTERVAL '1 day'))
+              AND ($1::date IS NULL OR created_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Seoul'))
+              AND ($2::date IS NULL OR created_at < (($2::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
               AND (user_id IS NULL OR NOT (user_id = ANY($3::text[])))
             GROUP BY 1, 2
             ORDER BY exposed_users DESC, exposure_events DESC, label
@@ -498,8 +498,8 @@ async def get_promotion_insights(start_date=None, end_date=None) -> dict[str, An
             FROM all_events
             WHERE event_name IN ('promotion_exposure', 'commerce_card_click')
               AND (properties->>'position') ~ '^[0-9]+$'
-              AND ($1::date IS NULL OR created_at >= $1::date)
-              AND ($2::date IS NULL OR created_at < ($2::date + INTERVAL '1 day'))
+              AND ($1::date IS NULL OR created_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Seoul'))
+              AND ($2::date IS NULL OR created_at < (($2::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
               AND (user_id IS NULL OR NOT (user_id = ANY($3::text[])))
             GROUP BY 1
             ORDER BY position
@@ -517,8 +517,8 @@ async def get_promotion_insights(start_date=None, end_date=None) -> dict[str, An
                    COUNT(DISTINCT user_id) FILTER (WHERE event_name = ANY($1::text[]))::int AS clicked_users,
                    COUNT(*) FILTER (WHERE event_name = ANY($1::text[]))::int AS click_events
             FROM all_events
-            WHERE ($2::date IS NULL OR created_at >= $2::date)
-              AND ($3::date IS NULL OR created_at < ($3::date + INTERVAL '1 day'))
+            WHERE ($2::date IS NULL OR created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
+              AND ($3::date IS NULL OR created_at < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
               AND (user_id IS NULL OR NOT (user_id = ANY($4::text[])))
             GROUP BY day
             ORDER BY day DESC
@@ -531,18 +531,30 @@ async def get_promotion_insights(start_date=None, end_date=None) -> dict[str, An
             WITH filtered_events AS (
                 SELECT event_name, user_id, created_at
                 FROM user_events
-                WHERE ($2::date IS NULL OR created_at >= $2::date)
-                  AND ($3::date IS NULL OR created_at < ($3::date + INTERVAL '1 day'))
+                WHERE ($2::date IS NULL OR created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
+                  AND ($3::date IS NULL OR created_at < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
                   AND (user_id IS NULL OR NOT (user_id = ANY($4::text[])))
-            ), user_steps AS (
+            ), entry_exposures AS (
                 SELECT user_id,
-                       MIN(created_at) FILTER (WHERE event_name = 'promotion_entry_exposure') AS entry_exposure_at,
-                       MIN(created_at) FILTER (WHERE event_name = 'promotion_entry_click') AS entry_click_at,
-                       MIN(created_at) FILTER (WHERE event_name = 'promotion_exposure') AS product_exposure_at,
-                       MIN(created_at) FILTER (WHERE event_name = ANY($1::text[])) AS product_click_at
+                       MIN(created_at) AS entry_exposure_at
                 FROM filtered_events
-                WHERE user_id IS NOT NULL
+                WHERE user_id IS NOT NULL AND event_name = 'promotion_entry_exposure'
                 GROUP BY user_id
+            ), entry_clicks AS (
+                SELECT x.*, (SELECT MIN(e.created_at) FROM filtered_events e
+                    WHERE e.user_id = x.user_id AND e.event_name = 'promotion_entry_click'
+                      AND e.created_at >= x.entry_exposure_at) AS entry_click_at
+                FROM entry_exposures x
+            ), product_exposures AS (
+                SELECT x.*, (SELECT MIN(e.created_at) FROM filtered_events e
+                    WHERE e.user_id = x.user_id AND e.event_name = 'promotion_exposure'
+                      AND e.created_at >= x.entry_click_at) AS product_exposure_at
+                FROM entry_clicks x
+            ), user_steps AS (
+                SELECT x.*, (SELECT MIN(e.created_at) FROM filtered_events e
+                    WHERE e.user_id = x.user_id AND e.event_name = ANY($1::text[])
+                      AND e.created_at >= x.product_exposure_at) AS product_click_at
+                FROM product_exposures x
             )
             SELECT COUNT(*) FILTER (WHERE entry_exposure_at IS NOT NULL)::int AS entry_exposed_users,
                    COUNT(*) FILTER (WHERE entry_exposure_at IS NOT NULL

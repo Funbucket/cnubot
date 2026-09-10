@@ -5,11 +5,13 @@ import secrets
 from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
+from pathlib import Path
 
 from app.services import experiments
 from app.services import llm
 from app.services import toss_sharelink
-from fastapi import APIRouter, Depends, HTTPException, Query
+from app.services import promotion_settings
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field
@@ -65,13 +67,45 @@ async def admin_home(_: str = Depends(require_admin)):
 
 @router.get("/recommendations", response_class=HTMLResponse)
 async def recommendations(_: str = Depends(require_admin)):
+    return HTMLResponse((Path(__file__).parent.parent / "static" / "promotion_editor.html").read_text(),
+                        headers={"Cache-Control": "no-store"})
+
+
+def require_editor(x_promotion_editor: str = Header(default="")):
+    if x_promotion_editor != "1":
+        raise HTTPException(status_code=403, detail="관리자 상품 편집 화면에서 요청해주세요.")
+
+
+class ShareTextInput(BaseModel):
+    text: str = Field(min_length=1, max_length=5000)
+
+
+@router.get("/promotion-settings")
+async def get_promotion_settings(_: str = Depends(require_admin)):
+    from fastapi.responses import JSONResponse
+    return JSONResponse(promotion_settings.read_settings().model_dump(), headers={"Cache-Control": "no-store"})
+
+
+@router.put("/promotion-settings", dependencies=[Depends(require_editor)])
+async def put_promotion_settings(payload: promotion_settings.Settings, _: str = Depends(require_admin)):
     try:
-        products = await toss_sharelink.best_selling(size=5)
-        error = ""
+        return await asyncio.to_thread(promotion_settings.save_settings, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/promotion-settings/parse", dependencies=[Depends(require_editor)])
+async def parse_promotion(payload: ShareTextInput, _: str = Depends(require_admin)):
+    try:
+        product = promotion_settings.parse_share_text(payload.text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    warning = ""
+    try:
+        product = await asyncio.to_thread(promotion_settings.enrich_product, product)
     except Exception:
-        products = []
-        error = "Toss 상품 목록을 불러오지 못했습니다. 기존 fallback 상품으로 동작합니다."
-    return HTMLResponse(_recommendations_page(products, error))
+        warning = "이미지 자동 조회에 실패했습니다. 상품명과 링크는 등록되며 이미지는 직접 입력할 수 있습니다."
+    return {"product": product.model_dump(), "warning": warning}
 
 
 @router.get("/insights", response_class=HTMLResponse)
@@ -327,12 +361,12 @@ WHERE created_at >= :start_date AND created_at < (:end_date + INTERVAL '1 day');
 *{{box-sizing:border-box}}body{{margin:0;background:#f6f8fc;color:#14213d;font-family:Inter,system-ui,sans-serif}}.shell{{max-width:1180px;margin:auto;padding:30px 22px 72px}}header{{display:flex;justify-content:space-between;align-items:end;gap:24px;margin-bottom:24px}}h1{{font-size:30px;letter-spacing:-.045em;margin:5px 0 8px}}h2{{font-size:18px;letter-spacing:-.025em;margin:30px 0 10px}}.sub,.hint{{color:#71809b}}.sub{{line-height:1.5;margin:0}}.eyebrow{{font:700 11px ui-monospace,monospace;color:#6680b8;letter-spacing:.08em}}nav{{display:flex;gap:6px;flex-wrap:wrap}}nav a{{padding:9px 11px;border-radius:9px;color:#5270aa;text-decoration:none;font-size:13px;font-weight:700}}nav a.active{{background:#e9efff;color:#315dcc}}.filters,.hero,.card,.funnel{{border:1px solid #e3e9f3;border-radius:18px;background:#fff;box-shadow:0 10px 30px #1b31500b}}.filters{{display:flex;align-items:end;gap:10px;padding:14px;margin-bottom:16px}}.filters label{{display:block;color:#71809b;font-size:11px;margin-bottom:5px}}.filters input{{font:inherit;border:1px solid #d7deea;border-radius:9px;padding:9px 10px;color:#14213d}}.filters button{{border:0;border-radius:9px;padding:10px 15px;background:#315dcc;color:#fff;font-weight:800;cursor:pointer}}.filters a{{padding:10px 4px;color:#315dcc;font-size:12px;text-decoration:none;white-space:nowrap}}.tilde{{color:#9aa6b9;padding-bottom:10px}}.hero{{background:linear-gradient(135deg,#233d91,#315dcc 65%,#6688f2);color:#fff;padding:25px;margin-bottom:16px}}.hero .eyebrow,.hero .sub{{color:#dce6ff}}.hero-row{{display:flex;justify-content:space-between;align-items:end;gap:20px}}.hero h1{{margin-top:7px}}.live{{padding:9px 12px;border:1px solid #ffffff40;border-radius:99px;background:#ffffff1c;font-size:12px;font-weight:800;white-space:nowrap}}.live i{{display:inline-block;width:7px;height:7px;border-radius:50%;background:#7dffb2;margin-right:6px}}.kpis{{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}}.card{{padding:17px}}.kpi-label{{font-size:12px;color:#71809b}}.kpi-value{{font-size:25px;font-weight:850;letter-spacing:-.05em;margin:8px 0 3px}}.kpi-note{{font-size:11px;color:#8b98ac}}.funnel{{padding:19px;margin-top:16px}}.section-head{{display:flex;justify-content:space-between;align-items:end;gap:16px}}.section-head h2{{margin:0}}.funnel-track{{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:16px}}.funnel-step{{position:relative;background:#f3f6ff;border-radius:13px;padding:14px;min-height:118px}}.funnel-step:not(:last-child)::after{{content:'›';position:absolute;right:-8px;top:43px;color:#9aace0;font-size:25px;font-weight:800;z-index:1}}.funnel-step strong{{display:block;color:#315dcc;font-size:11px}}.funnel-step b{{display:block;font-size:25px;letter-spacing:-.05em;margin:8px 0 4px}}.funnel-step small{{display:block;color:#71809b;font-size:11px;line-height:1.45}}.layout{{display:grid;grid-template-columns:1.35fr 1fr;gap:14px}}.panel{{padding:18px;border:1px solid #e3e9f3;border-radius:16px;background:#fff;box-shadow:0 10px 30px #1b31500b;overflow:hidden}}.panel h2{{margin:0}}.panel-head{{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px}}.scroll{{max-height:390px;overflow:auto}}table{{width:100%;border-collapse:collapse;font-size:13px}}th,td{{padding:12px 8px;text-align:left;border-bottom:1px solid #edf0f5;white-space:nowrap}}th{{font-size:11px;color:#71809b;font-weight:750}}td small{{display:block;color:#8a96a8;font-size:11px;margin-top:3px}}code{{font-size:11px;color:#71809b}}.two{{display:grid;grid-template-columns:1fr 1fr;gap:14px}}.position-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}}.position-cell{{background:#f4f7ff;border:1px solid #e1e8ff;border-radius:12px;padding:14px;min-height:108px}}.position-cell b,.position-cell strong,.position-cell small{{display:block}}.position-cell b{{color:#315dcc;font-size:12px}}.position-cell strong{{font-size:22px;margin:8px 0 5px}}.position-cell small{{color:#71809b;font-size:11px;line-height:1.5}}details{{margin-top:12px;border-top:1px solid #edf0f5;padding-top:10px}}summary{{cursor:pointer;color:#315dcc;font-size:12px;font-weight:750}}pre{{white-space:pre-wrap;word-break:break-word;background:#f7f9fc;color:#536078;border-radius:9px;padding:12px;font:11px/1.55 ui-monospace,monospace}}
 @media(max-width:900px){{.kpis{{grid-template-columns:repeat(3,1fr)}}.funnel-track{{grid-template-columns:repeat(3,1fr)}}.funnel-step:not(:last-child)::after{{display:none}}.layout,.two{{grid-template-columns:1fr}}}}
 @media(max-width:620px){{.shell{{padding:20px 14px 48px}}header{{display:block}}nav{{margin-top:16px}}h1{{font-size:26px}}.filters{{display:grid;grid-template-columns:1fr 20px 1fr}}.filters button,.filters a{{grid-column:1/-1;text-align:center}}.kpis,.funnel-track{{grid-template-columns:1fr}}.hero-row,.section-head{{display:block}}.live{{display:inline-block;margin-top:18px}}.funnel-step{{min-height:auto}}table,thead,tbody,tr,td{{display:block}}thead{{display:none}}tr{{padding:9px 0;border-bottom:1px solid #edf0f5}}td{{display:flex;justify-content:space-between;gap:14px;padding:7px 2px;border:0;white-space:normal;text-align:right}}td::before{{content:attr(data-label);color:#71809b;text-align:left}}td:first-child{{display:block;text-align:left;font-size:14px;padding-top:5px}}td:first-child::before{{display:none}}}}
-</style></head><body><main class="shell"><header><div><span class="eyebrow">CNU / PROMOTION INTELLIGENCE</span><h1>프로모션 인사이트</h1><p class="sub">사용자가 버튼을 본 순간부터 상품을 클릭하기까지의 흐름을 확인합니다.</p></div><nav><a class="active" href="/admin/insights">인사이트</a><a href="/admin/experiments">실험 목록</a><a href="/admin/experiments/new">＋ 새 실험</a></nav></header>
+</style></head><body><main class="shell"><header><div><span class="eyebrow">CNU / PROMOTION INTELLIGENCE</span><h1>프로모션 인사이트</h1><p class="sub">사용자가 버튼을 본 순간부터 상품을 클릭하기까지의 흐름을 확인합니다.</p></div><nav><a href="/admin/recommendations">상품·버튼 관리</a><a class="active" href="/admin/insights">인사이트</a><a href="/admin/experiments">실험 목록</a><a href="/admin/experiments/new">＋ 새 실험</a></nav></header>
 <form class="filters" method="get" action="/admin/insights"><div><label for="start_date">시작일</label><input id="start_date" name="start_date" type="date" value="{start_value}"></div><span class="tilde">~</span><div><label for="end_date">종료일</label><input id="end_date" name="end_date" type="date" value="{end_value}"></div><button type="submit">기간 적용</button><a href="/admin/insights?all_time=true">전체 기간 보기</a></form>
 <section class="hero"><div class="hero-row"><div><span class="eyebrow">DECISION DASHBOARD</span><h1>어디서 사용자가 이탈하는가?</h1><p class="sub">순차 코호트 기준 · 관리자 및 테스트 사용자 제외 · {start_value or '전체'} ~ {end_value or '현재'}</p></div><span class="live"><i></i>{data_status}</span></div></section>
 <section class="kpis"><div class="card"><span class="kpi-label">버튼 노출 사용자</span><div class="kpi-value">{entry_exposed_users:,}명</div><span class="kpi-note">{entry_exposure_events:,}회 노출</span></div><div class="card"><span class="kpi-label">버튼 CTR</span><div class="kpi-value">{entry_ctr:.2f}%</div><span class="kpi-note">노출 → 버튼 클릭</span></div><div class="card"><span class="kpi-label">상품 도달 사용자</span><div class="kpi-value">{exposed:,}명</div><span class="kpi-note">진입 후 상품 노출</span></div><div class="card"><span class="kpi-label">상품 클릭 사용자</span><div class="kpi-value">{clicked:,}명</div><span class="kpi-note">{click_events:,}회 클릭</span></div><div class="card"><span class="kpi-label">상품 CTR</span><div class="kpi-value">{ctr:.2f}%</div><span class="kpi-note">상품 노출 → 클릭</span></div></section>
 <section class="funnel"><div class="section-head"><h2>사용자 퍼널</h2><span class="hint">각 단계는 이전 단계를 통과한 사용자 기준</span></div><div class="funnel-track"><div class="funnel-step"><strong>01 · 버튼 노출</strong><b>{entry_exposed_users:,}</b><small>{entry_exposure_events:,}회 · 진입점에 버튼이 표시됨</small></div><div class="funnel-step"><strong>02 · 버튼 클릭</strong><b>{entry_users:,}</b><small>{entry_ctr:.2f}% 전환 · {entry_events:,}회</small></div><div class="funnel-step"><strong>03 · 상품 노출</strong><b>{exposed:,}</b><small>{exposure_after_entry:.2f}% 도달 · {exposure_events:,}회</small></div><div class="funnel-step"><strong>04 · 상품 클릭</strong><b>{clicked:,}</b><small>{ctr:.2f}% 전환 · {click_events:,}회</small></div><div class="funnel-step"><strong>05 · 외부 전환</strong><b>측정 중</b><small>토스 제휴 데이터 연동 필요</small></div></div>{details(summary_sql)}</section>
-<h2>무엇이 성과를 만들었나</h2><section class="layout"><section class="panel"><div class="panel-head"><h2>상품별 성과</h2><span class="hint">노출·클릭·CTR</span></div><div class="scroll"><table><thead><tr><th>상품</th><th>노출</th><th>클릭</th><th>CTR</th><th>주요 접점</th></tr></thead><tbody>{product_rows}</tbody></table></div>{details(product_sql)}</section><section class="panel"><div class="panel-head"><h2>버튼 문구 성과</h2><span class="hint">버튼 노출 → 버튼 클릭 → 상품 클릭</span></div><div class="scroll"><table><thead><tr><th>문구</th><th>버튼 노출</th><th>버튼 클릭</th><th>버튼 CTR</th><th>상품 클릭</th><th>상품 CTR</th></tr></thead><tbody>{message_rows}</tbody></table></div>{details(button_sql)}</section></section>
+<h2>무엇이 성과를 만들었나</h2><p class="sub">기간은 한국 시간 기준입니다. 아래 상세 표는 기간 내 전체 이벤트의 고유 사용자 수이며, 위 요약은 같은 기간 안에 순서대로 진입한 사용자만 집계합니다. 버튼·상품 노출은 응답에 포함된 횟수로, 실제 화면 열람을 보장하지 않습니다. 문구별 노출 시간대가 달라 CTR 차이만으로 문구의 우열을 단정할 수 없습니다.</p><section class="layout"><section class="panel"><div class="panel-head"><h2>상품별 성과</h2><span class="hint">노출·클릭·CTR</span></div><div class="scroll"><table><thead><tr><th>상품</th><th>노출</th><th>클릭</th><th>CTR</th><th>주요 접점</th></tr></thead><tbody>{product_rows}</tbody></table></div>{details(product_sql)}</section><section class="panel"><div class="panel-head"><h2>버튼 문구 성과</h2><span class="hint">버튼 노출 → 버튼 클릭 → 상품 클릭</span></div><div class="scroll"><table><thead><tr><th>문구</th><th>버튼 노출</th><th>버튼 클릭</th><th>버튼 CTR</th><th>상품 클릭</th><th>상품 CTR</th></tr></thead><tbody>{message_rows}</tbody></table></div>{details(button_sql)}</section></section>
 <section class="panel"><div class="panel-head"><h2>최근 추이</h2><span class="hint">KST · 최근 30일</span></div><div class="scroll"><table><thead><tr><th>날짜</th><th>노출</th><th>클릭 사용자</th><th>클릭 이벤트</th></tr></thead><tbody>{daily_rows}</tbody></table></div>{details(daily_sql)}</section>
 <h2>상품 카드 위치 효과</h2><section class="panel"><div class="panel-head"><h2>어느 위치가 강한가?</h2><span class="hint">commerceCard 순서별 클릭률</span></div><div class="position-grid">{position_rows}</div>{details(position_sql)}</section>
 </main></body></html>"""

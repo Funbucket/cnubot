@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 import os
 import time
 from datetime import datetime
@@ -11,6 +12,7 @@ from zoneinfo import ZoneInfo
 from app.utils import common, kakao_json_response
 from app.services import toss_sharelink
 from app.services import recommendations
+from app.services import promotion_settings
 
 PROMOTION_EXPERIMENT_KEY = "snack_product_comparison_v3"
 DEFAULT_PROMOTION_PRODUCT_KEY = "pepsi_lime"
@@ -319,6 +321,24 @@ async def get_live_toss_products(
     limit: int = 5,
     request_id: str | None = None,
 ) -> list[tuple[str, dict]]:
+    settings = promotion_settings.read_settings()
+    if settings.mode == "fixed":
+        products = promotion_settings.fixed_products(settings)[:limit]
+        for position, (key, product) in enumerate(products, 1):
+            TOSS_SHOPPING_PRODUCTS[key] = product
+            try:
+                await recommendations.record_exposure(
+                    user_id, surface, 0, [], product_key=key,
+                    properties={"product_name": product["title"], "position": position,
+                                "row": (position - 1) // 3 + 1, "column": (position - 1) % 3 + 1,
+                                "selection_mode": "fixed", "settings_revision": settings.revision,
+                                "product_button_label": product["button_label"]},
+                    request_id=request_id,
+                )
+            except Exception:
+                # Analytics failure must never replace the administrator's selection.
+                logging.getLogger(__name__).exception("failed to record fixed product exposure")
+        return products
     candidates = await _candidate_pool()
     affinity = await recommendations.category_affinity(user_id)
     recent_ids = await recommendations.recent_item_ids(user_id)
@@ -398,6 +418,7 @@ def create_tracking_token(
     button_label: str = "unknown",
     position: int | None = None,
     request_id: str | None = None,
+    product_snapshot: dict | None = None,
 ) -> str:
     payload = base64.urlsafe_b64encode(
         json.dumps(
@@ -413,8 +434,9 @@ def create_tracking_token(
                 "n": button_label,
                 "o": position,
                 "r": request_id,
+                "m": product_snapshot or {},
                 "e": int(time.time()) + 86400,
-            }
+            }, ensure_ascii=False, separators=(",", ":"),
         ).encode()
     ).decode().rstrip("=")
     signature = hmac.new(_tracking_secret(), payload.encode(), hashlib.sha256).hexdigest()
@@ -454,7 +476,8 @@ def create_toss_promotion_button(
     click_url: str | None = None,
     label: str = TOSS_LIVING_MENU_BUTTON_LABEL,
 ):
-    label = _rotating_label(MENU_BUTTON_LABELS)
+    settings = promotion_settings.read_settings()
+    label = settings.menu_button_label or ("🛍️ 오늘의 추천 상품" if settings.mode == "fixed" else _rotating_label(MENU_BUTTON_LABELS))
     return {
         "label": label,
         "action": "message",
@@ -468,11 +491,17 @@ def create_toss_promotion_button(
 
 
 def get_product(product_key: str | None = None) -> dict:
+    if product_key and product_key.startswith("fixed_"):
+        for item in promotion_settings.read_settings().products:
+            if promotion_settings.product_key(item.url) == product_key:
+                return item.model_dump()
+        return TOSS_SHOPPING_PRODUCTS.get(product_key, {"title": "이전에 등록된 상품", "url": ""})
     return TOSS_SHOPPING_PRODUCTS.get(product_key, TOSS_SHOPPING_PROMOTION)
 
 
 def create_toss_promotion_quick_reply(kakao_response, product: dict | None = None):
-    label = _rotating_label(QUICK_REPLY_LABELS)
+    settings = promotion_settings.read_settings()
+    label = settings.quick_reply_label or ("🛍️ 오늘의 추천 상품" if settings.mode == "fixed" else _rotating_label(QUICK_REPLY_LABELS))
     if common.KAKAO_TOSS_PROMOTION_BLOCK_ID:
         return kakao_response.create_quick_reply(
             label=label,
@@ -532,6 +561,28 @@ def create_toss_shopping_list_response(
 ):
     kakao_response = kakao_json_response.KakaoJsonResponse()
     click_urls = click_urls or [None] * len(products)
+    if products and all(p.get("selection_mode") == "fixed" for p in products):
+        kakao_response.add_output_to_response(kakao_response.create_simple_text(
+            "🛍️ 오늘의 추천 상품\n✱ " + promotion_settings.DISCLOSURE
+        ))
+        # Price is intentionally omitted: pasted links do not guarantee a current price.
+        cards = []
+        for product, click_url in zip(products, click_urls):
+            card = {"title": product["title"][:50],
+                    "description": product.get("description") or "현재 가격과 구매 조건은 토스에서 확인해주세요.",
+                    "buttons": [{"action": "webLink", "label": product["button_label"],
+                                 "webLinkUrl": click_url or product["url"]}]}
+            if product.get("image_url"):
+                card["thumbnail"] = {"imageUrl": product["image_url"]}
+            cards.append(card)
+        for start in range(0, len(cards), COMMERCE_CARDS_PER_ROW):
+            row = cards[start:start + COMMERCE_CARDS_PER_ROW]
+            card_type = "basicCard" if all("thumbnail" in card for card in row) else "textCard"
+            if card_type == "textCard":
+                row = [{key: value for key, value in card.items() if key != "thumbnail"} for card in row]
+            kakao_response.add_output_to_response(kakao_response.create_carousel(
+                row, type=card_type))
+        return kakao_response.get_response()
     cards = []
     for product, click_url in zip(products, click_urls):
         cards.append(
