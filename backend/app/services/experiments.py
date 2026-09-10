@@ -5,7 +5,8 @@ import os
 import re
 import secrets
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import Any
 
 from app.database import get_pool
@@ -711,15 +712,16 @@ def _summarize_paths(rows) -> list[dict[str, Any]]:
     return sorted(summaries, key=lambda item: item["reach_users"], reverse=True)
 
 
-def _summarize_guardrails(rows) -> list[dict[str, Any]]:
+def _summarize_guardrails(rows, today=None) -> list[dict[str, Any]]:
     """Daily retention and re-query volume.
 
+    다음 날이 아직 진행 중이면 재방문율이 낮게 나오므로 확정값으로 쓰지 않는다.
     다음 날 활동이 통째로 비어 있으면 0%가 아니라 측정 불가로 다뤄야 한다.
-    수집이 멈춘 날을 이탈로 읽으면 가드레일이 거짓 경보를 낸다.
+    수집이 멈춘 날이나 오늘을 이탈로 읽으면 가드레일이 거짓 경보를 낸다.
     """
     summaries = []
+    today = today or datetime.now(ZoneInfo("Asia/Seoul")).date()
     active_days = {row["day"] for row in rows if row["active_users"]}
-    latest_day = max(active_days, default=None)
     for row in rows:
         item = dict(row)
         next_day = item["day"] + timedelta(days=1)
@@ -727,9 +729,9 @@ def _summarize_guardrails(rows) -> list[dict[str, Any]]:
         item["views_per_user"] = (
             item["menu_views"] / item["menu_view_users"] if item["menu_view_users"] else 0
         )
-        item["return_rate_pending"] = item["day"] == latest_day
+        item["return_rate_pending"] = next_day >= today
         item["return_rate_measurable"] = (
-            next_day in active_days and item["day"] != latest_day
+            next_day in active_days and next_day < today
         )
         summaries.append(item)
     return summaries

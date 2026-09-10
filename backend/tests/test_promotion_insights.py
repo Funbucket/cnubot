@@ -124,30 +124,32 @@ class GuardrailSummaryTest(unittest.TestCase):
     def test_computes_return_rate_and_views_per_user(self):
         rows = [self._row(10, 100, 0), self._row(9, 200, 80, views=500, view_users=200)]
 
-        summaries = {item["day"].day: item for item in experiments._summarize_guardrails(rows)}
+        summaries = {item["day"].day: item for item in experiments._summarize_guardrails(rows, today=date(2026, 9, 11))}
 
         self.assertAlmostEqual(summaries[9]["return_rate"], 40.0)
         self.assertAlmostEqual(summaries[9]["views_per_user"], 2.5)
         self.assertTrue(summaries[9]["return_rate_measurable"])
 
-    def test_latest_day_is_still_pending(self):
-        rows = [self._row(10, 100, 0), self._row(9, 200, 80)]
+    def test_a_day_whose_successor_is_still_running_stays_pending(self):
+        # 오늘이 9/11이면 9/10의 재방문율은 아직 하루가 끝나지 않아 낮게 나온다.
+        rows = [self._row(10, 100, 2), self._row(9, 200, 80)]
 
-        summaries = {item["day"].day: item for item in experiments._summarize_guardrails(rows)}
+        summaries = {item["day"].day: item for item in experiments._summarize_guardrails(rows, today=date(2026, 9, 11))}
 
         self.assertTrue(summaries[10]["return_rate_pending"])
         self.assertFalse(summaries[10]["return_rate_measurable"])
+        self.assertFalse(summaries[9]["return_rate_pending"])
 
     def test_a_collection_gap_is_not_reported_as_zero_retention(self):
         # 9/8 데이터가 통째로 없으면 9/7 재방문율은 0%가 아니라 측정 불가다.
         rows = [self._row(10, 100, 0), self._row(9, 200, 80), self._row(7, 1200, 0)]
 
-        summaries = {item["day"].day: item for item in experiments._summarize_guardrails(rows)}
+        summaries = {item["day"].day: item for item in experiments._summarize_guardrails(rows, today=date(2026, 9, 11))}
 
         self.assertFalse(summaries[7]["return_rate_measurable"])
         self.assertFalse(summaries[7]["return_rate_pending"])
 
     def test_days_without_menu_view_instrumentation_report_no_views(self):
-        summaries = experiments._summarize_guardrails([self._row(9, 200, 80)])
+        summaries = experiments._summarize_guardrails([self._row(9, 200, 80)], today=date(2026, 9, 11))
 
         self.assertEqual(summaries[0]["views_per_user"], 0)

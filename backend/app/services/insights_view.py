@@ -54,14 +54,18 @@ def render_insights(data):
         if any(p.get('clicked_users', 0) > p.get('reach_users', 0) for p in paths.values()):
             observations.append(('노출과 클릭의 집계 범위를 확인하세요', '노출보다 클릭한 사용자가 많은 경로가 있습니다. 기간 밖 노출이나 누락된 노출 기록이 있는지 확인하세요.'))
     observation_html = ''.join(f'<div class="observation"><b>{esc(title)}</b><p>{esc(note)}</p></div>' for title, note in observations)
+    totals = data.get('totals') or {}
     flows = []
     for key, title, note in [('entry', '버튼을 거쳐 상품 보기', '버튼 노출 → 버튼 클릭 → 상품 노출 → 상품 클릭'), ('inline', '학식에서 상품 바로 보기', '상품 노출 → 상품 클릭')]:
         p = paths.get(key, {})
-        # Path aggregates are independent unique-user counts, not attributed cohorts.
-        steps = [('버튼 노출', p.get('reach_users', 0)), ('버튼 클릭', p.get('action_users', 0)), ('상품 노출', p.get('exposed_users', 0)), ('상품 클릭', p.get('clicked_users', 0))] if key == 'entry' else [('상품 노출', p.get('reach_users', 0)), ('상품 클릭', p.get('clicked_users', 0))]
+        # Path aggregates are independent unique-user counts. A funnel needs the
+        # attributed cohort in totals, or a later step can exceed an earlier one.
+        steps = [('버튼 노출', totals.get('entry_exposed_users', 0)), ('버튼 클릭', totals.get('entry_users', 0)), ('상품 노출', totals.get('exposed_users', 0)), ('상품 클릭', totals.get('clicked_users', 0))] if key == 'entry' else [('상품 노출', p.get('reach_users', 0)), ('상품 클릭', p.get('clicked_users', 0))]
         peak = max([v for _, v in steps] + [1])
         bars = ''.join(f'<div class="flow-step"><div><span><em>{i:02}</em>{label}</span><b>{value:,}<small> 명</small></b></div><div class="track"><div style="width:{value / peak * 100:.2f}%"></div></div></div>' for i, (label, value) in enumerate(steps, 1))
-        flows.append(f'<article class="panel flow"><span class="tag">{"버튼 경유" if key == "entry" else "바로 노출"}</span><h3>{title}</h3><p class="muted">{note}</p>{bars}<footer>접점 대비 상품 클릭률 <b>{rate(p.get("clicked_users", 0), p.get("reach_users", 0))}</b></footer></article>')
+        # 하단 요약도 퍼널과 같은 코호트를 써야 두 숫자가 어긋나지 않는다.
+        first, last = steps[0][1], steps[-1][1]
+        flows.append(f'<article class="panel flow"><span class="tag">{"버튼 경유" if key == "entry" else "바로 노출"}</span><h3>{title}</h3><p class="muted">{note}</p>{bars}<footer>접점 대비 상품 클릭률 <b>{rate(last, first)}</b></footer></article>')
     product_rows = []
     for index, p in enumerate(sorted(products, key=lambda p: p.get('clicked_users', 0), reverse=True), 1):
         name = p.get('product_name') or p['product_key']
@@ -77,6 +81,17 @@ def render_insights(data):
     messages = table(['버튼 문구 / 위치', '버튼 노출 사용자', '버튼 클릭 사용자', '버튼 클릭률', '상품 클릭 사용자'], [row(f'<b>{esc(r["label"])}</b><small>{esc(r.get("source"))}</small>', f'{r["exposed_users"]:,}', f'{r["entry_users"]:,}', rate(r['entry_users'], r['exposed_users']), f'{r["card_clicked_users"]:,}') for r in data.get('entry_labels', [])])
     positions = table(['카드 위치', '노출 사용자', '클릭 사용자', '클릭률'], [row(f'{r["row"]}행 {r["column"]}열', f'{r["exposed_users"]:,}', f'{r["clicked_users"]:,}', rate(r['clicked_users'], r['exposed_users'])) for r in data.get('positions', [])])
     fatigue = table(['경로', '기간 내 노출 순서', '노출 횟수', '반응 횟수', '반응률'], [row('바로 노출' if r['path'] == 'inline' else '버튼 경유', f'{r["nth"]}회차' + (' 이상' if r['nth'] >= 6 else ''), f'{r["impressions"]:,}', f'{r["actions"]:,}', rate(r['actions'], r['impressions'])) for r in data.get('fatigue', [])])
+    guardrail_rows = []
+    for g in data.get('guardrails', []):
+        if g.get('return_rate_pending'):
+            retention = '<small>집계 중</small>'
+        elif not g.get('return_rate_measurable'):
+            retention = '<small>측정 불가</small>'
+        else:
+            retention = f'<b>{g["return_rate"]:.1f}%</b><small>{g["returned_users"]:,}명 복귀</small>'
+        views = f'{g["views_per_user"]:.2f}회<small>{g["menu_views"]:,}회 / {g["menu_view_users"]:,}명</small>' if g.get('menu_view_users') else '<small>계측 전</small>'
+        guardrail_rows.append(row(esc(g['day']), f'{g["active_users"]:,}', views, retention))
+    guardrails = table(['날짜 (KST)', '활성 사용자', '1인당 학식 조회', '다음날 재방문'], guardrail_rows)
     surfaces = table(['클릭 위치', '클릭 사용자', '클릭 횟수'], [row(esc({'commerce_card': '상품 카드', 'menu_button': '학식 메뉴 버튼', 'quick_reply': '퀵리플라이', 'promotion_block': '기타 프로모션'}.get(r['surface'], r['surface'])), f'{r["users"]:,}', f'{r["events"]:,}') for r in data.get('surfaces', [])])
     template = Template((Path(__file__).parent.parent / 'static' / 'insights.html').read_text())
-    return template.substitute(period=esc(period), start=esc(start), end=esc(end), today=today.isoformat(), presets=presets, cards=''.join(cards), observations=observation_html, flows=''.join(flows), products=product_table, chart=chart, daily=daily_table, messages=messages, positions=positions, fatigue=fatigue, surfaces=surfaces)
+    return template.substitute(period=esc(period), start=esc(start), end=esc(end), today=today.isoformat(), presets=presets, cards=''.join(cards), observations=observation_html, flows=''.join(flows), products=product_table, chart=chart, daily=daily_table, messages=messages, positions=positions, fatigue=fatigue, guardrails=guardrails, surfaces=surfaces)
