@@ -1,14 +1,11 @@
 import argparse
-import json
-import os
-import shutil
-import tempfile
 from pathlib import Path
 
 from app.scrapers.cnu_food import scrape_mobile_food_menu
 from app.scrapers.dorm import scrape_dorm_hours, scrape_dorm_menu
 from app.scrapers.settings import DORM_URL, get_mobile_food_url
 from app.utils import common
+from app.utils.json_files import write_json_atomic as _write_json
 
 SCRAPABLE_PLACES = ["dorm", "hall_2", "hall_3", "sangrok", "life_science"]
 
@@ -32,40 +29,6 @@ def save_dorm_hours(data_dir: Path) -> Path:
     if not hours.get("hours", {}).get("lunch"):
         raise ValueError("Dorm hours are missing lunch")
     return _write_json(hours, data_dir, "dorm_hours.json")
-
-
-def _write_json(data: dict, data_dir: Path, filename: str) -> Path:
-    data_dir.mkdir(parents=True, exist_ok=True)
-    path = data_dir / filename
-    current_stat = path.stat() if path.exists() else None
-    payload = json.dumps(data, ensure_ascii=False, indent=4)
-
-    with tempfile.NamedTemporaryFile(
-        "w",
-        encoding="utf-8",
-        dir=data_dir,
-        prefix=f".{path.stem}.",
-        suffix=".tmp",
-        delete=False,
-    ) as tmp:
-        tmp.write(payload)
-        tmp.write("\n")
-        tmp_path = Path(tmp.name)
-
-    try:
-        json.loads(tmp_path.read_text(encoding="utf-8"))
-        if current_stat:
-            shutil.copystat(path, tmp_path)
-            try:
-                os.chown(tmp_path, current_stat.st_uid, current_stat.st_gid)
-            except PermissionError:
-                pass
-        os.replace(tmp_path, path)
-    finally:
-        if tmp_path.exists():
-            tmp_path.unlink()
-
-    return path
 
 
 def validate_menu_data(data: dict) -> None:
