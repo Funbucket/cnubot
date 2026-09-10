@@ -5,6 +5,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -50,6 +51,25 @@ MENU_BUTTON_LABELS = (
 TOSS_CANDIDATE_POOL_SIZE = 100
 COMMERCE_CARDS_PER_ROW = 3
 KST = ZoneInfo("Asia/Seoul")
+
+# 학식 응답에 상품을 바로 끼워넣는 카드는 진입 버튼과 달리 무시 비용이 크므로,
+# 아래 기준을 통과하는 상품이 없으면 카드를 아예 노출하지 않는다.
+INLINE_CARD_SURFACE = "menu_inline_card"
+INLINE_CARD_MAX_PRICE = 20000
+INLINE_CARD_MIN_DISCOUNT_RATE = 30
+# textCard 캐러셀은 title 50자, description 128자, commerceCard는 30자/40자까지 노출한다.
+INLINE_CARD_TITLE_LIMIT = 50
+INLINE_CARD_BUTTON_LIMIT = 14
+COMMERCE_CARD_TITLE_LIMIT = 30
+COMMERCE_CARD_DESCRIPTION_LIMIT = 40
+# 대용량·가정용 수량은 자취생과 맞지 않아 인라인 노출에서 제외한다.
+_BULK_QUANTITY_LIMITS = (
+    ("개입", 100), ("개", 100), ("매", 300), ("롤", 12),
+    ("팩", 5), ("박스", 1), ("포", 60), ("봉", 5), ("kg", 2),
+)
+_BULK_QUANTITY_PATTERN = re.compile(
+    r"(\d[\d,]*(?:\.\d+)?)\s*(개입|개|매|롤|팩|박스|포|봉|kg|KG)"
+)
 
 
 def _rotating_label(labels: tuple[str, ...]) -> str:
@@ -259,6 +279,7 @@ async def get_live_toss_product(
     surface: str = "default",
     preferred_item_id: int | None = None,
     request_id: str | None = None,
+    record_exposure: bool = True,
 ) -> tuple[str, dict]:
     candidates = await _candidate_pool()
     affinity = await recommendations.category_affinity(user_id)
@@ -303,15 +324,16 @@ async def get_live_toss_product(
         "category_names": category_names,
         "candidate_sources": item.get("_candidate_sources", []),
     }
-    await recommendations.record_exposure(
-        user_id,
-        surface,
-        item_id,
-        TOSS_SHOPPING_PRODUCTS[product_key]["category_ids"],
-        product_key=product_key,
-        properties={"product_name": TOSS_SHOPPING_PRODUCTS[product_key]["title"]},
-        request_id=request_id,
-    )
+    if record_exposure:
+        await recommendations.record_exposure(
+            user_id,
+            surface,
+            item_id,
+            TOSS_SHOPPING_PRODUCTS[product_key]["category_ids"],
+            product_key=product_key,
+            properties={"product_name": TOSS_SHOPPING_PRODUCTS[product_key]["title"]},
+            request_id=request_id,
+        )
     return product_key, TOSS_SHOPPING_PRODUCTS[product_key]
 
 
@@ -525,6 +547,195 @@ def create_toss_promotion_quick_reply(kakao_response, product: dict | None = Non
             "button_id": "toss_promotion_quick_reply",
             "button_label": label,
         },
+    )
+
+
+def _is_bulk_quantity(title: str) -> bool:
+    for amount, unit in _BULK_QUANTITY_PATTERN.findall(title or ""):
+        limit = next((value for key, value in _BULK_QUANTITY_LIMITS if key == unit.lower()), None)
+        if limit is not None and float(amount.replace(",", "")) > limit:
+            return True
+    return False
+
+
+def passes_inline_quality_gate(item: dict) -> bool:
+    """Judge a raw Toss candidate for menu-inline exposure."""
+    price = item.get("displayPrice") or 0
+    if not price or price > INLINE_CARD_MAX_PRICE:
+        return False
+    if (item.get("discountRate") or 0) < INLINE_CARD_MIN_DISCOUNT_RATE:
+        return False
+    if item.get("isSoldOut") or not item.get("thumbnailUrl"):
+        return False
+    return not _is_bulk_quantity(item.get("displayName", ""))
+
+
+def _is_renderable_inline(product: dict) -> bool:
+    return bool(
+        product.get("price")
+        and product.get("image_url")
+        and not product.get("is_sold_out")
+    )
+
+
+def _rotate_fixed_product(
+    products: list[tuple[str, dict]], last_exposed: dict[str, object]
+) -> tuple[str, dict]:
+    """Walk the admin's order, showing what this user has not seen yet.
+
+    한 바퀴를 다 돌면 가장 오래전에 보여준 상품부터 다시 시작한다.
+    """
+    for key, product in products:
+        if key not in last_exposed:
+            return key, product
+    return min(products, key=lambda pair: last_exposed[pair[0]])
+
+
+async def record_inline_exposure(
+    user_id: str | None, product_key: str, product: dict, request_id: str | None = None
+) -> None:
+    """Record the exposure only once the card is known to be in the response."""
+    try:
+        await recommendations.record_exposure(
+            user_id, INLINE_CARD_SURFACE, product.get("taca_item_id") or 0,
+            product.get("category_ids") or [], product_key=product_key,
+            properties={
+                "product_name": product["title"],
+                "position": 1,
+                "selection_mode": product.get("selection_mode") or (
+                    "fixed" if product_key.startswith("fixed_") else "algorithm"
+                ),
+                "settings_revision": product.get("settings_revision"),
+            },
+            request_id=request_id,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception("failed to record inline product exposure")
+
+
+async def get_inline_promotion_product(
+    user_id: str | None, request_id: str | None = None
+) -> tuple[str, dict] | None:
+    """Pick at most one product for the menu-inline card, or None when nothing qualifies.
+
+    노출은 카드가 실제로 응답에 들어간 뒤에 record_inline_exposure로 따로 기록한다.
+    """
+    settings = promotion_settings.read_settings()
+    if settings.mode == "fixed":
+        # 관리자가 직접 고른 상품은 품질 게이트 대신 렌더 가능 여부만 확인한다.
+        try:
+            products = await asyncio.wait_for(
+                promotion_settings.resolved_fixed_products(settings), timeout=3.5
+            )
+        except Exception:
+            products = promotion_settings.fixed_products(settings)
+        renderable = [(key, product) for key, product in products if _is_renderable_inline(product)]
+        if not renderable:
+            return None
+        key, product = _rotate_fixed_product(
+            renderable, await recommendations.last_exposure_by_product(user_id, INLINE_CARD_SURFACE)
+        )
+        TOSS_SHOPPING_PRODUCTS[key] = product
+        return key, product
+
+    candidates = [item for item in await _candidate_pool() if passes_inline_quality_gate(item)]
+    if not candidates:
+        return None
+    affinity = await recommendations.category_affinity(user_id)
+    recent_ids = await recommendations.recent_item_ids(user_id)
+    item = recommendations.rank_candidates(
+        candidates, affinity, recent_ids, user_id, INLINE_CARD_SURFACE
+    )
+    if not item:
+        return None
+    return await get_live_toss_product(
+        user_id, INLINE_CARD_SURFACE,
+        preferred_item_id=int(item["tacaItemId"]), request_id=request_id,
+        record_exposure=False,
+    )
+
+
+def _trim_product_title(title: str, limit: int = INLINE_CARD_TITLE_LIMIT) -> str:
+    """Cut a long Toss product name at an option boundary instead of mid-word."""
+    if len(title) <= limit:
+        return title
+    head = title[:limit - 1]
+    boundary = head.rfind(",")
+    return (head[:boundary] if boundary > limit // 2 else head).rstrip(" ,") + "…"
+
+
+def _strikethrough(text: str) -> str:
+    """textCard는 서식을 못 쓰므로 결합 문자로 취소선을 흉내낸다."""
+    return "".join(f"{character}̶" for character in text)
+
+
+def _inline_price_lines(product: dict) -> str:
+    """Mimic the commerceCard price block: 할인율 + 취소선 정가, 그 아래 최종가."""
+    price = product.get("price") or 0
+    original_price = product.get("original_price") or price
+    final_line = f"{price:,}원"
+    if original_price <= price:
+        return final_line
+    original_line = _strikethrough(f"{original_price:,}원")
+    if product.get("discount_rate"):
+        return f"{product['discount_rate']}% {original_line}\n{final_line}"
+    return f"{original_line}\n{final_line}"
+
+
+def inline_product_description(product: dict) -> str:
+    """Use the same wording as the product list shown after the entry button."""
+    custom = (product.get("description") or "").strip()
+    if custom:
+        return custom
+    if product.get("price") is None:
+        return "현재 가격과 구매 조건은 토스에서 확인해주세요."
+    return f"{product.get('discount_rate') or 0}% 할인 · 최대할인가 {product['price']:,}원"
+
+
+def create_inline_product_output(product: dict, click_url: str | None = None) -> dict:
+    """Build the commerceCard output used when a spare output slot is available."""
+    price = product.get("price") or 0
+    original_price = product.get("original_price") or price
+    commerce_card = {
+        "title": _trim_product_title(product["title"], COMMERCE_CARD_TITLE_LIMIT),
+        "description": inline_product_description(product)[:COMMERCE_CARD_DESCRIPTION_LIMIT],
+        "price": original_price,
+        "currency": "won",
+        "discountedPrice": price,
+        "thumbnails": [{"imageUrl": product["image_url"]}],
+        "buttons": [_inline_product_button(product, click_url)],
+    }
+    # discountRate는 discountedPrice가 있어야 노출되고, discount보다 우선 표시된다.
+    if product.get("discount_rate"):
+        commerce_card["discountRate"] = product["discount_rate"]
+    elif original_price > price:
+        commerce_card["discount"] = original_price - price
+    return {"commerceCard": commerce_card}
+
+
+def _inline_product_button(product: dict, click_url: str | None) -> dict:
+    label = (product.get("button_label") or "구매하러 가기").removesuffix(" · 제휴")
+    return {
+        "action": "webLink",
+        "label": label[:INLINE_CARD_BUTTON_LIMIT],
+        "webLinkUrl": click_url or product["url"],
+    }
+
+
+def create_inline_product_card(product: dict, click_url: str | None = None) -> dict:
+    """Build the textCard that sits at the end of a meal row.
+
+    끼니별 3행 레이아웃을 지키려면 메뉴와 같은 carousel에 들어가야 하고,
+    carousel은 카드 타입이 하나뿐이라 textCard로 맞춘다.
+    """
+    # 취소선 가격 블록이 commerceCard의 가격 UI를 대신하므로, 같은 값을 반복하지 않는다.
+    custom = (product.get("description") or "").strip()
+    description = f"{_inline_price_lines(product)}\n\n{custom}" if custom else _inline_price_lines(product)
+    return kakao_json_response.KakaoJsonResponse.create_text_card(
+        title=_trim_product_title(product["title"]),
+        description=description,
+        buttons=[_inline_product_button(product, click_url)],
+        button_layout="vertical",
     )
 
 

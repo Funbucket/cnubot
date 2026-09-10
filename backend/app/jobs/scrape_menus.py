@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 from app.scrapers.cnu_food import scrape_mobile_food_menu
-from app.scrapers.dorm import scrape_dorm_menu
+from app.scrapers.dorm import scrape_dorm_hours, scrape_dorm_menu
 from app.scrapers.settings import DORM_URL, get_mobile_food_url
 from app.utils import common
 
@@ -22,10 +22,21 @@ def scrape_place(place: str) -> dict:
 
 
 def save_menu(data: dict, data_dir: Path) -> Path:
-    data_dir.mkdir(parents=True, exist_ok=True)
     validate_menu_data(data)
-    place = data["place"]
-    path = data_dir / f"{place}_menu.json"
+    return _write_json(data, data_dir, f"{data['place']}_menu.json")
+
+
+def save_dorm_hours(data_dir: Path) -> Path:
+    """Keep operating hours crawled rather than hardcoded, alongside the weekly menus."""
+    hours = scrape_dorm_hours()
+    if not hours.get("hours", {}).get("lunch"):
+        raise ValueError("Dorm hours are missing lunch")
+    return _write_json(hours, data_dir, "dorm_hours.json")
+
+
+def _write_json(data: dict, data_dir: Path, filename: str) -> Path:
+    data_dir.mkdir(parents=True, exist_ok=True)
+    path = data_dir / filename
     current_stat = path.stat() if path.exists() else None
     payload = json.dumps(data, ensure_ascii=False, indent=4)
 
@@ -33,7 +44,7 @@ def save_menu(data: dict, data_dir: Path) -> Path:
         "w",
         encoding="utf-8",
         dir=data_dir,
-        prefix=f".{place}_menu.",
+        prefix=f".{path.stem}.",
         suffix=".tmp",
         delete=False,
     ) as tmp:
@@ -109,9 +120,12 @@ def expand_places(places: list[str]) -> list[str]:
 def main() -> None:
     args = parse_args()
     data_dir = Path(args.data_dir)
-    for place in expand_places(args.places):
+    places = expand_places(args.places)
+    for place in places:
         path = save_menu(scrape_place(place), data_dir)
         print(f"saved {place}: {path}")
+    if "dorm" in places:
+        print(f"saved dorm hours: {save_dorm_hours(data_dir)}")
 
 
 if __name__ == "__main__":

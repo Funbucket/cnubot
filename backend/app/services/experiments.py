@@ -389,6 +389,16 @@ async def get_analysis(experiment_id: int) -> dict[str, Any]:
         }
 
 
+_PATH_EVENTS_CTE = """
+                SELECT user_id, event_name, created_at,
+                       CASE WHEN surface = 'menu_inline_card' THEN 'inline' ELSE 'entry' END AS path
+                FROM qualified_promotion_events
+                WHERE ($2::date IS NULL OR created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
+                  AND ($3::date IS NULL OR created_at < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
+                  AND (user_id IS NULL OR NOT (user_id = ANY($4::text[])))
+"""
+
+
 async def get_promotion_insights(start_date=None, end_date=None) -> dict[str, Any]:
     """Return product and surface aggregates for the promotion dashboard."""
     pool = get_pool()
@@ -526,6 +536,53 @@ async def get_promotion_insights(start_date=None, end_date=None) -> dict[str, An
             """,
             list(click_events), start_date, end_date, excluded_user_ids,
         )
+        # 인라인 카드에는 진입 클릭 단계가 없어 경로별로 따로 집계해야 한다.
+        path_rows = await conn.fetch(
+            f"""
+            WITH events AS ({_PATH_EVENTS_CTE})
+            SELECT path,
+                   COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_entry_exposure')::int AS entry_exposed_users,
+                   COUNT(*) FILTER (WHERE event_name = 'promotion_entry_exposure')::int AS entry_exposure_events,
+                   COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_entry_click')::int AS entry_users,
+                   COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_exposure')::int AS exposed_users,
+                   COUNT(*) FILTER (WHERE event_name = 'promotion_exposure')::int AS exposure_events,
+                   COUNT(DISTINCT user_id) FILTER (WHERE event_name = ANY($1::text[]))::int AS clicked_users,
+                   COUNT(*) FILTER (WHERE event_name = ANY($1::text[]))::int AS click_events
+            FROM events
+            GROUP BY path
+            """,
+            list(click_events), start_date, end_date, excluded_user_ids,
+        )
+        # 같은 접점을 반복해서 본 사용자의 반응률이 떨어지는지 본다.
+        fatigue_rows = await conn.fetch(
+            f"""
+            WITH events AS ({_PATH_EVENTS_CTE}), impressions AS (
+                SELECT user_id, path, created_at,
+                       ROW_NUMBER() OVER (PARTITION BY user_id, path ORDER BY created_at) AS nth,
+                       LEAD(created_at) OVER (PARTITION BY user_id, path ORDER BY created_at) AS next_at
+                FROM events
+                WHERE (path = 'entry' AND event_name = 'promotion_entry_exposure')
+                   OR (path = 'inline' AND event_name = 'promotion_exposure')
+            ), actions AS (
+                SELECT user_id, path, created_at
+                FROM events
+                WHERE (path = 'entry' AND event_name = 'promotion_entry_click')
+                   OR (path = 'inline' AND event_name = ANY($1::text[]))
+            )
+            SELECT i.path, LEAST(i.nth, 6)::int AS nth,
+                   COUNT(*)::int AS impressions,
+                   COUNT(*) FILTER (WHERE EXISTS (
+                       SELECT 1 FROM actions a
+                       WHERE a.user_id = i.user_id AND a.path = i.path
+                         AND a.created_at >= i.created_at
+                         AND (i.next_at IS NULL OR a.created_at < i.next_at)
+                   ))::int AS actions
+            FROM impressions i
+            GROUP BY 1, 2
+            ORDER BY 1, 2
+            """,
+            list(click_events), start_date, end_date, excluded_user_ids,
+        )
         totals = await conn.fetchrow(
             """
             WITH filtered_events AS (
@@ -576,6 +633,8 @@ async def get_promotion_insights(start_date=None, end_date=None) -> dict[str, An
             list(click_events), start_date, end_date, excluded_user_ids,
         )
     return {
+        "paths": _summarize_paths(path_rows),
+        "fatigue": [dict(row) for row in fatigue_rows],
         "products": [dict(row) for row in product_rows],
         "surfaces": [dict(row) for row in surface_rows],
         "entry_labels": [dict(row) for row in entry_label_rows],
@@ -585,6 +644,38 @@ async def get_promotion_insights(start_date=None, end_date=None) -> dict[str, An
         "start_date": start_date,
         "end_date": end_date,
     }
+
+
+def _summarize_paths(rows) -> list[dict[str, Any]]:
+    """Describe each path with the same reach → 반응 → 클릭 shape.
+
+    진입형은 버튼을 본 사람이 접점 노출이고, 인라인형은 상품 카드 자체가 접점이다.
+    """
+    summaries = []
+    for row in rows:
+        item = dict(row)
+        if item["path"] == "inline":
+            item["reach_users"] = item["exposed_users"]
+            item["reach_events"] = item["exposure_events"]
+            item["action_users"] = item["clicked_users"]
+            item["steps"] = 2
+        else:
+            item["reach_users"] = item["entry_exposed_users"]
+            item["reach_events"] = item["entry_exposure_events"]
+            item["action_users"] = item["entry_users"]
+            item["steps"] = 4
+        item["action_rate"] = _rate(item["action_users"], item["reach_users"])
+        item["click_rate"] = _rate(item["clicked_users"], item["reach_users"])
+        item["impression_click_rate"] = _rate(item["click_events"], item["reach_events"])
+        item["impressions_per_user"] = (
+            item["reach_events"] / item["reach_users"] if item["reach_users"] else 0
+        )
+        summaries.append(item)
+    return sorted(summaries, key=lambda item: item["reach_users"], reverse=True)
+
+
+def _rate(numerator: int, denominator: int) -> float:
+    return numerator / denominator * 100 if denominator else 0.0
 
 
 async def refresh_rollup(experiment_id: int, conn=None) -> None:

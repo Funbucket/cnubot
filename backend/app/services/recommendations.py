@@ -73,6 +73,30 @@ async def recent_item_ids(user_id: str | None, hours: int = 24) -> dict[int, obj
     return {int(row["taca_item_id"]): row["last_exposed_at"] for row in rows}
 
 
+async def last_exposure_by_product(user_id: str | None, surface: str) -> dict[str, object]:
+    """Return the last time each product was shown to a user on one surface."""
+    if not user_id:
+        return {}
+    try:
+        pool = get_pool()
+    except RuntimeError:
+        return {}
+    rows = await pool.fetch(
+        """
+        SELECT product_key, MAX(created_at) AS last_exposed_at
+        FROM user_events
+        WHERE user_id = $1
+          AND surface = $2
+          AND event_name = 'promotion_exposure'
+          AND product_key IS NOT NULL
+        GROUP BY product_key
+        """,
+        user_id,
+        surface,
+    )
+    return {row["product_key"]: row["last_exposed_at"] for row in rows}
+
+
 async def latest_item_id(user_id: str | None, surface: str) -> int | None:
     if not user_id:
         return None

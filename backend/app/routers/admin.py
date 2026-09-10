@@ -261,6 +261,22 @@ code{{background:#f1f4fa;padding:2px 5px;border-radius:5px}}@media(max-width:650
 
 def _insights_page(data: dict[str, Any]) -> str:
     totals = data["totals"]
+    paths = data.get("paths", [])
+    by_path = {item["path"]: item for item in paths}
+    entry_path = by_path.get("entry", {})
+    inline_path = by_path.get("inline", {})
+    all_clicked = sum(item["clicked_users"] for item in paths)
+    all_reach = sum(item["reach_users"] for item in paths)
+    path_rows = _insight_path_rows(paths)
+    fatigue_rows = _insight_fatigue_rows(data.get("fatigue", []))
+    path_funnels = _insight_path_funnels(paths, totals)
+    entry_reach = entry_path.get("reach_users") or 0
+    entry_reach_events = entry_path.get("reach_events") or 0
+    entry_action_rate = entry_path.get("action_rate") or 0
+    entry_click_rate = entry_path.get("click_rate") or 0
+    inline_reach = inline_path.get("reach_users") or 0
+    inline_reach_events = inline_path.get("reach_events") or 0
+    inline_click_rate = inline_path.get("click_rate") or 0
     exposed = totals.get("exposed_users") or 0
     clicked = totals.get("clicked_users") or 0
     entry_exposed_users = totals.get("entry_exposed_users") or 0
@@ -315,6 +331,39 @@ def _insights_page(data: dict[str, Any]) -> str:
         f"<td data-label=\"클릭 사용자\">{row['clicked_users']:,}명</td><td data-label=\"클릭 이벤트\">{row['click_events']:,}건</td></tr>"
         for row in data["daily"]
     ) or '<tr><td colspan="4" class="sub">아직 일별 데이터가 없습니다.</td></tr>'
+    path_sql = """WITH events AS (
+  SELECT user_id, event_name, created_at,
+         CASE WHEN surface = 'menu_inline_card' THEN 'inline' ELSE 'entry' END AS path
+  FROM qualified_promotion_events
+)
+SELECT path,
+  COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_entry_exposure') AS entry_exposed_users,
+  COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_entry_click') AS entry_users,
+  COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_exposure') AS exposed_users,
+  COUNT(DISTINCT user_id) FILTER (WHERE event_name IN ('promotion_click', 'promotion_button_click', 'promotion_quick_reply_click', 'promotion_block_click', 'commerce_card_click')) AS clicked_users
+FROM events GROUP BY path;"""
+    fatigue_sql = """WITH events AS (
+  SELECT user_id, event_name, created_at,
+         CASE WHEN surface = 'menu_inline_card' THEN 'inline' ELSE 'entry' END AS path
+  FROM qualified_promotion_events
+), impressions AS (
+  SELECT user_id, path, created_at,
+         ROW_NUMBER() OVER (PARTITION BY user_id, path ORDER BY created_at) AS nth,
+         LEAD(created_at) OVER (PARTITION BY user_id, path ORDER BY created_at) AS next_at
+  FROM events
+  WHERE (path = 'entry' AND event_name = 'promotion_entry_exposure')
+     OR (path = 'inline' AND event_name = 'promotion_exposure')
+), actions AS (
+  SELECT user_id, path, created_at FROM events
+  WHERE (path = 'entry' AND event_name = 'promotion_entry_click')
+     OR (path = 'inline' AND event_name = 'commerce_card_click')
+)
+SELECT path, LEAST(nth, 6) AS nth, COUNT(*) AS impressions,
+  COUNT(*) FILTER (WHERE EXISTS (
+    SELECT 1 FROM actions a WHERE a.user_id = impressions.user_id AND a.path = impressions.path
+      AND a.created_at >= impressions.created_at
+      AND (impressions.next_at IS NULL OR a.created_at < impressions.next_at))) AS actions
+FROM impressions GROUP BY 1, 2 ORDER BY 1, 2;"""
     product_sql = """WITH normalized AS (
   SELECT COALESCE(e.product_key, e.properties->>'product_key', v.config->>'product_key', 'unknown') AS product_key,
          e.user_id, e.event_name
@@ -375,13 +424,92 @@ WHERE created_at >= :start_date AND created_at < (:end_date + INTERVAL '1 day');
 </style></head><body><main class="shell"><header><div><span class="eyebrow">CNU / PROMOTION INTELLIGENCE</span><h1>프로모션 인사이트</h1><p class="sub">사용자가 버튼을 본 순간부터 상품을 클릭하기까지의 흐름을 확인합니다.</p></div><nav><a href="/admin/recommendations">상품·버튼 관리</a><a class="active" href="/admin/insights">인사이트</a><a href="/admin/experiments">실험 목록</a><a href="/admin/experiments/new">＋ 새 실험</a></nav></header>
 <form class="filters" method="get" action="/admin/insights"><div><label for="start_date">시작일</label><input id="start_date" name="start_date" type="date" value="{start_value}"></div><span class="tilde">~</span><div><label for="end_date">종료일</label><input id="end_date" name="end_date" type="date" value="{end_value}"></div><button type="submit">기간 적용</button><a href="/admin/insights?all_time=true">전체 기간 보기</a></form>
 <section class="hero"><div class="hero-row"><div><span class="eyebrow">DECISION DASHBOARD</span><h1>어디서 사용자가 이탈하는가?</h1><p class="sub">순차 코호트 기준 · 관리자 및 테스트 사용자 제외 · {start_value or '전체'} ~ {end_value or '현재'}</p></div><span class="live"><i></i>{data_status}</span></div></section>
-<section class="kpis"><div class="card"><span class="kpi-label">버튼 노출 사용자</span><div class="kpi-value">{entry_exposed_users:,}명</div><span class="kpi-note">{entry_exposure_events:,}회 노출</span></div><div class="card"><span class="kpi-label">버튼 CTR</span><div class="kpi-value">{entry_ctr:.2f}%</div><span class="kpi-note">노출 → 버튼 클릭</span></div><div class="card"><span class="kpi-label">상품 도달 사용자</span><div class="kpi-value">{exposed:,}명</div><span class="kpi-note">진입 후 상품 노출</span></div><div class="card"><span class="kpi-label">상품 클릭 사용자</span><div class="kpi-value">{clicked:,}명</div><span class="kpi-note">{click_events:,}회 클릭</span></div><div class="card"><span class="kpi-label">상품 CTR</span><div class="kpi-value">{ctr:.2f}%</div><span class="kpi-note">상품 노출 → 클릭</span></div></section>
-<section class="funnel"><div class="section-head"><h2>사용자 퍼널</h2><span class="hint">각 단계는 이전 단계를 통과한 사용자 기준</span></div><div class="funnel-track"><div class="funnel-step"><strong>01 · 버튼 노출</strong><b>{entry_exposed_users:,}</b><small>{entry_exposure_events:,}회 · 진입점에 버튼이 표시됨</small></div><div class="funnel-step"><strong>02 · 버튼 클릭</strong><b>{entry_users:,}</b><small>{entry_ctr:.2f}% 전환 · {entry_events:,}회</small></div><div class="funnel-step"><strong>03 · 상품 노출</strong><b>{exposed:,}</b><small>{exposure_after_entry:.2f}% 도달 · {exposure_events:,}회</small></div><div class="funnel-step"><strong>04 · 상품 클릭</strong><b>{clicked:,}</b><small>{ctr:.2f}% 전환 · {click_events:,}회</small></div><div class="funnel-step"><strong>05 · 외부 전환</strong><b>측정 중</b><small>토스 제휴 데이터 연동 필요</small></div></div>{details(summary_sql)}</section>
+<section class="kpis"><div class="card"><span class="kpi-label">진입형 접점 노출</span><div class="kpi-value">{entry_reach:,}명</div><span class="kpi-note">{entry_reach_events:,}회 · 버튼 CTR {entry_action_rate:.2f}%</span></div><div class="card"><span class="kpi-label">진입형 최종 CTR</span><div class="kpi-value">{entry_click_rate:.2f}%</div><span class="kpi-note">버튼 본 사람 → 상품 클릭</span></div><div class="card"><span class="kpi-label">인라인형 카드 노출</span><div class="kpi-value">{inline_reach:,}명</div><span class="kpi-note">{inline_reach_events:,}회 · 진입 클릭 없음</span></div><div class="card"><span class="kpi-label">인라인형 최종 CTR</span><div class="kpi-value">{inline_click_rate:.2f}%</div><span class="kpi-note">카드 본 사람 → 상품 클릭</span></div><div class="card"><span class="kpi-label">상품 클릭 사용자</span><div class="kpi-value">{all_clicked:,}명</div><span class="kpi-note">두 경로 합계 · 접점 {all_reach:,}명</span></div></section>
+<section class="funnel"><div class="section-head"><h2>경로별 사용자 퍼널</h2><span class="hint">각 단계는 이전 단계를 통과한 사용자 기준 · 경로마다 단계 수가 다릅니다</span></div>{path_funnels}{details(summary_sql)}</section><section class="panel"><div class="panel-head"><h2>경로 비교</h2><span class="hint">접점을 본 사람 기준 · 기간 내 고유 사용자(순차 코호트 아님)</span></div><div class="scroll"><table><thead><tr><th>경로</th><th>접점 노출</th><th>1인당 노출</th><th>반응</th><th>상품 클릭</th><th>최종 CTR</th></tr></thead><tbody>{path_rows}</tbody></table></div>{details(path_sql)}</section><section class="panel"><div class="panel-head"><h2>노출 피로도</h2><span class="hint">같은 사람에게 반복 노출될수록 반응률이 어떻게 변하는가</span></div><div class="scroll"><table><thead><tr><th>경로</th><th>노출 회차</th><th>노출</th><th>반응</th><th>반응률</th></tr></thead><tbody>{fatigue_rows}</tbody></table></div>{details(fatigue_sql)}</section>
 <h2>무엇이 성과를 만들었나</h2><p class="sub">기간은 한국 시간 기준입니다. 아래 상세 표는 기간 내 전체 이벤트의 고유 사용자 수이며, 위 요약은 같은 기간 안에 순서대로 진입한 사용자만 집계합니다. 버튼·상품 노출은 응답에 포함된 횟수로, 실제 화면 열람을 보장하지 않습니다. 문구별 노출 시간대가 달라 CTR 차이만으로 문구의 우열을 단정할 수 없습니다.</p><section class="layout"><section class="panel"><div class="panel-head"><h2>상품별 성과</h2><span class="hint">노출·클릭·CTR</span></div><div class="scroll"><table><thead><tr><th>상품</th><th>노출</th><th>클릭</th><th>CTR</th><th>주요 접점</th></tr></thead><tbody>{product_rows}</tbody></table></div>{details(product_sql)}</section><section class="panel"><div class="panel-head"><h2>버튼 문구 성과</h2><span class="hint">버튼 노출 → 버튼 클릭 → 상품 클릭</span></div><div class="scroll"><table><thead><tr><th>문구</th><th>버튼 노출</th><th>버튼 클릭</th><th>버튼 CTR</th><th>상품 클릭</th><th>상품 CTR</th></tr></thead><tbody>{message_rows}</tbody></table></div>{details(button_sql)}</section></section>
 <section class="panel"><div class="panel-head"><h2>최근 추이</h2><span class="hint">KST · 최근 30일</span></div><div class="scroll"><table><thead><tr><th>날짜</th><th>노출</th><th>클릭 사용자</th><th>클릭 이벤트</th></tr></thead><tbody>{daily_rows}</tbody></table></div>{details(daily_sql)}</section>
 <h2>상품 카드 위치 효과</h2><section class="panel"><div class="panel-head"><h2>어느 위치가 강한가?</h2><span class="hint">commerceCard 순서별 클릭률</span></div><div class="position-grid">{position_rows}</div>{details(position_sql)}</section>
 </main></body></html>"""
     return page
+
+
+def _percent(numerator: int, denominator: int) -> float:
+    return numerator / denominator * 100 if denominator else 0.0
+
+
+PATH_LABELS = {
+    "entry": ("진입형", "버튼·퀵리플라이를 눌러 상품 목록으로 이동"),
+    "inline": ("인라인형", "학식 응답 안에서 상품 카드를 바로 노출"),
+}
+
+
+def _insight_path_rows(paths: list[dict[str, Any]]) -> str:
+    rows = []
+    for path in paths:
+        name, note = PATH_LABELS.get(path["path"], (path["path"], ""))
+        rows.append(
+            f"<tr><td><b style=\"font-size:14px\">{html.escape(name)}</b>"
+            f"<span style=\"display:block;margin-top:5px;color:#71809b;font-size:11px;line-height:1.45\">{html.escape(note)}</span></td>"
+            f"<td data-label=\"접점 노출\">{path['reach_users']:,}명<small>{path['reach_events']:,}회</small></td>"
+            f"<td data-label=\"1인당 노출\">{path['impressions_per_user']:.2f}회</td>"
+            f"<td data-label=\"반응\">{path['action_users']:,}명<small>{path['action_rate']:.2f}%</small></td>"
+            f"<td data-label=\"상품 클릭\"><b>{path['clicked_users']:,}명</b><small>{path['click_events']:,}건</small></td>"
+            f"<td data-label=\"최종 CTR\"><b style=\"color:#147342\">{path['click_rate']:.2f}%</b>"
+            f"<small>노출당 {path['impression_click_rate']:.2f}%</small></td></tr>"
+        )
+    return "".join(rows) or '<tr><td colspan="6" class="sub">아직 경로별 데이터가 없습니다.</td></tr>'
+
+
+def _insight_fatigue_rows(fatigue: list[dict[str, Any]]) -> str:
+    rows = []
+    for item in fatigue:
+        name = PATH_LABELS.get(item["path"], (item["path"], ""))[0]
+        rate = item["actions"] / item["impressions"] * 100 if item["impressions"] else 0
+        nth = f"{item['nth']}회차" + ("+" if item["nth"] >= 6 else "")
+        rows.append(
+            f"<tr><td data-label=\"경로\">{html.escape(name)}</td>"
+            f"<td data-label=\"노출 회차\">{nth}</td>"
+            f"<td data-label=\"노출\">{item['impressions']:,}회</td>"
+            f"<td data-label=\"반응\">{item['actions']:,}건</td>"
+            f"<td data-label=\"반응률\"><b>{rate:.2f}%</b></td></tr>"
+        )
+    return "".join(rows) or '<tr><td colspan="5" class="sub">반복 노출 데이터가 아직 없습니다.</td></tr>'
+
+
+def _insight_path_funnels(paths: list[dict[str, Any]], totals: dict[str, Any]) -> str:
+    """Draw one funnel per path.
+
+    진입형은 단계 순서를 지킨 코호트(totals)를 써야 뒷단계가 앞단계보다 커지지 않는다.
+    """
+    blocks = []
+    for path in paths:
+        name, note = PATH_LABELS.get(path["path"], (path["path"], ""))
+        if path["path"] == "inline":
+            steps = [
+                ("01 · 카드 노출", f"{path['reach_users']:,}", f"{path['reach_events']:,}회 · 학식 응답에 카드가 포함됨"),
+                ("02 · 상품 클릭", f"{path['clicked_users']:,}", f"{path['click_rate']:.2f}% 전환 · {path['click_events']:,}회"),
+            ]
+        else:
+            entry_exposed = totals.get("entry_exposed_users") or 0
+            entry_users = totals.get("entry_users") or 0
+            exposed = totals.get("exposed_users") or 0
+            clicked = totals.get("clicked_users") or 0
+            steps = [
+                ("01 · 버튼 노출", f"{entry_exposed:,}", f"{totals.get('entry_exposure_events') or 0:,}회 · 진입점에 버튼이 표시됨"),
+                ("02 · 버튼 클릭", f"{entry_users:,}", f"{_percent(entry_users, entry_exposed):.2f}% 전환"),
+                ("03 · 상품 노출", f"{exposed:,}", f"{_percent(exposed, entry_users):.2f}% 도달"),
+                ("04 · 상품 클릭", f"{clicked:,}", f"{_percent(clicked, exposed):.2f}% 전환 · {totals.get('click_events') or 0:,}회"),
+            ]
+        cards = "".join(
+            f"<div class=\"funnel-step\"><strong>{title}</strong><b>{value}</b><small>{html.escape(hint)}</small></div>"
+            for title, value, hint in steps
+        )
+        blocks.append(
+            f"<div class=\"section-head\"><h2>{html.escape(name)} 퍼널</h2>"
+            f"<span class=\"hint\">{html.escape(note)}</span></div>"
+            f"<div class=\"funnel-track\">{cards}</div>"
+        )
+    return "".join(blocks) or '<p class="sub">아직 퍼널을 그릴 데이터가 없습니다.</p>'
 
 
 def _insight_label(product_key: str) -> str:

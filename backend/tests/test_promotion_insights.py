@@ -65,3 +65,50 @@ class PromotionInsightsTest(unittest.IsolatedAsyncioTestCase):
         data = await experiments.get_promotion_insights(date(2026,9,10), date(2026,9,10))
         self.assertEqual(data["totals"]["entry_exposed_users"], 2)
         self.assertEqual([row["day"] for row in data["daily"]], [date(2026,9,10)])
+
+
+class PathSummaryTest(unittest.TestCase):
+    def _row(self, **overrides):
+        row = {
+            "path": "entry", "entry_exposed_users": 1000, "entry_exposure_events": 2400,
+            "entry_users": 50, "exposed_users": 50, "exposure_events": 300,
+            "clicked_users": 5, "click_events": 6,
+        }
+        row.update(overrides)
+        return row
+
+    def test_entry_path_reach_is_the_button_impression(self):
+        summary = experiments._summarize_paths([self._row()])[0]
+
+        self.assertEqual(summary["reach_users"], 1000)
+        self.assertEqual(summary["reach_events"], 2400)
+        self.assertEqual(summary["action_users"], 50)
+        self.assertAlmostEqual(summary["action_rate"], 5.0)
+        self.assertAlmostEqual(summary["click_rate"], 0.5)
+        self.assertAlmostEqual(summary["impressions_per_user"], 2.4)
+        self.assertEqual(summary["steps"], 4)
+
+    def test_inline_path_reach_is_the_card_itself(self):
+        summary = experiments._summarize_paths([self._row(
+            path="inline", entry_exposed_users=0, entry_exposure_events=0, entry_users=0,
+            exposed_users=900, exposure_events=900, clicked_users=9, click_events=9,
+        )])[0]
+
+        # 진입 클릭 단계가 없으므로 반응이 곧 상품 클릭이다.
+        self.assertEqual(summary["reach_users"], 900)
+        self.assertEqual(summary["action_users"], summary["clicked_users"])
+        self.assertAlmostEqual(summary["click_rate"], 1.0)
+        self.assertEqual(summary["steps"], 2)
+
+    def test_paths_are_ordered_by_reach_and_survive_empty_data(self):
+        summaries = experiments._summarize_paths([
+            self._row(entry_exposed_users=10, entry_exposure_events=10),
+            self._row(path="inline", exposed_users=800, exposure_events=800),
+        ])
+
+        self.assertEqual([item["path"] for item in summaries], ["inline", "entry"])
+        empty = experiments._summarize_paths([self._row(
+            entry_exposed_users=0, entry_exposure_events=0, entry_users=0, clicked_users=0,
+        )])[0]
+        self.assertEqual(empty["action_rate"], 0)
+        self.assertEqual(empty["impressions_per_user"], 0)

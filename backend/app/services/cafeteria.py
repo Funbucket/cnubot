@@ -13,6 +13,14 @@ CUISINE_KOREAN = {
 
 MEAL_TIME_KOREAN = {"breakfast": "🍳 아침", "lunch": "☀️ 점심", "dinner": "🌙 저녁"}
 
+MEAL_TIMES = ("breakfast", "lunch", "dinner")
+DORM_HOURS_FILENAME = "dorm_hours.json"
+MEAL_SCHEDULE_PATH = "/code/app/static/data/meal_schedule.json"
+# textCard 캐러셀의 description은 128자까지 노출된다.
+CAROUSEL_DESCRIPTION_LIMIT = 128
+CAROUSEL_ROW_SIZE = 3
+MENU_OUTPUT_LIMIT = 3
+
 def get_kor_meal_time(meal_time: str):
     return MEAL_TIME_KOREAN.get(meal_time)
 
@@ -50,7 +58,11 @@ def create_schedule_response(meal_schedule: list[dict], promotion_product: dict 
         else:
             description += format_times(hours)
 
-        return description if len(description) <= 100 else description[:97] + " ..."
+        return (
+            description
+            if len(description) <= CAROUSEL_DESCRIPTION_LIMIT
+            else description[: CAROUSEL_DESCRIPTION_LIMIT - 4] + " ..."
+        )
 
     def create_schedule_buttons(cafeteria):
         place = cafeteria["place"]
@@ -106,42 +118,109 @@ def create_schedule_response(meal_schedule: list[dict], promotion_product: dict 
     return response
 
 
+async def dorm_meal_hours() -> dict:
+    """Prefer the crawled dorm hours; fall back to the bundled schedule."""
+    try:
+        crawled = await common.load_data(str(common.MENU_DATA_DIR / DORM_HOURS_FILENAME))
+        if crawled.get("hours"):
+            return crawled["hours"]
+    except (FileNotFoundError, ValueError, KeyError, TypeError):
+        pass
+    schedule = await common.load_data(MEAL_SCHEDULE_PATH)
+    for entry in schedule:
+        if entry.get("place") == "dorm":
+            return entry.get("hours") or {}
+    return {}
+
+
+def is_meal_time_over(hours: dict, meal_time: str, now=None) -> bool:
+    """Tell whether a meal's serving window has already closed today."""
+    close = (hours.get(meal_time) or {}).get("close")
+    if not close:
+        return False
+    try:
+        closing_hour, closing_minute = (int(part) for part in close.split(":"))
+    except ValueError:
+        return False
+    now = now or common.get_current_kr_time()
+    return (now.hour, now.minute) > (closing_hour, closing_minute)
+
+
+def _create_menu_text_card(kakao_response, day_label: str, meal_time: str, meal: dict):
+    return kakao_response.create_text_card(
+        title=f"{day_label} • {get_kor_meal_time(meal_time)} • {meal['type']}",
+        description="{}{}".format(
+            (f"💰 {meal['price']:,}원\n\n" if meal.get("price") is not None else "")
+            + (
+                f"칼로리: {meal['calorie']} kcal\n\n"
+                if "calorie" in meal and meal["calorie"]
+                else ""
+            ),
+            "\n".join(meal["menu"]),
+        ),
+        buttons=[
+            {"label": "식단 공유하기", "action": "share"},
+        ],
+        button_layout="vertical",
+    )
+
+
+def _build_meal_rows(kakao_response, day_label: str, menu_data: dict) -> dict[str, list[list]]:
+    """Split each meal into carousel-sized rows, keyed by the meal they belong to."""
+    rows_by_meal = {}
+    for meal_time in MEAL_TIMES:
+        items = [
+            _create_menu_text_card(kakao_response, day_label, meal_time, meal)
+            for meal in menu_data[meal_time]
+            if meal["menu"]
+        ]
+        rows_by_meal[meal_time] = [
+            items[start : start + CAROUSEL_ROW_SIZE]
+            for start in range(0, len(items), CAROUSEL_ROW_SIZE)
+        ]
+    return rows_by_meal
+
+
+def _row_with_space(rows_by_meal: dict[str, list[list]]) -> list | None:
+    """Find a meal row the product card can join without splitting it in two."""
+    for meal_time in ["lunch", "dinner", "breakfast"]:
+        for items in rows_by_meal[meal_time]:
+            if len(items) < CAROUSEL_ROW_SIZE:
+                return items
+    return None
+
+
 def create_menu_response(
     day: str,
     menu_data: dict,
     place: str,
     promotion_product: dict | None = None,
     promotion_click_url: str | None = None,
+    inline_product_card: dict | None = None,
+    inline_product_output: dict | None = None,
 ):
     kakao_response = kakao_json_response.KakaoJsonResponse()
 
     today_kor = common.get_today_in_korean()
     day_label = "오늘" if day == today_kor else day
-    for meal_time in ["breakfast", "lunch", "dinner"]:
-        items = [
-            kakao_response.create_text_card(
-                title=f"{day_label} • {get_kor_meal_time(meal_time)} • {meal['type']}",
-                description="{}{}".format(
-                    (f"💰 {meal['price']:,}원\n\n" if meal.get("price") is not None else "")
-                    + (
-                        f"칼로리: {meal['calorie']} kcal\n\n"
-                        if "calorie" in meal and meal["calorie"]
-                        else ""
-                    ),
-                    "\n".join(meal["menu"]),
-                ),
-                buttons=[
-                    {"label": "식단 공유하기", "action": "share"},
-                ],
-                button_layout="vertical",
-            )
-            for meal in menu_data[meal_time]
-            if meal["menu"]
-        ]
+    rows_by_meal = _build_meal_rows(kakao_response, day_label, menu_data)
+    row_count = sum(len(rows) for rows in rows_by_meal.values())
 
+    # 운영하지 않는 끼니 자리가 남으면 이미지가 붙는 commerceCard를 그 자리에 넣고,
+    # 자리가 없으면 끼니 행 끝에 카드로 끼운다.
+    # 인라인 상품은 진입 버튼을 대체하므로 두 진입점을 함께 띄우지 않는다.
+    product_output = None
+    hosting_row = _row_with_space(rows_by_meal) if inline_product_card else None
+    if inline_product_output and row_count < MENU_OUTPUT_LIMIT:
+        product_output = inline_product_output
+    elif hosting_row is not None:
+        hosting_row.append(inline_product_card)
+    else:
+        # 상품을 어디에도 넣지 못하면 기존 진입 버튼으로 되돌린다.
         # 점심 첫 번째 메뉴 카드에만 간식 특가 버튼을 노출합니다.
-        if meal_time == "lunch" and items:
-            items[0]["buttons"].append(
+        lunch_rows = rows_by_meal["lunch"]
+        if lunch_rows:
+            lunch_rows[0][0]["buttons"].append(
                 promotions.create_toss_promotion_button(
                     promotion_product,
                     promotion_click_url,
@@ -152,20 +231,28 @@ def create_menu_response(
                     ),
                 )
             )
-            items[0]["buttonLayout"] = "vertical"
+            lunch_rows[0][0]["buttonLayout"] = "vertical"
 
-        # carousel을 3개씩 2개 행으로 출력
-        for i in range(0, len(items), 3):
-            carousel_items = items[i : i + 3]
-            carousel = kakao_response.create_carousel(carousel_items)
-            kakao_response.add_output_to_response(carousel)
+    placed = False
+    for meal_time in MEAL_TIMES:
+        if rows_by_meal[meal_time]:
+            for items in rows_by_meal[meal_time]:
+                kakao_response.add_output_to_response(kakao_response.create_carousel(items))
+        elif product_output and not placed:
+            # 비어 있는 끼니 자리를 그대로 물려받아 아침·점심·저녁 순서를 유지한다.
+            kakao_response.add_output_to_response(product_output)
+            placed = True
 
+    return _finish_menu_response(kakao_response, day, place, today_kor)
+
+
+def _finish_menu_response(kakao_response, day: str, place: str, today_kor: str):
     quick_replies = [
         kakao_response.create_quick_reply(
-            label=(f"• {day}" if f"{day}요일" == today_kor else day),
-            message_text=f"{day}요일{place}",
+            label=(f"• {weekday}" if f"{weekday}요일" == today_kor else weekday),
+            message_text=f"{weekday}요일{place}",
         )
-        for day in common.DAYS_OF_WEEK_KOREAN
+        for weekday in common.DAYS_OF_WEEK_KOREAN
     ]
 
     response = kakao_response.add_quick_replies(quick_replies).get_response()

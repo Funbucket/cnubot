@@ -9,6 +9,9 @@ from fastapi import APIRouter, Body, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
 
+SHOW_BREAKFAST_KEY = "show_breakfast"
+DISABLED_VALUES = {"0", "false", "off", "no"}
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
@@ -23,9 +26,13 @@ async def get_schedule(req: KakaoRequest | None = Body(default=None)):
     if _is_dorm_crowding_utterance(utterance):
         return await get_dorm_crowding()
 
-    schedule_data = await common.load_data("/code/app/static/data/meal_schedule.json")
+    schedule_data = await common.load_data(cafeteria.MEAL_SCHEDULE_PATH)
+    dorm_hours = await cafeteria.dorm_meal_hours()
     for cafeteria_data in schedule_data:
         place = cafeteria_data.get("place")
+        # 기숙사 운영시간은 크롤링 값이 최신이므로 정적 파일보다 우선한다.
+        if place == "dorm" and dorm_hours:
+            cafeteria_data["hours"] = dorm_hours
         if not cafeteria_data.get("date"):
             operating_date = await common.get_operating_date_for_place(place)
             if operating_date:
@@ -57,12 +64,7 @@ async def get_today_menu(req: KakaoRequest):
     if not menu_data:
         raise HTTPException(status_code=404, detail="해당 요일에 메뉴가 없습니다.")
 
-    response = cafeteria.create_menu_response(
-        kor_day,
-        menu_data,
-        place,
-    )
-    await _record_promotion_button_exposures(req.userRequest.user.id, response)
+    response = await _menu_response(req, kor_day, menu_data, place, place_key)
     return JSONResponse(response)
 
 
@@ -105,12 +107,7 @@ async def get_menu_by_day(req: KakaoRequest):
 
         return kakao_response.get_response()
 
-    response = cafeteria.create_menu_response(
-        kor_day,
-        menu_data,
-        place,
-    )
-    await _record_promotion_button_exposures(req.userRequest.user.id, response)
+    response = await _menu_response(req, kor_day, menu_data, place, place_key)
     return JSONResponse(response)
 
 
@@ -124,6 +121,133 @@ async def get_image(image_name: str):
     if os.path.exists(file_path):
         return FileResponse(file_path)
     raise HTTPException(status_code=404, detail="이미지를 찾을 수 없습니다.")
+
+
+async def _menu_response(
+    req: KakaoRequest, kor_day: str, menu_data: dict, place: str, place_key: str
+) -> dict:
+    """Build a menu response, placing the inline product card when it fits."""
+    user_id = req.userRequest.user.id if req.userRequest.user else None
+    chosen = None if _wants_breakfast(req) else await _pick_inline_product(user_id)
+    inline_product = {}
+    if chosen:
+        product_key, product, click_url, request_id = chosen
+        inline_product = {
+            "inline_product_card": promotions.create_inline_product_card(product, click_url),
+            "inline_product_output": promotions.create_inline_product_output(product, click_url),
+        }
+        # 시간표의 "식단 보기"는 오늘 날짜 발화로 /menu/day를 타므로 요일로 판단한다.
+        if place_key == "dorm" and f"{kor_day}" == common.get_today_in_korean():
+            menu_data, inline_product = await _replace_finished_breakfast(
+                menu_data, inline_product, place
+            )
+
+    response = cafeteria.create_menu_response(kor_day, menu_data, place, **inline_product)
+
+    if chosen and _inline_card_placed(response, inline_product):
+        await promotions.record_inline_exposure(user_id, product_key, product, request_id)
+    await _record_promotion_button_exposures(user_id, response)
+    return response
+
+
+def _inline_card_placed(response: dict, inline_product: dict) -> bool:
+    """Only a card that survived placement counts as an exposure."""
+    card = inline_product.get("inline_product_card")
+    output = inline_product.get("inline_product_output")
+    for rendered in response["template"]["outputs"]:
+        if rendered is output:
+            return True
+        for item in rendered.get("carousel", {}).get("items", []):
+            if item is card:
+                return True
+    return False
+
+
+def _wants_breakfast(req: KakaoRequest) -> bool:
+    """The restore button asks for this one response only — nothing is remembered."""
+    if not req.action:
+        return False
+    for payload in (req.action.clientExtra, req.action.extra):
+        if (payload or {}).get(SHOW_BREAKFAST_KEY):
+            return True
+    return False
+
+
+async def _replace_finished_breakfast(
+    menu_data: dict, inline_product: dict, place: str
+) -> tuple[dict, dict]:
+    """Give the finished breakfast slot to the product card, restorable on demand.
+
+    아침은 조회가 적고 제공이 끝나면 정보 가치도 없어서 당일에 한해 광고로 대체한다.
+    점심·저녁은 광고가 과해지므로 대체하지 않는다.
+    """
+    if not any(meal["menu"] for meal in menu_data.get("breakfast") or []):
+        return menu_data, inline_product
+    hours = await cafeteria.dorm_meal_hours()
+    if not cafeteria.is_meal_time_over(hours, "breakfast"):
+        return menu_data, inline_product
+
+    restore_button = {
+        "action": "message",
+        "label": "아침 식단 보기",
+        "messageText": place,
+        "extra": {SHOW_BREAKFAST_KEY: True},
+    }
+    for card in (inline_product.get("inline_product_card"), inline_product.get("inline_product_output")):
+        target = card.get("commerceCard", card) if card else None
+        if target is not None:
+            target.setdefault("buttons", []).append(restore_button)
+            target["buttonLayout"] = "vertical"
+    return {**menu_data, "breakfast": []}, inline_product
+
+
+def _inline_card_enabled(user_id: str | None) -> bool:
+    """Menu-inline product cards are on for everyone unless narrowed or switched off.
+
+    PROMOTION_INLINE_CARD_ENABLED=false 로 즉시 되돌릴 수 있고,
+    PROMOTION_INLINE_CARD_USER_IDS 를 채우면 그 사용자에게만 노출된다.
+    """
+    if not user_id:
+        return False
+    if os.getenv("PROMOTION_INLINE_CARD_ENABLED", "true").strip().lower() in DISABLED_VALUES:
+        return False
+    allowed = {
+        value.strip()
+        for value in os.getenv("PROMOTION_INLINE_CARD_USER_IDS", "").split(",")
+        if value.strip()
+    }
+    return not allowed or user_id in allowed
+
+
+async def _pick_inline_product(user_id: str | None):
+    if not _inline_card_enabled(user_id):
+        return None
+    request_id = str(uuid.uuid4())
+    try:
+        chosen = await promotions.get_inline_promotion_product(user_id, request_id)
+    except Exception:
+        logger.exception("failed to pick inline promotion product")
+        return None
+    if not chosen:
+        return None
+    product_key, product = chosen
+    try:
+        token = promotions.create_tracking_token(
+            user_id, product_key, "menu_inline",
+            category_ids=product.get("category_ids"), target_url=product.get("url"),
+            taca_item_id=product.get("taca_item_id"),
+            surface=promotions.INLINE_CARD_SURFACE,
+            button_id="toss_promotion_menu_inline_card",
+            button_label="토스에서 보기",
+            position=1, request_id=request_id,
+            product_snapshot={key: product.get(key) for key in
+                              ("title", "button_label", "settings_revision", "selection_mode")},
+        )
+        click_url = f"{common.SERVER_URL}/promotions/toss-shopping/click?token={token}"
+    except Exception:
+        logger.exception("failed to create inline promotion tracking token")
+        return None
+    return product_key, product, click_url, request_id
 
 
 def _is_dorm_crowding_utterance(utterance: str) -> bool:

@@ -5,6 +5,16 @@ import requests
 from bs4 import BeautifulSoup as bs
 
 DORM_CROWDING_URL = "https://dorm.cnu.ac.kr/intranet/public/ajax_cafe_inwon.php"
+DORM_HOURS_URL = "https://dorm.cnu.ac.kr/html/kr/sub04/sub04_040301.html"
+DORM_HOURS_MEAL_TIMES = {"아침": "breakfast", "점심": "lunch", "저녁": "dinner"}
+HOURS_PATTERN = re.compile(r"(\d{1,2}:\d{2})\s*~\s*(\d{1,2}:\d{2})")
+HOURS_NOTE_ABBREVIATIONS = (
+    ("토/일요일 및 공휴일", "주말·공휴일"),
+    ("토요일/일요일 및 공휴일", "주말·공휴일"),
+    ("주말 및 공휴일", "주말·공휴일"),
+    ("방학기간은", "방학"),
+    ("방학기간", "방학"),
+)
 MENU_HEADER_PATTERN = re.compile(
     r"((?:메인|menu|main)\s*\w*)\s*\((?:(\d+)kcal|([^)]*))\)",
     flags=re.IGNORECASE,
@@ -37,6 +47,53 @@ def scrape_dorm_menu(url: str) -> dict:
 
 def scrape_dorm_menu_json(url: str) -> str:
     return json.dumps(scrape_dorm_menu(url), ensure_ascii=False)
+
+
+def scrape_dorm_hours(url: str = DORM_HOURS_URL) -> dict:
+    """Scrape the dorm cafeteria operating hours so they are not hardcoded."""
+    response = requests.get(url, timeout=20)
+    response.raise_for_status()
+    soup = bs(response.content.decode("utf8", "replace"), "html.parser")
+
+    hours = {}
+    for item in soup.select("ul.mealPlan-wrap li"):
+        title = item.select_one("strong.tit")
+        time_text = item.select_one("span.txt")
+        if not title or not time_text:
+            continue
+        meal_time = DORM_HOURS_MEAL_TIMES.get(title.text.strip())
+        matched = HOURS_PATTERN.search(time_text.text)
+        if not meal_time or not matched:
+            continue
+        entry = {"open": matched.group(1), "close": matched.group(2)}
+        notes = [
+            compact_hours_note(note.text)
+            for note in item.select("p.txt-check")
+            if _note_adds_information(note.text, entry)
+        ]
+        if notes:
+            entry["extra"] = " / ".join(notes)
+        hours[meal_time] = entry
+
+    if not hours:
+        raise ValueError("Could not find dorm operating hours")
+    return {"place": "dorm", "hours": hours}
+
+
+def _note_adds_information(note: str, entry: dict) -> bool:
+    """Drop notes that just repeat the main window — the schedule card is tight."""
+    text = note.strip()
+    if not text:
+        return False
+    matched = HOURS_PATTERN.search(text)
+    return not matched or (matched.group(1), matched.group(2)) != (entry["open"], entry["close"])
+
+
+def compact_hours_note(note: str) -> str:
+    text = " ".join(note.split())
+    for verbose, short in HOURS_NOTE_ABBREVIATIONS:
+        text = text.replace(verbose, short)
+    return text.strip(" :")
 
 
 def scrape_dorm_crowding(url: str = DORM_CROWDING_URL) -> dict:
