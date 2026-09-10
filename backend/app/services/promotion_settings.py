@@ -35,7 +35,7 @@ class Product(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     title: str = Field(min_length=1, max_length=200)
     url: str
-    button_label: str = Field(default="상품 가격 보기", min_length=1, max_length=14)
+    button_label: str = Field(default="특가 바로가기", min_length=1, max_length=14)
     description: str = Field(default="", max_length=180)
     image_url: str = Field(default="", max_length=2000)
     enabled: bool = True
