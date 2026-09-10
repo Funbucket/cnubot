@@ -175,7 +175,7 @@ def _status_buttons(route: str):
             {
                 "action": "webLink",
                 "label": "노선·정류장 보기",
-                "webLinkUrl": f"{common.SERVER_URL}/shuttle/images/shuttle_route.png",
+                "webLinkUrl": "https://cdn.jsdelivr.net/gh/Funbucket/cnubot@menu-inline-promotion-card/backend/app/static/images/shuttle_route.jpg",
             }
         )
     buttons.append(
