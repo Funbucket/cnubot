@@ -122,7 +122,7 @@ class PromotionSettingsTest(unittest.TestCase):
         carousel = response["template"]["outputs"][1]["carousel"]
         self.assertEqual(carousel["type"], "textCard")
         self.assertNotIn("price", carousel["items"][0])
-        self.assertIn(settings.DISCLOSURE, response["template"]["outputs"][0]["simpleText"]["text"])
+        self.assertEqual(response["template"]["outputs"][0]["simpleText"]["text"], settings.FIXED_PROMOTION_INTRO)
 
     def test_image_cards_have_thumbnail_and_title_limit_and_order(self):
         data = settings.Settings(mode="fixed", products=[self.product(str(i), image_url="https://shopping.toss.im/a.jpg") for i in range(6)])

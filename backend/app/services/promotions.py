@@ -567,7 +567,7 @@ def create_toss_shopping_list_response(
     is_fixed = bool(products) and all(p.get("selection_mode") == "fixed" for p in products)
     if is_fixed and any(p.get("price") is None or not p.get("image_url") or p.get("is_sold_out") for p in products):
         kakao_response.add_output_to_response(kakao_response.create_simple_text(
-            "🛍️ 오늘의 추천 상품\n✱ " + promotion_settings.DISCLOSURE
+            promotion_settings.FIXED_PROMOTION_INTRO
         ))
         cards = []
         for product, click_url in zip(products, click_urls):
@@ -610,7 +610,7 @@ def create_toss_shopping_list_response(
         )
     kakao_response.add_output_to_response(
         kakao_response.create_simple_text(
-            ("🛍️ 오늘의 추천 상품\n✱ " + promotion_settings.DISCLOSURE) if is_fixed else
+            promotion_settings.FIXED_PROMOTION_INTRO if is_fixed else
             "츠누봇이 토스와 준비한 특가예요 🛍️\n"
             "• 이 링크를 통해서만 할인 혜택을 받을 수 있어요.\n"
             "• 구매 수수료는 챗봇 서버 운영비로 사용됩니다."

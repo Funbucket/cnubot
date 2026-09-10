@@ -16,6 +16,11 @@ from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 
 DISCLOSURE = "이 포스팅은 토스쇼핑 쉐어링크 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다."
+FIXED_PROMOTION_INTRO = (
+    "🛍️  오늘의 추천 상품\n"
+    "✱ 츠누봇이 토스와 준비한 특가예요.\n"
+    "✱ 이 링크를 통해서만 할인 혜택을 받을 수 있어요."
+)
 
 
 def validate_link(value: str) -> str:
