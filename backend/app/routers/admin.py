@@ -2,6 +2,7 @@ import html
 import asyncio
 import os
 import secrets
+import time
 from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -18,6 +19,8 @@ from pydantic import BaseModel, Field
 
 router = APIRouter()
 security = HTTPBasic()
+_insights_cache: dict[tuple[date | None, date | None], tuple[float, dict[str, Any]]] = {}
+_INSIGHTS_CACHE_SECONDS = 20
 
 
 class VariantInput(BaseModel):
@@ -119,6 +122,7 @@ async def preview_promotions(payload: promotion_settings.Settings, refresh: bool
             "checked_at": [p.get("price_checked_at") for _, p in pairs]}
 
 
+@router.get("/insight", response_class=HTMLResponse, include_in_schema=False)
 @router.get("/insights", response_class=HTMLResponse)
 async def insights(
     start_date: date | None = Query(default=None),
@@ -130,9 +134,15 @@ async def insights(
         end_date = datetime.now(ZoneInfo("Asia/Seoul")).date()
         start_date = end_date - timedelta(days=29)
     if start_date and end_date and start_date > end_date:
-        raise HTTPException(status_code=400, detail="시작일은 종료일보다 빠를 수 없습니다.")
-    data = await experiments.get_promotion_insights(start_date, end_date)
-    return HTMLResponse(_insights_page(data))
+        raise HTTPException(status_code=400, detail="시작일은 종료일보다 늦을 수 없습니다.")
+    cache_key = (start_date, end_date)
+    cached = _insights_cache.get(cache_key)
+    if cached and time.monotonic() - cached[0] < _INSIGHTS_CACHE_SECONDS:
+        data = cached[1]
+    else:
+        data = await experiments.get_promotion_insights(start_date, end_date)
+        _insights_cache[cache_key] = (time.monotonic(), data)
+    return HTMLResponse(_insights_page(data), headers={"Cache-Control": "no-store"})
 
 
 @router.get("/experiments", response_class=HTMLResponse)
@@ -231,35 +241,39 @@ def _experiment_card(row: dict[str, Any]) -> str:
 
 
 def _recommendations_page(products: list[dict[str, Any]], error: str = "") -> str:
+    sold_out = sum(1 for item in products if item.get("isSoldOut"))
+    average_price = round(sum(item.get("displayPrice", 0) or 0 for item in products) / len(products)) if products else 0
     rows = "".join(
-        f"<tr><td>{index}</td><td>{html.escape(str(item.get('displayName', '-')))}</td>"
-        f"<td>{item.get('displayPrice', 0):,}원</td><td>{'품절' if item.get('isSoldOut') else '판매 중'}</td></tr>"
+        f"<tr><td><span class=\"rank\">{index:02}</span></td><td><b>{html.escape(str(item.get('displayName', '-')))}</b></td>"
+        f"<td class=\"price\">{item.get('displayPrice', 0):,}원</td><td><span class=\"status {'sold' if item.get('isSoldOut') else 'available'}\">{'품절' if item.get('isSoldOut') else '판매 중'}</span></td></tr>"
         for index, item in enumerate(products, 1)
-    ) or '<tr><td colspan="4">상품 목록이 없습니다.</td></tr>'
-    notice = f'<div class="warning">{html.escape(error)}</div>' if error else ""
-    return f"""<!doctype html>
+    ) or '<tr><td colspan="4" class="empty">현재 후보 상품이 없습니다.</td></tr>'
+    notice = f'<div class="warning" role="alert">{html.escape(error)}</div>' if error else ""
+    page = """<!doctype html>
 <html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CNU 개인화 추천</title>
+<link rel="prefetch" href="/admin/insights">
 <style>
-body{{font-family:system-ui,sans-serif;background:#f5f7fb;color:#172033;margin:0}}
-main{{max-width:900px;margin:auto;padding:32px 20px 64px}}
-header{{display:flex;justify-content:space-between;align-items:end;gap:20px;margin-bottom:24px}}
-h1{{margin:4px 0 8px;font-size:30px}}h2{{margin:28px 0 12px;font-size:19px}}
-.sub{{color:#68738a;line-height:1.6}}nav{{display:flex;gap:8px;flex-wrap:wrap}}
-nav a{{color:#3767e8;text-decoration:none;font-weight:700;font-size:13px}}
-.card{{background:#fff;border:1px solid #e3e8f0;border-radius:16px;padding:22px;margin:14px 0}}
-.grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}}.metric{{background:#f7f9fc;border-radius:10px;padding:14px}}
-.metric span{{display:block;color:#71809b;font-size:12px;margin-bottom:6px}}.metric b{{font-size:16px}}
-.status{{color:#147342;background:#dcf8e8;border-radius:99px;padding:6px 10px;font-size:12px;font-weight:700}}
-.warning{{background:#fff8e7;border:1px solid #f3dfaa;border-radius:10px;padding:12px;color:#785b12}}
-table{{width:100%;border-collapse:collapse;font-size:14px}}th,td{{text-align:left;padding:10px;border-bottom:1px solid #edf0f5}}th{{color:#71809b}}
-code{{background:#f1f4fa;padding:2px 5px;border-radius:5px}}@media(max-width:650px){{header{{display:block}}.grid{{grid-template-columns:1fr}}nav{{margin-top:16px}}}}
-</style><main><header><div><div class="sub">CNU RECOMMENDATION CENTER</div><h1>개인화 추천</h1><p class="sub">사용자별 클릭 카테고리를 학습해 Toss 인기상품 순위를 개인화합니다.</p></div><nav><a href="/admin/recommendations">개인화 추천</a><a href="/admin/experiments">보관된 실험</a><a href="/admin/insights">기존 인사이트</a></nav></header>
-{notice}<section class="card"><div class="grid"><div class="metric"><span>운영 상태</span><b class="status">개인화 추천 운영 중</b></div><div class="metric"><span>추천 정책</span><b>인기상품 + 카테고리 affinity</b></div><div class="metric"><span>상품 캐시</span><b>1시간</b></div></div><p class="sub">사용자가 클릭한 상품의 카테고리 점수를 저장하고, 이후 같은 카테고리의 Toss 인기상품을 우선 추천합니다. 신규 사용자는 전체 인기순으로 시작하며 API 오류 시 fallback 상품을 사용합니다.</p></section>
-<section class="card"><h2>현재 후보 상품</h2><table><thead><tr><th>순위</th><th>상품</th><th>가격</th><th>상태</th></tr></thead><tbody>{rows}</tbody></table></section></main></html>"""
+*{{box-sizing:border-box}}body{{margin:0;background:#f5f7f7;color:#182a37;font:14px/1.6 system-ui,sans-serif}}a{{color:inherit;text-decoration:none}}main{{max-width:1120px;margin:auto;padding:30px 24px 70px}}header{{display:flex;justify-content:space-between;align-items:end;gap:24px;margin-bottom:26px}}.eyebrow{{font-size:11px;letter-spacing:.14em;color:#087f70;font-weight:700}}h1{{font-size:30px;letter-spacing:-.06em;margin:6px 0 8px}}h2{{font-size:19px;letter-spacing:-.04em;margin:0}}.sub{{color:#61717d;line-height:1.65;margin:5px 0}}nav{{display:flex;gap:6px;flex-wrap:wrap}}nav a{{padding:8px 11px;border-radius:8px;color:#087f70;font-size:13px;font-weight:700}}nav a[aria-current]{{background:#e5f4f0}}.hero,.card{{background:#fff;border:1px solid #e1e7e8;border-radius:14px}}.hero{{padding:24px;margin-bottom:16px;background:linear-gradient(135deg,#123f3b,#087f70);color:white}}.hero .eyebrow,.hero .sub{{color:#d9f3ed}}.hero h2{{font-size:22px;margin:7px 0}}.hero .sub{{max-width:680px}}.grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:22px}}.metric{{background:#ffffff18;border:1px solid #ffffff26;border-radius:10px;padding:13px}}.metric span{{display:block;color:#c3e8e0;font-size:12px}}.metric b{{display:block;font-size:17px;margin-top:4px}}.status{{display:inline-block;border-radius:99px;padding:4px 9px;font-size:12px;font-weight:700}.available{{color:#146b5e;background:#dff5ef}}.sold{{color:#8b4b28;background:#fff0e7}}.card{{padding:22px;margin:16px 0}}.card-head{{display:flex;justify-content:space-between;gap:14px;align-items:end;margin-bottom:15px}}.hint{{font-size:12px;color:#61717d}}.warning{{background:#fff8e7;border:1px solid #f3dfaa;border-radius:10px;padding:12px;color:#785b12;margin-bottom:16px}}.table-wrap{{overflow:auto;border:1px solid #e7eded;border-radius:10px}}table{{width:100%;border-collapse:collapse;font-size:14px;white-space:nowrap}}th,td{{text-align:left;padding:13px 15px;border-bottom:1px solid #edf0f1}}th{{color:#61717d;font-size:12px;font-weight:600;background:#f7f9f9}}tbody tr:last-child td{{border:0}}tbody tr:hover{{background:#fafcfc}}td.price{{font-weight:700}}.rank{{font:12px ui-monospace,monospace;color:#8b9b99}}.empty{{text-align:center!important;color:#61717d;padding:30px!important}}.info{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}}.info div{{padding:15px;background:#f7f9f9;border-radius:10px}}.info b{{display:block;font-size:13px;margin-bottom:3px}}.info p{{font-size:12px;color:#61717d;margin:0}}
+@media(max-width:700px){{main{{padding:22px 14px 50px}}header{{display:block;margin-bottom:20px}}nav{{margin-top:16px}}h1{{font-size:26px}}.hero,.card{{padding:17px;border-radius:12px}}.grid,.info{{grid-template-columns:1fr}}.grid{{gap:8px}}.card-head{{display:block}}.card-head .hint{{display:block;margin-top:5px}}table{{min-width:560px}}}}
+</style><main><header><div><span class="eyebrow">RECOMMENDATION CENTER</span><h1>개인화 추천</h1><p class="sub">사용자 반응을 바탕으로 다음에 보여줄 상품을 관리합니다.</p></div><nav aria-label="관리자 메뉴"><a href="/admin/recommendations" aria-current="page">추천 관리</a><a href="/admin/insights">인사이트</a><a href="/admin/experiments">실험실</a></nav></header>
+{notice}<section class="hero"><span class="eyebrow">NOW RUNNING</span><h2>개인화 추천이 운영 중입니다</h2><p class="sub">사용자가 클릭한 상품 카테고리를 학습해 Toss 인기상품을 우선 추천합니다. 신규 사용자는 전체 인기순으로 시작하고, API 오류에는 fallback 상품을 사용합니다.</p><div class="grid"><div class="metric"><span>현재 후보 상품</span><b>{len(products):,}개</b></div><div class="metric"><span>판매 중</span><b>{len(products)-sold_out:,}개</b></div><div class="metric"><span>평균 표시 가격</span><b>{average_price:,}원</b></div></div></section>
+<section class="card"><div class="card-head"><div><h2>현재 후보 상품</h2><p class="hint">Toss 인기상품 목록 · 1시간 캐시 · 품절 상품은 추천에서 제외됩니다.</p></div></div><div class="table-wrap"><table><thead><tr><th>순위</th><th>상품</th><th>가격</th><th>상태</th></tr></thead><tbody>{rows}</tbody></table></div></section>
+<section class="card"><div class="card-head"><h2>운영 방식</h2></div><div class="info"><div><b>개인화 신호</b><p>사용자가 클릭한 상품의 카테고리 affinity</p></div><div><b>신규 사용자</b><p>전체 인기순으로 시작</p></div><div><b>데이터 확인</b><p>인사이트에서 노출·클릭 성과 확인</p></div></div></section></main></html>"""
+    return (page.replace("{{", "{").replace("}}", "}")
+        .replace("{notice}", notice)
+        .replace("{len(products):,}", f"{len(products):,}")
+        .replace("{len(products)-sold_out:,}", f"{len(products)-sold_out:,}")
+        .replace("{average_price:,}", f"{average_price:,}")
+        .replace("{rows}", rows))
 
 
 def _insights_page(data: dict[str, Any]) -> str:
+    from app.services.insights_view import render_insights
+    return render_insights(data)
+
+
+def _legacy_insights_page(data: dict[str, Any]) -> str:
     totals = data["totals"]
     paths = data.get("paths", [])
     by_path = {item["path"]: item for item in paths}
@@ -603,6 +617,7 @@ def _page(cards: str, experiment_count: int, show_form: bool = True, show_list: 
     page = """<!doctype html>
 <html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CNU 실험실</title>
+<link rel="prefetch" href="/admin/insights">
 <style>
 *{{box-sizing:border-box}}body{{font-family:Inter,system-ui,sans-serif;margin:0;background:#f5f7fb;color:#172033}}.shell{{max-width:1120px;margin:auto;padding:32px 20px 64px}}header{{display:flex;justify-content:space-between;align-items:end;margin-bottom:28px}}h1{{font-size:30px;margin:4px 0 8px;letter-spacing:-.04em}}h2{{font-size:19px;margin:30px 0 12px}}h3{{font-size:18px;margin:5px 0;letter-spacing:-.02em}}h4{{font-size:13px;margin:18px 0 8px;color:#68738a}}p{{line-height:1.55}}.sub{{color:#68738a;margin:0}}.card,form,.experiment-card{{background:#fff;border:1px solid #e3e8f0;border-radius:16px;padding:22px;margin:14px 0;box-shadow:0 8px 24px #1720330a}}form{{border-top:4px solid #3767e8}}.section-title{{display:flex;justify-content:space-between;align-items:center}}.eyebrow{{font-size:11px;color:#71809b;font-family:ui-monospace,monospace}}label{{display:block;font-size:13px;font-weight:650;color:#3d4960;margin-top:12px}}input,textarea{{width:100%;font:inherit;box-sizing:border-box;margin-top:6px;padding:11px 12px;border:1px solid #d4dbe7;border-radius:9px;background:#fbfcfe}}input:focus,textarea:focus{{outline:3px solid #3767e822;border-color:#3767e8}}textarea{{min-height:76px;resize:vertical}}button{{border:0;border-radius:9px;padding:10px 14px;background:#3767e8;color:#fff;font-weight:700;cursor:pointer;margin:4px 4px 0 0}}button:hover{{filter:brightness(.95)}}button.secondary{{background:#eef2f8;color:#344159}}button:disabled{{opacity:.55;cursor:wait}}.card-top,.row{{display:flex;justify-content:space-between;gap:16px;align-items:center}}.status{{padding:5px 10px;border-radius:99px;font-size:12px;font-weight:700;white-space:nowrap}}.status-draft{{background:#fff4d6;color:#8a6200}}.status-running{{background:#dcf8e8;color:#147342}}.status-paused{{background:#e9edf5;color:#68738a}}.status-completed{{background:#e6edff;color:#3158af}}.hypothesis{{color:#4d5a70;margin:16px 0}}.meta-grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}}.meta-grid div{{padding:12px;background:#f7f9fc;border-radius:10px;min-width:0}}.meta-grid span{{display:block;color:#7b879b;font-size:11px;margin-bottom:5px}}.meta-grid b{{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px}}.variants ul{{list-style:none;padding:0;margin:0;display:flex;gap:8px;flex-wrap:wrap}}.variants li{{background:#f1f4fa;border-radius:8px;padding:8px 10px;font-size:13px}}.actions{{margin-top:18px}.result-panel{{margin-top:14px;border-top:1px solid #e6eaf1;padding-top:14px}}.hidden{{display:none}}.result-summary{{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}}.metric{{background:#f6f8fc;padding:10px 12px;border-radius:9px}}.metric span{{display:block;color:#71809b;font-size:11px}}.metric b{{display:block;margin-top:3px}}table{{width:100%;border-collapse:collapse;font-size:13px}}th,td{{padding:9px;text-align:left;border-bottom:1px solid #edf0f5}}th{{color:#71809b;font-weight:600}}.notice{{padding:12px 14px;background:#fff8e7;border:1px solid #f3dfaa;border-radius:10px;color:#785b12;font-size:13px}}.form-grid{{display:grid;grid-template-columns:1fr 1fr;gap:0 18px}}.wide{{grid-column:1/-1}}.field-help{{display:block;color:#7b879b;font-size:11px;font-weight:400;margin-top:4px}}.form-footer{{display:flex;justify-content:space-between;align-items:center;margin-top:18px;padding-top:16px;border-top:1px solid #edf0f5}}.toolbar{{display:flex;gap:8px;align-items:center;margin:12px 0}}.toolbar input{{margin:0;max-width:280px}}.count{{color:#71809b;font-size:12px}}@media(max-width:720px){{.meta-grid{{grid-template-columns:repeat(2,1fr)}}.form-grid{{display:block}}header{{display:block}}.notice{{margin-top:18px}}.toolbar{{align-items:stretch;flex-direction:column}.toolbar input{{max-width:none}}}}
 /* Mobile-first refinements */
@@ -622,9 +637,9 @@ def _page(cards: str, experiment_count: int, show_form: bool = True, show_list: 
   .toolbar select{{margin-top:0}}.result-panel{{margin-left:-4px;margin-right:-4px;padding-left:4px;padding-right:4px}}
 }}
  .new-page .page-list{{display:none}}.list-page #new-experiment{{display:none}}nav{{display:flex;gap:8px;margin-bottom:12px}}nav a{{color:#3767e8;text-decoration:none;font-size:13px;font-weight:700;padding:8px 10px;border-radius:8px}}nav a.nav-primary{{background:#3767e8;color:#fff}}.event-metric{{min-width:150px}}.event-metric small{{display:block;color:#8a94a6;margin-top:3px}}
- .live-summary{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:16px 0 4px;padding:12px;background:#f7f9fc;border-radius:10px;color:#536078;font-size:12px}}.live-label{{color:#3767e8;font-weight:800}}.live-loading{{color:#8a94a6}}.progress{{flex:1;min-width:80px;height:6px;background:#e2e7f0;border-radius:99px;overflow:hidden}}.progress i{{display:block;height:100%;background:#3767e8;border-radius:inherit}}.srm{{font-weight:700}}
+ .live-summary{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:16px 0 4px;padding:12px;background:#f7f9fc;border-radius:10px;color:#536078;font-size:12px}}.live-label{{color:#3767e8;font-weight:800}}.live-loading{{color:#8a94a6}}.progress{{flex:1;min-width:80px;height:6px;background:#e2e7f0;border-radius:99px;overflow:hidden}}.progress i{{display:block;height:100%;background:#3767e8;border-radius:inherit}}.srm{{font-weight:700}}.result-panel{{overflow-x:auto}}.result-panel table{{min-width:680px}}
 </style>
-<body class="__PAGE_MODE__"><main class="shell"><header><div><span class="eyebrow">CNU EXPERIMENT LAB</span><h1>실험실</h1><p class="sub">가설을 검증하고, 학습을 기록하세요.</p></div><div><nav><a href="/admin/insights">인사이트</a><a href="/admin/experiments">실험 목록</a><a class="nav-primary" href="/admin/experiments/new">＋ 새 실험</a></nav><div class="notice">결정 전 샘플 수와 SRM을 확인하세요.</div></div></header>
+<body class="__PAGE_MODE__"><main class="shell"><header><div><span class="eyebrow">CNU EXPERIMENT LAB</span><h1>실험실</h1><p class="sub">가설을 검증하고, 학습을 기록하세요.</p></div><div><nav aria-label="관리자 메뉴"><a href="/admin/recommendations">추천 관리</a><a href="/admin/insights">인사이트</a><a href="/admin/experiments" aria-current="page">실험 목록</a><a class="nav-primary" href="/admin/experiments/new">＋ 새 실험</a></nav><div class="notice">결정 전 샘플 수와 SRM을 확인하세요.</div></div></header>
 <form id="new-experiment">
 <div class="section-title"><h2>새 실험 설계</h2><span class="eyebrow">STEP 1 · PLAN</span></div>
 <label class="wide">AI에게 설계 요청<textarea id="ai-prompt" placeholder="예: 황치즈 버터링 특가 버튼 문구의 클릭률을 높일 수 있는 A/B 실험을 설계해줘"></textarea><span class="field-help">가설·지표·변형 문구 초안을 자동으로 채워줍니다.</span></label>
