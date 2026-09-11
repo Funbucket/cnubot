@@ -33,14 +33,14 @@ def render_insights(data):
     presets += f'<a class="preset{" selected" if not start and not end else ""}" href="?all_time=true">전체</a>'
     cards = []
     for label, p, metric, note in [
-        ('버튼 경유 · 목록 진입', entry, 'action_users', '버튼을 눌러 상품 목록으로 이동한 경로'),
-        ('바로 노출 · 상품 클릭', inline, 'clicked_users', '학식 응답 안에 상품이 바로 보이는 경로'),
+        ('버튼 경유 · 목록 진입 사용자', entry, 'action_users', '버튼을 눌러 상품 목록으로 이동한 사용자 수'),
+        ('바로 노출 · 상품 클릭 사용자', inline, 'clicked_users', '학식 응답 안의 상품 카드를 클릭한 사용자 수'),
     ]:
         reach, clicked = p.get('reach_users', 0), p.get(metric, 0)
         cards.append(f'<article class="metric"><span>{label}</span><strong>{clicked:,}<small>명</small></strong><p>접점 노출 {reach:,}명 <span class="pill">클릭률 {rate(clicked, reach)}</span></p><small>{note}</small></article>')
     products = data.get('products', [])
     active = sum(1 for p in products if p.get('clicked_users', 0))
-    cards.append(f'<article class="metric"><span>클릭이 발생한 상품</span><strong>{active:,}<small>개</small></strong><p>관측된 상품 {len(products):,}개 중</p><small>상품별 성과에서 클릭이 집중된 상품을 확인하세요.</small></article>')
+    cards.append(f'<article class="metric"><span>클릭이 발생한 상품 수</span><strong>{active:,}<small>개</small></strong><p>관측된 상품 {len(products):,}개 중</p><small>사용자 수가 아니라 클릭이 발생한 서로 다른 상품 수입니다.</small></article>')
     observations = []
     if not any(p.get('reach_users') or p.get('clicked_users') for p in paths.values()):
         observations.append(('데이터를 기다리고 있어요', '기간을 넓혀 보세요. 데이터가 수집되면 경로별 성과와 상품 순위가 표시됩니다.'))
