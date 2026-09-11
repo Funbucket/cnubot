@@ -8,64 +8,9 @@ _PATH_EVENTS_CTE = """
                 SELECT user_id, event_name, created_at,
                        CASE WHEN surface = 'menu_inline_card' THEN 'inline' ELSE 'entry' END AS path
                 FROM qualified_promotion_events
-                WHERE ($2::date IS NULL OR created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
+                  WHERE ($2::date IS NULL OR created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
                   AND ($3::date IS NULL OR created_at < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
                   AND (user_id IS NULL OR NOT (user_id = ANY($4::text[])))
-                  -- Keep each funnel step inside the selected period. The
-                  -- qualification view intentionally looks at historical
-                  -- events, but a dashboard period must not inherit a
-                  -- button click from an exposure before that period.
-                  AND (
-                    event_name <> 'promotion_entry_click'
-                    OR EXISTS (
-                      SELECT 1 FROM qualified_promotion_events p
-                      WHERE p.user_id = qualified_promotion_events.user_id
-                        AND p.event_name = 'promotion_entry_exposure'
-                        AND p.created_at <= qualified_promotion_events.created_at
-                        AND ($2::date IS NULL OR p.created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
-                        AND ($3::date IS NULL OR p.created_at < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
-                    )
-                  )
-                  AND (
-                    event_name <> 'promotion_exposure'
-                    OR EXISTS (
-                      SELECT 1 FROM qualified_promotion_events c
-                      JOIN qualified_promotion_events p
-                        ON p.user_id = c.user_id
-                       AND p.event_name = 'promotion_entry_exposure'
-                       AND p.created_at <= c.created_at
-                      WHERE c.user_id = qualified_promotion_events.user_id
-                        AND c.event_name = 'promotion_entry_click'
-                        AND c.created_at <= qualified_promotion_events.created_at
-                        AND ($2::date IS NULL OR c.created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
-                        AND ($3::date IS NULL OR c.created_at < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
-                        AND ($2::date IS NULL OR p.created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
-                        AND ($3::date IS NULL OR p.created_at < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
-                    )
-                  )
-                  AND (
-                    event_name NOT IN ('promotion_click', 'promotion_button_click', 'promotion_quick_reply_click', 'promotion_block_click', 'commerce_card_click')
-                    OR EXISTS (
-                      SELECT 1 FROM qualified_promotion_events x
-                      JOIN qualified_promotion_events c
-                        ON c.user_id = x.user_id
-                       AND c.event_name = 'promotion_entry_click'
-                       AND c.created_at <= x.created_at
-                      JOIN qualified_promotion_events p
-                        ON p.user_id = c.user_id
-                       AND p.event_name = 'promotion_entry_exposure'
-                       AND p.created_at <= c.created_at
-                      WHERE x.user_id = qualified_promotion_events.user_id
-                        AND x.event_name = 'promotion_exposure'
-                        AND x.created_at <= qualified_promotion_events.created_at
-                        AND ($2::date IS NULL OR x.created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
-                        AND ($3::date IS NULL OR x.created_at < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
-                        AND ($2::date IS NULL OR c.created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
-                        AND ($3::date IS NULL OR c.created_at < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
-                        AND ($2::date IS NULL OR p.created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
-                        AND ($3::date IS NULL OR p.created_at < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
-                    )
-                  )
 """
 
 
@@ -333,6 +278,20 @@ async def get_promotion_insights(pool, start_date=None, end_date=None) -> dict[s
             """,
             list(click_events), start_date, end_date, excluded_user_ids,
         )
+    totals = dict(totals)
+    # The qualification view allows a user to click an older Kakao message.
+    # Reuse the same qualified path counts for the funnel so a historical
+    # button click is not counted in one panel and dropped from another.
+    entry_path = next((row for row in path_rows if row["path"] == "entry"), None)
+    if entry_path:
+        totals.update(
+            entry_exposed_users=entry_path["entry_exposed_users"],
+            entry_exposure_events=entry_path["entry_exposure_events"],
+            entry_users=entry_path["entry_users"],
+            exposed_users=entry_path["exposed_users"],
+            exposure_events=entry_path["exposure_events"],
+            clicked_users=entry_path["clicked_users"],
+        )
     return {
         "paths": _summarize_paths(path_rows),
         "guardrails": _summarize_guardrails(guardrail_rows),
@@ -342,7 +301,7 @@ async def get_promotion_insights(pool, start_date=None, end_date=None) -> dict[s
         "entry_labels": [dict(row) for row in entry_label_rows],
         "positions": [dict(row) for row in position_rows],
         "daily": [dict(row) for row in daily_rows],
-        "totals": dict(totals),
+        "totals": totals,
         "start_date": start_date,
         "end_date": end_date,
     }
