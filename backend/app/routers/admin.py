@@ -12,7 +12,7 @@ from app.services import llm
 from app.services import toss_sharelink
 from app.services import promotion_settings
 from fastapi import APIRouter, Depends, HTTPException, Query, Header
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from app.schemas.admin import VariantInput, ExperimentInput, SuggestInput, ShareTextInput
 
@@ -64,6 +64,12 @@ async def admin_home(_: str = Depends(require_admin)):
 async def recommendations(_: str = Depends(require_admin)):
     return HTMLResponse((Path(__file__).parent.parent / "static" / "promotion_editor.html").read_text(),
                         headers={"Cache-Control": "no-store"})
+
+
+@router.get("/assets/admin_nav.css", response_class=PlainTextResponse, include_in_schema=False)
+async def admin_navigation_css():
+    path = Path(__file__).parent.parent / "static" / "admin_nav.css"
+    return PlainTextResponse(path.read_text(), media_type="text/css", headers={"Cache-Control": "no-cache"})
 
 
 def require_editor(x_promotion_editor: str = Header(default="")):
