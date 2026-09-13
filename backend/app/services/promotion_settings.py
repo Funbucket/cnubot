@@ -16,7 +16,7 @@ from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 
 DISCLOSURE = "이 포스팅은 토스쇼핑 쉐어링크 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다."
-FIXED_PRODUCT_BUTTON_LABEL = "특가 구경하기"
+FIXED_PRODUCT_BUTTON_LABEL = "특가 바로가기"
 FIXED_PROMOTION_INTRO = (
     "🛍️  오늘의 추천 상품\n"
     "✱ 츠누봇이 토스와 준비한 특가예요.\n"
@@ -35,10 +35,14 @@ class Product(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     title: str = Field(min_length=1, max_length=200)
     url: str
-    button_label: str = Field(default="상품 가격 보기", min_length=1, max_length=14)
+    button_label: str = Field(default="특가 바로가기", min_length=1, max_length=14)
     description: str = Field(default="", max_length=180)
     image_url: str = Field(default="", max_length=2000)
     enabled: bool = True
+    show_unit_price: bool = False
+    unit_count: int | None = Field(default=None, gt=1, le=100000)
+    show_gram_price: bool = False
+    total_weight_g: int | None = Field(default=None, gt=0, le=1000000)
     taca_item_id: int | None = Field(default=None, gt=0)
 
     _link = field_validator("url")(validate_link)
@@ -59,6 +63,7 @@ class Settings(BaseModel):
     menu_button_label: str = Field(default="", max_length=14)
     quick_reply_label: str = Field(default="", max_length=20)
     products: list[Product] = Field(default_factory=list, max_length=30)
+    collections: dict[str, "CollectionSettings"] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_products(self):
@@ -73,13 +78,36 @@ class Settings(BaseModel):
         return self
 
 
+class CollectionSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    label: str = Field(min_length=1, max_length=30)
+    message_text: str = Field(min_length=1, max_length=100)
+    mode: Literal["algorithm", "fixed"] = "algorithm"
+    products: list[Product] = Field(default_factory=list, max_length=30)
+    allowed_categories: list[str] = Field(default_factory=list, max_length=30)
+    next_collection_id: str | None = Field(default=None, max_length=40)
+
+    @model_validator(mode="after")
+    def validate_collection(self):
+        if len({p.url for p in self.products}) != len(self.products):
+            raise ValueError("같은 공유 링크가 중복되었습니다.")
+        if sum(p.enabled for p in self.products) > 6:
+            raise ValueError("노출 상품은 최대 6개입니다.")
+        if self.mode == "fixed" and not any(p.enabled for p in self.products):
+            raise ValueError("고정 모드에는 노출할 상품이 최소 1개 필요합니다.")
+        return self
+
+
 def settings_path() -> Path:
     return Path(os.getenv("MENU_DATA_DIR", "/data/menus")) / "promotion_settings.json"
 
 
 def read_settings() -> Settings:
     try:
-        return Settings.model_validate_json(settings_path().read_text())
+        settings = Settings.model_validate_json(settings_path().read_text())
+        if not settings.collections:
+            settings = _migrate_legacy(settings)
+        return settings
     except FileNotFoundError:
         return Settings()
 
@@ -106,6 +134,27 @@ def save_settings(settings: Settings) -> Settings:
         return saved
 
 
+def _migrate_legacy(settings: Settings) -> Settings:
+    """Expose the old single list as living while keeping existing editor data."""
+    base = {"label": settings.quick_reply_label or "자취생 꿀템",
+            "message_text": "자취생 꿀템", "mode": settings.mode,
+            "products": settings.products}
+    food = {"label": "자취생 먹을거 핫딜", "message_text": "자취생 먹을거 핫딜",
+            "mode": "algorithm", "products": [], "allowed_categories": ["식품", "간식", "음료", "농산", "축산", "수산"],
+            "next_collection_id": "living"}
+    base["next_collection_id"] = "food"
+    return settings.model_copy(update={"collections": {"food": CollectionSettings.model_validate(food), "living": CollectionSettings.model_validate(base)}})
+
+
+def read_collection(collection_id: str) -> CollectionSettings:
+    settings = read_settings()
+    collection = settings.collections.get(collection_id) or _migrate_legacy(settings).collections["living"]
+    # The former shared-product quick-reply label must not leak into living.
+    if collection_id == "living" and collection.message_text == "자취생 꿀템" and collection.label.startswith("💵"):
+        collection = collection.model_copy(update={"label": "자취생 꿀템"})
+    return collection
+
+
 def product_key(url: str) -> str:
     return "fixed_" + hashlib.sha256(url.encode()).hexdigest()[:16]
 
@@ -123,7 +172,39 @@ def parse_share_text(text: str) -> Product:
     url = validate_link(urls[0])
     lines = [line.strip() for line in text.replace(url, "").splitlines()
              if line.strip() and not any(word in line for word in ("수수료", "쉐어링크 활동"))]
-    return Product(title=" ".join(lines) or "토스쇼핑 상품", url=url)
+    title = " ".join(lines) or "토스쇼핑 상품"
+    unit_count = infer_unit_count(title)
+    return Product(title=title, url=url, unit_count=unit_count,
+                   total_weight_g=infer_total_weight_g(title, unit_count))
+
+
+def infer_unit_count(title: str) -> int | None:
+    """Infer a bundle count for the optional per-item price message.
+
+    For titles such as ``100매 10팩`` the last package count (10팩) is used.
+    The editor keeps this value editable because product titles are not a
+    reliable source of merchandising quantity.
+    """
+    matches = re.findall(r"(?<!\d)(\d{1,5})\s*(?:개입|개|입|팩|매|롤|캔|병|봉|포)\b", title.lower())
+    if not matches:
+        return None
+    count = int(matches[-1])
+    return count if count > 1 else None
+
+
+def infer_total_weight_g(title: str, unit_count: int | None = None) -> int | None:
+    """Infer the total gram weight for the optional per-100g price message.
+
+    ``치킨텐더, 1kg, 2개`` becomes 2000g: the last weight in the title is the
+    weight of one package, so the bundle count multiplies it. Volumes (ml, L)
+    are ignored because a 100g callout would misread them.
+    """
+    matches = re.findall(r"(?<![\d.])(\d{1,5}(?:\.\d{1,2})?)\s*(kg|g)(?![a-z])", title.lower())
+    if not matches:
+        return None
+    amount, unit = matches[-1]
+    grams = round(float(amount) * (1000 if unit == "kg" else 1) * (unit_count or 1))
+    return grams if 0 < grams <= 1000000 else None
 
 
 def enrich_product(product: Product) -> Product:
@@ -192,10 +273,15 @@ async def market_product(product: Product, force: bool = False) -> dict:
                 raise ValueError("상품 가격을 확인하지 못했습니다.")
             original = original if isinstance(original, int) and original >= price else price
             rate = rate if isinstance(rate, (int, float)) and 0 <= rate <= 100 else round((original-price)/original*100) if original else 0
+            api_name = str(item.get("displayName") or "")
+            api_unit_count = infer_unit_count(api_name)
             metadata = {"taca_item_id": resolved.taca_item_id,
                         "price": price, "original_price": original,
                         "discount_rate": rate, "discount": original-price,
                         "is_sold_out": bool(item.get("isSoldOut")),
+                        "unit_count": resolved.unit_count or api_unit_count,
+                        "total_weight_g": resolved.total_weight_g or infer_total_weight_g(
+                            api_name, resolved.unit_count or api_unit_count),
                         "category_ids": item.get("categoryIds") or [],
                         "market_image_url": item.get("thumbnailUrl") or resolved.image_url,
                         "price_checked_at": int(time.time()), "price_error": ""}

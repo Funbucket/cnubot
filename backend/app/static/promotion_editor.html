@@ -1,87 +1,146 @@
 <!doctype html>
 <html lang="ko">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CNU 상품·버튼 관리</title>
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>상품·버튼 관리 | CNU ADMIN</title>
+<link rel="stylesheet" href="/admin/assets/admin_nav.css">
 <style>
-*{box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#f5f7fb;color:#172033;margin:0}main{max-width:1080px;margin:auto;padding:32px 20px 100px}header{display:flex;justify-content:space-between;gap:16px;align-items:center}h1{font-size:28px;margin:8px 0}h2{font-size:19px;margin:0 0 14px}nav{display:flex;gap:12px;flex-wrap:wrap}a{color:#3564df}p{line-height:1.65}.sub{font-size:13px;color:#637087}.card{background:white;border:1px solid #dfe5ef;border-radius:16px;padding:22px;margin:18px 0}.cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}label{display:block;font-size:14px;font-weight:600;margin-bottom:7px}input,textarea,select{font:inherit;width:100%;padding:11px;border:1px solid #bdc8d8;border-radius:8px;background:white;color:#172033}textarea{resize:vertical}button{font:inherit;font-size:14px;background:#3564df;color:white;border:0;border-radius:8px;padding:10px 15px;cursor:pointer}button.secondary{background:#edf1f9;color:#243755}button.danger{background:#fff0f0;color:#aa3333}button:disabled{opacity:.45;cursor:default}.toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.toolbar label{margin:0}.toolbar input{width:auto}.product{border:1px solid #dae2ed;border-radius:12px;padding:18px;margin-top:14px}.product.off{background:#f5f6f8}.product .cols{margin-top:14px}.badge{font-size:12px;border-radius:20px;padding:5px 10px;background:#e9efff;color:#2954be}.savebar{position:sticky;bottom:12px;background:#172033;color:white;border-radius:12px;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px;box-shadow:0 6px 24px #17203322}.savebar button{background:#5681ff}#message{white-space:pre-wrap;line-height:1.6}#message.error{color:#b02929}#message.success{color:#157448}.preview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.preview article{border:1px solid #dfe5ef;border-radius:12px;overflow:hidden;background:white}.preview img{width:100%;height:160px;object-fit:contain;background:#f8fafc}.preview .content{padding:12px}.preview strong{display:block;font-size:14px}.preview p{font-size:12px}.preview .cta{background:#fff1b3;border-radius:8px;text-align:center;padding:9px;font-size:13px}.small{font-size:12px}.check{display:flex;align-items:center;gap:8px}.check input{width:auto}.status{font-weight:600}@media(max-width:650px){header{display:block}nav{margin-top:16px}.cols{grid-template-columns:1fr}.card{padding:16px}.preview{grid-template-columns:1fr}.savebar{bottom:6px}.preview img{height:190px}}
-.preview{display:block;max-width:480px;margin:0 auto;background:#2c2c2c;border-radius:20px;padding:16px 0 0;overflow:hidden}.preview-row{display:flex;gap:10px;overflow-x:auto;padding:0 16px 16px;scroll-snap-type:x mandatory}.preview article{flex:0 0 calc(100% - 18px);min-width:0;border:0;border-radius:18px;scroll-snap-align:start;color:#111}.preview img{display:block;width:100%;height:auto;aspect-ratio:2/1;object-fit:cover;background:#eee}.preview .content{padding:18px}.preview strong{font-size:22px;font-weight:600;line-height:1.25;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}.preview .selling-price{font-size:28px;font-weight:600;margin:18px 0 10px}.preview .discount-line{display:flex;gap:10px;align-items:center;font-size:19px}.preview del{color:#4c4c4c}.preview .rate{color:#fa572c}.preview .card-description{font-size:18px;line-height:1.45;color:#808080;margin:24px 0 26px;padding-top:20px;border-top:1px solid #e8e8e8;white-space:pre-line}.preview .cta{border:1px solid #e8e8e8;border-radius:11px;background:#f6f7f8;padding:16px 8px;color:#111;font-size:20px;text-align:center}.preview-notice{white-space:pre-line;margin:0 16px 16px;padding:13px 16px;background:#414141;color:#fff;border-radius:14px;font-size:13px;line-height:1.6}.preview-empty{color:white;padding:16px}.preview-status{font-size:13px;color:#637087;white-space:pre-line;margin:12px 0}.preview-status.error{color:#a53727}
+:root{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#182a37;background:#f4f7f6;font-synthesis:none;--green:#087563;--muted:#576b73;--line:#dce5e1}
+*{box-sizing:border-box}body{margin:0}button,input,textarea,select{font:inherit}button,a,input,textarea,summary{touch-action:manipulation}button{cursor:pointer;min-height:44px;border:1px solid transparent;border-radius:10px;padding:10px 15px;font-size:14px;font-weight:650;background:var(--green);color:#fff}button:disabled{cursor:default;opacity:.45}button.secondary{background:#fff;border-color:#cbd8d2;color:#29483e}button.danger{background:#fff;color:#a33128;border-color:#efd1cd}button:focus-visible,a:focus-visible,summary:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid #59a5ec;outline-offset:3px}a{color:var(--green)}h1,h2,h3,p{margin-top:0}h1{font-size:30px;letter-spacing:-.045em;margin-bottom:8px}h2{font-size:18px;margin-bottom:12px}h3{font-size:15px;margin-bottom:8px}p{line-height:1.6}small,.hint{font-size:13px;color:var(--muted);line-height:1.55}.hint{margin:8px 0 0}main{max-width:1260px;margin:auto;padding:28px 28px 150px}.page-heading{margin-bottom:24px}.page-heading p{color:var(--muted);margin-bottom:0}.eyebrow{font-size:11px;font-weight:750;letter-spacing:.12em;color:var(--green);margin-bottom:8px}.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px;min-width:0}.stack{display:grid;gap:18px;min-width:0}.collection-picker{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px}.collection-option{text-align:left;background:#fff;border:1px solid #cbd8d2;color:#243d35;padding:17px 20px;border-radius:14px;display:grid;gap:7px}.collection-option strong{font-size:17px}.collection-option span{font-size:12px;font-weight:450;color:var(--muted)}.collection-option[aria-pressed=true]{border:2px solid var(--green);padding:16px 19px;background:#edf7f2}.collection-option .state{font-weight:650;color:var(--green)}.workspace{display:grid;grid-template-columns:minmax(0,1fr) 370px;gap:24px;align-items:start}.preview-panel{position:sticky;top:20px;max-height:calc(100dvh - 145px);overflow:auto;scrollbar-width:thin}.section-top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px}.section-top h2{margin:0}.badge{display:inline-block;padding:5px 9px;border-radius:7px;background:#eaf3ef;color:#285745;font-size:12px;font-weight:650}.mode-options{display:grid;grid-template-columns:1fr 1fr;gap:10px}.mode-options label{display:flex;align-items:center;gap:10px;border:1px solid #cbd8d2;border-radius:11px;padding:13px;min-height:62px;cursor:pointer}.mode-options label:has(input:checked){border-color:var(--green);background:#edf7f2}.mode-options strong{display:block;font-size:14px}.mode-options small{display:block;font-size:12px}input[type=radio],input[type=checkbox]{accent-color:var(--green);width:20px;height:20px;flex-shrink:0}input:not([type=checkbox]):not([type=radio]),textarea{width:100%;min-width:0;border:1px solid #b8c9c0;border-radius:9px;padding:11px 12px;background:#fff;font-size:16px;color:#182a37}textarea{resize:vertical;min-height:100px}label.field{display:grid;gap:7px;font-size:13px;font-weight:650}.fields{display:grid;grid-template-columns:1fr 1fr;gap:14px}.full{grid-column:1/-1}summary{cursor:pointer;min-height:44px;display:list-item;line-height:1.5;padding:9px 0;font-weight:650;font-size:14px}details.settings>summary{font-size:16px}details[open]>summary{margin-bottom:12px}.inline-note{background:#f0f6f3;border-radius:10px;padding:12px;margin-top:14px;color:#38584a;font-size:13px;line-height:1.6}.copy-row{display:flex;gap:8px;align-items:center;margin-top:10px}.copy-row code{font-size:12px;overflow-wrap:anywhere;flex:1}.add-details{border:1px dashed #b5cbbf;border-radius:11px;padding:3px 14px;margin-top:16px}.add-details textarea{margin-bottom:10px}.product-list{display:grid;gap:12px}.product{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff}.product.off{background:#f7f9f8}.product-head{display:flex;gap:12px;align-items:center;padding:14px}.product-thumb{width:52px;height:52px;border-radius:9px;background:#edf3ef;object-fit:contain;flex-shrink:0}.product-name{min-width:0;flex:1}.product-name strong{display:block;font-size:14px;line-height:1.5;overflow-wrap:anywhere}.product-name .badge{margin-bottom:5px;padding:3px 6px;font-size:11px}.product-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:0 14px 10px}.move-actions{display:flex;gap:6px}.move-actions button{padding:8px 12px}.check{display:flex;gap:8px;align-items:center;min-height:44px;font-size:13px;cursor:pointer}.product details{border-top:1px solid #edf1ef;padding:0 14px 10px}.product details:not([open]){padding-bottom:0}.product details summary{font-size:13px;color:var(--green)}.product-footer{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:14px}.product-footer a{font-size:13px;overflow-wrap:anywhere}.empty{padding:28px 15px;background:#f6f8f7;border:1px dashed #cbd8d2;border-radius:12px;text-align:center;font-size:14px;color:var(--muted);line-height:1.65}.undo{background:#fff5df;border:1px solid #eedaa8;padding:10px 12px;border-radius:10px;display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;font-size:13px}.preview-panel .card{padding:18px}.preview-note{font-size:12px;color:var(--muted);line-height:1.6}.phone{background:#e7eeea;border-radius:15px;padding:14px 0;overflow:hidden}.preview-notice{margin:0 12px 12px;background:#fff;padding:12px;border-radius:10px;font-size:12px;white-space:pre-line;line-height:1.6}.preview-row{display:flex;gap:10px;overflow:auto;padding:0 12px 12px;scroll-snap-type:x mandatory}.preview-card{flex:0 0 92%;min-width:0;background:white;border-radius:12px;overflow:hidden;scroll-snap-align:start;border:1px solid #d5dfd9}.preview-card img{width:100%;height:150px;object-fit:contain;background:white}.preview-content{padding:14px}.preview-content strong{font-size:15px;line-height:1.5;display:block}.preview-price{font-size:22px;font-weight:750;margin:12px 0 6px}.preview-description{font-size:12px;white-space:pre-line;color:var(--muted);line-height:1.5}.preview-cta{font-size:13px;background:#f5f7f6;border:1px solid var(--line);border-radius:8px;text-align:center;padding:11px;margin-top:9px}.preview-status{font-size:12px;line-height:1.5;white-space:pre-line;color:var(--muted);margin:12px 0 0}.error{color:#a12d26!important}.savebar{position:fixed;bottom:0;left:0;right:0;z-index:20;background:#fff;border-top:1px solid #d3dfd7;padding:14px max(20px,calc((100vw - 1204px)/2));padding-bottom:max(14px,env(safe-area-inset-bottom));display:flex;align-items:center;gap:16px;box-shadow:0 -4px 20px #162d2110}.save-info{flex:1;min-width:0}.save-info strong{font-size:14px;display:block}.save-info span{font-size:12px;color:var(--muted);display:block;margin-top:4px}.savebar button{min-width:170px}.message{white-space:pre-line;font-size:13px;line-height:1.5;margin:0}.message:empty{display:none}.mobile-view{display:none}[hidden]{display:none!important}.busy{opacity:.65}fieldset{border:0;padding:0;margin:0;min-width:0}
+@media(max-width:1020px){.workspace{grid-template-columns:minmax(0,1fr) 320px;gap:16px}main{padding:24px 20px 150px}.card{padding:18px}.fields{grid-template-columns:1fr}}
+@media(max-width:760px){main{padding:22px 14px 170px}.page-heading{margin-bottom:18px}h1{font-size:26px}.page-heading p{font-size:13px}.collection-picker{gap:8px;margin-bottom:14px}.collection-option{padding:13px 11px;gap:7px}.collection-option[aria-pressed=true]{padding:12px 10px}.collection-option strong{font-size:14px;line-height:1.45}.collection-option span{font-size:11px}.workspace{display:block}.preview-panel{position:static;max-height:none;overflow:visible}.mobile-view{display:flex;gap:6px;background:#e6ede8;border-radius:10px;padding:4px;margin-bottom:16px}.mobile-view button{flex:1;background:transparent;color:#456153;min-height:44px}.mobile-view button[aria-pressed=true]{background:white;color:var(--green);box-shadow:0 1px 4px #20352c15}.workspace[data-view=edit] .preview-panel{display:none}.workspace[data-view=preview] .edit-panel{display:none}.card{padding:16px;border-radius:13px}.stack{gap:14px}.fields{grid-template-columns:1fr}.mode-options label{padding:10px;gap:6px}.mode-options strong{font-size:13px}.mode-options small{font-size:11px}.mode-options input{width:18px;height:18px}.savebar{padding:12px 14px;padding-bottom:max(12px,env(safe-area-inset-bottom));gap:10px;flex-wrap:wrap}.save-info{min-width:130px}.savebar button{min-width:120px;padding:10px 12px;font-size:13px}.save-info strong{font-size:13px}.save-info span{font-size:11px}.savebar .message{flex-basis:100%;order:3;max-height:66px;overflow:auto}.product-head{padding:12px}.product-actions{padding:0 12px 8px}.preview-panel .card{padding:16px}.phone{max-width:430px;margin:auto}.preview-card img{height:190px}}
+@media(prefers-reduced-motion:no-preference){button{transition:background .12s,border-color .12s}}
 </style></head>
-<body><main>
-<header><div><div class="sub">CNU SHOPPING CENTER</div><h1>상품·버튼 관리</h1><p class="sub">공유 링크로 상품을 등록하고, 보여줄 순서와 버튼 문구를 정하세요.</p></div><nav><a href="/admin/insights">인사이트</a><a href="/admin/experiments">실험</a></nav></header>
-<form id="editor">
-<fieldset id="fields" disabled style="border:0;padding:0;margin:0;min-width:0">
-<section class="card"><h2>노출 방식</h2><label class="check"><input id="fixed" type="checkbox" role="switch">고정 상품 모드</label><p id="modeHelp" class="sub"></p><div class="cols"><div><label for="menuLabel">학식 메뉴 버튼 문구 · 최대 14자</label><input id="menuLabel" maxlength="14" placeholder="예: 🥤 하이뮨 가격 보기"></div><div><label for="quickLabel">스케줄 퀵리플라이 문구 · 최대 20자</label><input id="quickLabel" maxlength="20" placeholder="예: 🥤 하이뮨 18개 가격 보기"></div></div><p class="sub">빈칸이면 자동 추천 모드에서는 기존 시간대별 문구, 고정 모드에서는 ‘🛍️ 오늘의 추천 상품’을 사용합니다. 직접 입력한 문구는 두 모드 모두에 적용됩니다.</p></section>
-<section class="card"><h2>공유 문구로 상품 추가</h2><label for="shareText">토스에서 복사한 문구 전체 또는 공유 링크</label><textarea id="shareText" rows="5" maxlength="5000" placeholder="✱ 이 포스팅은 토스쇼핑 쉐어링크 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.&#10;일동후디스 하이뮨 프로틴 밸런스 액티브 밤티라미수 제로, 250ml, 18개&#10;https://toss.im/_m/l6bqsMls"></textarea><p class="sub">한 번에 상품 하나씩 추가하세요. 상품명과 링크를 추출하고 이미지를 조회합니다. 추가 후 ‘저장하고 적용’을 눌러야 반영됩니다.</p><button id="add" type="button">상품 불러오기</button></section>
-<section class="card"><h2>고정 상품과 순서</h2><p class="sub">위에서부터 노출합니다. ↑ ↓ 버튼으로 이동하세요. 노출은 최대 6개, 숨김을 포함해 30개까지 보관할 수 있습니다. 자동 추천 모드에서도 이 목록은 보관됩니다. 고정 모드의 상품 버튼은 <b>특가 구경하기</b>로 표시됩니다.</p><div id="products"></div></section>
-<section class="card"><div class="toolbar"><h2>카카오톡 상품 미리보기</h2><button id="refreshPreview" type="button" class="secondary">가격 새로고침</button></div><p id="previewNote" class="sub"></p><p id="previewStatus" class="preview-status" role="status" aria-live="polite"></p><div id="preview" class="preview"></div><p class="sub small">실제 챗봇과 같은 응답 데이터로 표시합니다. 한 줄에 3개씩 가로로 넘길 수 있습니다. 순서 번호는 상품명에 표시하지 않습니다. 기기의 글꼴과 화면 크기에 따라 줄바꿈은 달라질 수 있습니다.</p></section>
-</fieldset>
-<p id="message" role="status" aria-live="polite"></p>
-<div class="savebar"><span id="saveStatus">설정 불러오는 중…</span><button id="save" type="submit" disabled>저장하고 적용</button></div>
+<body>
+<header class="admin-topbar"><a class="admin-brand" href="/admin"><span class="admin-brand-mark">C</span>CNU ADMIN</a><nav class="admin-nav" aria-label="관리자 메뉴"><a href="/admin/recommendations" aria-current="page">상품·버튼 관리</a><a href="/admin/insights">인사이트</a><a href="/admin/experiments">실험실</a></nav></header>
+<main>
+<div class="page-heading"><div class="eyebrow">SHOPPING COLLECTIONS</div><h1>상품·버튼 관리</h1><p>기획전을 선택하고, 상품과 노출 방식을 관리하세요.</p></div>
+<form id="editor" novalidate>
+<fieldset id="fields" disabled>
+<div class="collection-picker" role="group" aria-label="관리할 기획전">
+<button type="button" class="collection-option" id="pickFood" data-collection="food" aria-pressed="true"><strong>자취생 먹을거 핫딜</strong><span>메뉴 버튼 · 메뉴 빈자리</span><span class="state" id="foodState">불러오는 중</span></button>
+<button type="button" class="collection-option" id="pickLiving" data-collection="living" aria-pressed="false"><strong>자취생 꿀템</strong><span>일반 퀵리플라이</span><span class="state" id="livingState">불러오는 중</span></button>
+</div>
+<div class="mobile-view" role="group" aria-label="화면 보기"><button id="editView" type="button" aria-pressed="true">설정·상품 편집</button><button id="previewView" type="button" aria-pressed="false">미리보기</button></div>
+<div class="workspace" id="workspace" data-view="edit">
+<div class="edit-panel stack">
+<section class="card"><div class="section-top"><h2>상품 선택 방식</h2><span id="modeBadge" class="badge"></span></div>
+<div class="mode-options"><label><input type="radio" name="mode" id="modeAuto" value="algorithm"><span><strong>자동 추천</strong><small>추천 알고리즘으로 선택</small></span></label><label><input type="radio" name="mode" id="modeFixed" value="fixed"><span><strong>고정 상품</strong><small>직접 고른 순서로 노출</small></span></label></div>
+<p id="modeHelp" class="hint"></p><div id="inlineNote" class="inline-note"></div></section>
+<section class="card"><details class="settings" id="buttonSettings"><summary>버튼 문구·카카오 연결</summary><p id="entryHint" class="hint"></p><div class="fields" style="margin-top:14px"><label class="field">보이는 버튼명<input id="collectionLabel" maxlength="30" autocomplete="off"></label><label class="field">카카오에 등록한 발화<input id="collectionMessage" maxlength="100" autocomplete="off" aria-describedby="routingHint"></label></div><p id="routingHint" class="hint">발화를 바꾸면 카카오 관리자에도 같은 문구를 등록해야 합니다.</p><div class="copy-row"><code id="skillPath"></code><button class="secondary" type="button" id="copyPath">경로 복사</button></div></details></section>
+<section class="card"><div class="section-top"><h2 id="productsHeading">고정 상품</h2><span id="productCount" class="badge"></span></div><p id="listHint" class="hint" style="margin:0 0 14px"></p>
+<div id="undoArea" class="undo" hidden><span id="undoText"></span><button type="button" class="secondary" id="undoDelete">되돌리기</button></div>
+<div id="products" class="product-list"></div>
+<details id="addDetails" class="add-details"><summary>＋ 상품 추가</summary><label class="field" for="shareText">공유 문구 또는 토스 공유 링크</label><textarea id="shareText" rows="3" maxlength="5000" placeholder="토스에서 복사한 상품 문구나 공유 링크를 붙여넣으세요."></textarea><button id="add" type="button">상품 불러오기</button><p class="hint">한 번에 하나씩 추가합니다. 노출은 최대 6개, 숨김 포함 30개까지 보관할 수 있습니다.</p></details>
+</section></div>
+<aside class="preview-panel" aria-label="선택한 기획전 미리보기"><section class="card"><div class="section-top"><h2>미리보기</h2><button id="refreshPreview" class="secondary" type="button">새로고침</button></div><p id="previewNote" class="preview-note"></p><div id="preview" class="phone"></div><p id="previewStatus" class="preview-status" role="status"></p><p class="hint">카드 안에서 좌우로 넘겨보세요. 실제 카카오톡에서는 기기에 따라 글꼴과 배치가 달라질 수 있습니다.</p></section></aside>
+</div></fieldset>
+<div class="savebar"><div class="save-info"><strong id="saveStatus" role="status">설정 불러오는 중…</strong><span id="saveDetail">기획전별로 독립 저장됩니다.</span></div><p id="message" class="message" role="status" aria-live="polite"></p><button id="save" type="submit" disabled>모든 변경사항 저장</button></div>
 </form></main>
 <script>
 'use strict';
-let state, dirty=false, busy=false;
 const $=id=>document.getElementById(id);
-function message(text,error=false){$('message').textContent=text;$('message').className=error?'error':'success';}
-function changed(){dirty=true;$('saveStatus').textContent='저장하지 않은 변경사항';$('save').disabled=false;}
-async function api(path,options={}){const r=await fetch('/admin/promotion-settings'+path,{...options,headers:{'Content-Type':'application/json','X-Promotion-Editor':'1',...options.headers}});const d=await r.json();if(!r.ok)throw Error(typeof d.detail==='string'?d.detail:JSON.stringify(d.detail||d));return d;}
-function sync(){state.mode=$('fixed').checked?'fixed':'algorithm';state.menu_button_label=$('menuLabel').value.trim();state.quick_reply_label=$('quickLabel').value.trim();}
-function input(label,value,callback,limit,type='text'){const wrapper=document.createElement('div');const l=document.createElement('label');l.textContent=label;const el=document.createElement('input');el.type=type;el.value=value;el.maxLength=limit;l.append(el);wrapper.append(l);el.addEventListener('input',()=>{callback(el.value);changed();preview();});return wrapper;}
-function button(text,fn,disabled=false,kind='secondary'){const b=document.createElement('button');b.type='button';b.textContent=text;b.className=kind;b.disabled=disabled;b.onclick=fn;return b;}
-function render(){
- $('modeHelp').textContent=$('fixed').checked?'고정 모드: 추천 알고리즘을 사용하지 않고 아래 상품을 지정한 순서대로 보여줍니다.':'자동 추천 모드: 기존 인기상품·클릭 이력 기반 추천을 사용합니다.';
- $('products').replaceChildren();let position=0;
- state.products.forEach((p,i)=>{
-  const article=document.createElement('article');article.className='product'+(p.enabled?'':' off');
-  const toolbar=document.createElement('div');toolbar.className='toolbar';const badge=document.createElement('span');badge.className='badge';badge.textContent=p.enabled?'노출 '+(++position)+'번 · '+(Math.floor((position-1)/3)+1)+'행 '+((position-1)%3+1)+'열':'숨김';toolbar.append(badge);
-  toolbar.append(button('↑ 위로',()=>{[state.products[i-1],state.products[i]]=[p,state.products[i-1]];changed();render();},i===0));
-  toolbar.append(button('↓ 아래로',()=>{[state.products[i+1],state.products[i]]=[p,state.products[i+1]];changed();render();},i===state.products.length-1));
-  const label=document.createElement('label');label.className='check';const checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.checked=p.enabled;checkbox.onchange=()=>{p.enabled=checkbox.checked;changed();render();};label.append(checkbox,'노출');toolbar.append(label);
-  toolbar.append(button('삭제',()=>{state.products.splice(i,1);changed();render();},false,'danger'));article.append(toolbar);
-  const grid=document.createElement('div');grid.className='cols';
-  grid.append(input('상품명',p.title,v=>p.title=v,200),input('상품 버튼 문구 · 자동 모드에서 사용',p.button_label,v=>p.button_label=v,14),input('상품 설명 · 선택',p.description,v=>p.description=v,180),input('이미지 URL · 선택',p.image_url,v=>p.image_url=v,2000));
-  const link=document.createElement('a');link.href=p.url;link.textContent=p.url;link.target='_blank';link.rel='noopener noreferrer';link.className='small';article.append(grid,link);$('products').append(article);
+const names={food:'먹거리',living:'꿀템'};
+let state,saved,activeId='food',busy=false,previewTimer,previewVersion=0,previewAbort;
+const draftText={food:'',living:''},undo={food:null,living:null},openProducts={food:new Set(),living:new Set()};
+const mobile=window.matchMedia('(max-width:760px)');
+const active=()=>state.collections[activeId];
+const changedIds=()=>state?Object.keys(names).filter(id=>JSON.stringify(state.collections[id])!==JSON.stringify(saved.collections[id])):[];
+function message(text,error=false){$('message').textContent=text;$('message').className='message'+(error?' error':'');}
+function node(tag,cls,text){const el=document.createElement(tag);if(cls)el.className=cls;if(text!==undefined)el.textContent=text;return el;}
+function button(text,fn,kind='secondary'){const b=node('button',kind,text);b.type='button';b.onclick=fn;return b;}
+function updateStatus(){
+ const ids=changedIds();$('save').disabled=busy||!ids.length;
+ $('saveStatus').textContent=busy?'처리 중…':ids.length?ids.map(id=>names[id]).join(' · ')+' 변경사항 있음':'모든 변경사항 저장됨';
+ $('saveDetail').textContent=ids.length?'기획전을 바꿔도 수정 내용은 유지됩니다.':'현재 편집: '+names[activeId]+' 기획전';
+ for(const id of Object.keys(names)){const c=state.collections[id];$(id+'State').textContent=(c.mode==='fixed'?'고정 상품':'자동 추천')+' · '+c.products.filter(p=>p.enabled).length+'개 등록'+(ids.includes(id)?' · 수정 중':'');}
+}
+function changed(){message('');updateStatus();}
+function setBusy(value){busy=value;$('fields').disabled=value;updateStatus();}
+async function api(path,options={}){
+ const r=await fetch('/admin/promotion-settings'+path,{...options,headers:{'Content-Type':'application/json','X-Promotion-Editor':'1',...options.headers}});
+ let d;try{d=await r.json();}catch{throw Error('서버 응답을 읽지 못했습니다. 잠시 후 다시 시도해주세요.');}
+ if(!r.ok){if(r.status===401)throw Error('관리자 로그인이 필요합니다. 이 화면을 유지한 채 다른 탭에서 로그인해주세요.');if(r.status===409)throw Error('다른 창에서 설정이 변경되었습니다. 수정 내용을 확인한 뒤 새로고침해주세요.');throw Error(typeof d.detail==='string'?d.detail:(d.detail||[]).map?.(x=>x.msg).join(' / ')||'요청을 처리하지 못했습니다.');}return d;
+}
+function sync(){active().label=$('collectionLabel').value.trim();active().message_text=$('collectionMessage').value.trim();}
+function choose(id){if(busy||id===activeId)return;sync();draftText[activeId]=$('shareText').value;activeId=id;loadCollection();message('');}
+function loadCollection(){
+ const c=active();for(const id of Object.keys(names))$(id==='food'?'pickFood':'pickLiving').setAttribute('aria-pressed',String(id===activeId));
+ $('collectionLabel').value=c.label;$('collectionMessage').value=c.message_text;$('modeAuto').checked=c.mode==='algorithm';$('modeFixed').checked=c.mode==='fixed';$('shareText').value=draftText[activeId];
+ $('skillPath').textContent='/promotions/collections/'+activeId;$('entryHint').textContent=activeId==='food'?'학식 메뉴와 메뉴 빈자리에서 연결되는 먹거리 목록입니다.':'일반 퀵리플라이에서 연결되는 꿀템 목록입니다.';
+ $('preview').replaceChildren();renderProducts();updateStatus();
+}
+function field(label,value,fn,{type='text',max=200}={}){const l=node('label','field',label);const i=document.createElement('input');i.type=type;i.value=value??'';i.maxLength=max;i.oninput=()=>{fn(i.value);changed();schedulePreview();};l.append(i);return l;}
+function move(index,delta){const list=active().products;[list[index],list[index+delta]]=[list[index+delta],list[index]];changed();renderProducts();document.querySelector('[data-product-index="'+(index+delta)+'"] .move-actions button')?.focus({preventScroll:true});}
+function renderProducts(){
+ const collectionId=activeId,c=active(),fixed=c.mode==='fixed',count=c.products.filter(p=>p.enabled).length;
+ $('modeBadge').textContent=fixed?'고정 상품':'자동 추천';$('modeHelp').textContent=fixed?'아래에서 노출한 상품을 지정한 순서대로 보여줍니다.':(activeId==='food'?'식품 카테고리 안에서 인기 상품과 이용 이력을 바탕으로 추천합니다.':'인기 상품과 이용 이력을 바탕으로 여러 카테고리에서 추천합니다.');
+ $('inlineNote').hidden=activeId!=='food';$('inlineNote').textContent=fixed?'메뉴 빈자리에는 첫 번째 노출 상품이 나옵니다. 품절이거나 가격·이미지를 확인할 수 없으면 생략합니다.':'메뉴 빈자리에는 먹거리 추천 중 가격·할인·수량 조건을 통과한 상품 1개가 나옵니다.';
+ $('productsHeading').textContent=fixed?'고정 상품·노출 순서':'보관 중인 고정 상품';$('productCount').textContent=count+'/6개 노출 · 총 '+c.products.length+'개';
+ $('listHint').textContent=fixed?'위·아래 버튼으로 순서를 바꿀 수 있습니다. 상품을 펼치면 상세 정보를 수정할 수 있습니다.':'자동 추천에는 아래 상품이 사용되지 않습니다. 고정 상품 모드로 바꾸면 등록한 목록을 사용합니다.';
+ $('undoArea').hidden=!undo[activeId];$('undoText').textContent=undo[activeId]?'상품을 목록에서 삭제했습니다.':'';
+ const root=$('products');root.replaceChildren();let order=0;
+ c.products.forEach((p,index)=>{
+  const item=node('article','product'+(!p.enabled?' off':''));item.dataset.productIndex=index;
+  const head=node('div','product-head');const image=node('img','product-thumb');image.alt='';image.loading='lazy';image.referrerPolicy='no-referrer';if(p.image_url)image.src=p.image_url;else image.hidden=true;image.onerror=()=>image.hidden=true;head.append(image);
+  const info=node('div','product-name');const badge=node('span','badge',p.enabled?'노출 '+(++order)+(activeId==='food'&&fixed&&order===1?' · 메뉴 빈자리':''):'숨김');const title=node('strong','',p.title);info.append(badge,title);head.append(info);item.append(head);
+  const actions=node('div','product-actions'),moves=node('div','move-actions');const up=button('↑ 위로',()=>move(index,-1)),down=button('↓ 아래로',()=>move(index,1));up.disabled=index===0;down.disabled=index===c.products.length-1;up.setAttribute('aria-label',p.title+' 위로 이동');down.setAttribute('aria-label',p.title+' 아래로 이동');moves.append(up,down);
+  const check=node('label','check');const checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.checked=p.enabled;checkbox.onchange=()=>{if(checkbox.checked&&count>=6){checkbox.checked=false;message('노출은 최대 6개입니다. 다른 상품을 숨긴 뒤 켜주세요.',true);return;}p.enabled=checkbox.checked;changed();renderProducts();};check.append(checkbox,document.createTextNode('노출'));actions.append(moves,check);item.append(actions);
+  const details=document.createElement('details');details.open=openProducts[activeId].has(p.url);details.ontoggle=()=>details.open?openProducts[collectionId].add(p.url):openProducts[collectionId].delete(p.url);details.append(node('summary','','상품 정보 수정'));
+  const grid=node('div','fields');grid.append(field('상품명',p.title,v=>{p.title=v;title.textContent=v;}),field('이미지 URL · 선택',p.image_url,v=>p.image_url=v,{max:2000,type:'url'}));
+  const units=field('묶음 수량',p.unit_count,v=>p.unit_count=v?Number(v):null,{type:'number'});units.querySelector('input').min='2';units.querySelector('input').max='100000';grid.append(units);
+  const unitCheck=node('label','check');const unitInput=document.createElement('input');unitInput.type='checkbox';unitInput.checked=!!p.show_unit_price;unitInput.onchange=()=>{p.show_unit_price=unitInput.checked;changed();schedulePreview();};unitCheck.append(unitInput,document.createTextNode('1개당 가격 표시'));grid.append(unitCheck);
+  const grams=field('총 중량(g)',p.total_weight_g,v=>p.total_weight_g=v?Number(v):null,{type:'number'});grams.querySelector('input').min='1';grams.querySelector('input').max='1000000';grid.append(grams);
+  const gramCheck=node('label','check');const gramInput=document.createElement('input');gramInput.type='checkbox';gramInput.checked=!!p.show_gram_price;gramInput.onchange=()=>{p.show_gram_price=gramInput.checked;changed();schedulePreview();};gramCheck.append(gramInput,document.createTextNode('100g당 가격 표시'));grid.append(gramCheck);
+  details.append(grid,node('p','hint','총 중량은 묶음 전체 기준입니다. 예: 1kg 2개 → 2000. 상품 구매 버튼은 “특가 바로가기”로 표시됩니다.'));
+  const footer=node('div','product-footer');const link=node('a','','원본 상품 열기 ↗');link.href=p.url;link.target='_blank';link.rel='noopener noreferrer';footer.append(link,button('상품 삭제',()=>{undo[activeId]={product:structuredClone(p),index};c.products.splice(index,1);changed();renderProducts();},'danger'));details.append(footer);item.append(details);root.append(item);
  });
- if(!state.products.length){const p=document.createElement('p');p.className='sub';p.textContent='등록된 고정 상품이 없습니다. 위에서 공유 문구를 붙여넣어 추가하세요.';$('products').append(p);}
- preview();
+ if(!c.products.length)root.append(node('div','empty',fixed?'아직 등록한 상품이 없습니다.\n아래 “상품 추가”에서 첫 상품을 등록하세요.':'보관 중인 상품이 없습니다.\n자동 추천은 등록 상품 없이도 동작합니다.'));
+ $('addDetails').open=!c.products.length&&fixed;
+ schedulePreview();
 }
-let previewTimer, previewVersion=0;
-function preview(force=false){
- clearTimeout(previewTimer);const version=++previewVersion;
- $('previewNote').textContent=$('fixed').checked?'저장 후 아래 순서로 적용됩니다.':'현재는 자동 추천 모드입니다. 아래 목록은 고정 모드로 전환한 후 저장하면 적용됩니다.';
- $('previewStatus').textContent='상품 가격과 미리보기를 불러오는 중…';
- previewTimer=setTimeout(async()=>{try{
-  const d=await api('/preview'+(force?'?refresh=true':''),{method:'POST',body:JSON.stringify(state)});
-  if(version!==previewVersion)return;
-  $('preview').replaceChildren();
-  for(const output of d.response.template.outputs){
-   if(output.simpleText){const notice=document.createElement('div');notice.className='preview-notice';notice.textContent=output.simpleText.text;$('preview').append(notice);}
-   if(!output.carousel)continue;
-   const row=document.createElement('div');row.className='preview-row';
-   for(const card of output.carousel.items){
-    const a=document.createElement('article');const url=card.thumbnails?.[0]?.imageUrl||card.thumbnail?.imageUrl;
-    if(url){const img=document.createElement('img');img.src=url;img.alt='';img.referrerPolicy='no-referrer';a.append(img);}
-    const c=document.createElement('div');c.className='content';const t=document.createElement('strong');t.textContent=card.title;c.append(t);
-    if(output.carousel.type==='commerceCard'){
-     const price=document.createElement('div');price.className='selling-price';price.textContent=(card.discountedPrice??card.price).toLocaleString('ko-KR')+'원';c.append(price);
-     if(card.price>card.discountedPrice){const line=document.createElement('div');line.className='discount-line';const original=document.createElement('del');original.textContent=card.price.toLocaleString('ko-KR');const rate=document.createElement('span');rate.className='rate';rate.textContent=card.discountRate+'%';line.append(original,rate);c.append(line);}
-    }
-    const description=document.createElement('p');description.className='card-description';description.textContent=card.description;c.append(description);
-    for(const button of card.buttons||[]){const b=document.createElement('div');b.className='cta';b.textContent=button.label;c.append(b);}
-    a.append(c);row.append(a);
-   }
-   $('preview').append(row);
-  }
-  const times=(d.checked_at||[]).filter(Boolean);const checked=times.length?new Date(Math.min(...times)*1000).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'}):'';
-  $('previewStatus').className='preview-status'+(d.warnings.length?' error':'');
-  $('previewStatus').textContent=d.warnings.length?d.warnings.map(w=>w.title+': '+w.message).join('\n'):(checked?'가격 확인: '+checked+' · 최대 1시간 캐시 · 새로고침으로 즉시 재조회':'노출할 상품을 추가해주세요.');
- }catch(e){if(version!==previewVersion)return;$('preview').replaceChildren();$('previewStatus').className='preview-status error';$('previewStatus').textContent='미리보기를 불러오지 못했습니다. '+e.message;}},180);
+function validate(){
+ for(const id of Object.keys(names)){const c=state.collections[id];let reason='',target='collectionLabel';
+  if(!c.label.trim())reason='버튼명을 입력해주세요.';else if(!c.message_text.trim()){reason='카카오 등록 발화를 입력해주세요.';target='collectionMessage';}
+  else if(c.mode==='fixed'&&!c.products.some(p=>p.enabled)){reason='고정 모드에는 노출할 상품이 최소 1개 필요합니다.';target='addDetails';}
+  else if(c.products.some(p=>!p.title.trim())){reason='상품명을 입력해주세요.';target='products';}
+  else if(c.products.some(p=>p.unit_count!==null&&p.unit_count!==undefined&&(!Number.isInteger(p.unit_count)||p.unit_count<2||p.unit_count>100000))){reason='묶음 수량은 2~100000 사이의 정수로 입력해주세요.';target='products';}
+  else if(c.products.some(p=>p.total_weight_g!==null&&p.total_weight_g!==undefined&&(!Number.isInteger(p.total_weight_g)||p.total_weight_g<1||p.total_weight_g>1000000))){reason='총 중량(g)은 1~1000000 사이의 정수로 입력해주세요.';target='products';}
+  if(reason){if(id!==activeId){activeId=id;loadCollection();}setView('edit');if(target.startsWith('collection'))$('buttonSettings').open=true;if(target==='addDetails')$('addDetails').open=true;$(target).scrollIntoView({block:'center'});$(target).focus?.({preventScroll:true});throw Error(names[id]+': '+reason);}
+ }
 }
-$('refreshPreview').onclick=()=>preview(true);
-function setBusy(value){busy=value;$('fields').disabled=value;$('save').disabled=value||!dirty;}
-$('add').onclick=async()=>{if(busy)return;if(!$('shareText').value.trim())return message('공유 문구를 붙여넣어주세요.',true);setBusy(true);message('상품 정보를 불러오는 중…');try{const d=await api('/parse',{method:'POST',body:JSON.stringify({text:$('shareText').value})});if(state.products.some(p=>p.url===d.product.url))throw Error('이미 등록된 공유 링크입니다.');if(state.products.length>=30)throw Error('상품은 최대 30개까지 보관할 수 있습니다.');if(state.products.filter(p=>p.enabled).length>=6)d.product.enabled=false;state.products.push(d.product);$('shareText').value='';changed();render();message(d.warning||'상품을 추가했습니다. 문구와 순서를 확인한 뒤 저장해주세요.');}catch(e){message(e.message,true);}finally{setBusy(false);}};
-for(const id of ['fixed','menuLabel','quickLabel'])$(id).addEventListener('input',()=>{sync();changed();render();});
-$('editor').onsubmit=async event=>{event.preventDefault();if(busy||!state)return;sync();setBusy(true);try{state=await api('',{method:'PUT',body:JSON.stringify(state)});dirty=false;$('saveStatus').textContent='적용 완료 · '+(state.mode==='fixed'?'고정 상품':'자동 추천');message('저장했습니다. 다음 챗봇 응답부터 적용됩니다.');render();}catch(e){message(e.message,true);}finally{setBusy(false);}};
-window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
-(async()=>{try{state=await api('');$('fixed').checked=state.mode==='fixed';$('menuLabel').value=state.menu_button_label;$('quickLabel').value=state.quick_reply_label;render();$('fields').disabled=false;$('saveStatus').textContent='현재 적용: '+(state.mode==='fixed'?'고정 상품':'자동 추천');}catch(e){message('설정을 불러오지 못했습니다. 새로고침해주세요. '+e.message,true);$('saveStatus').textContent='불러오기 실패';}})();
+function previewVisible(){return !mobile.matches||$('workspace').dataset.view==='preview';}
+function schedulePreview(force=false){
+ clearTimeout(previewTimer);previewAbort?.abort();const version=++previewVersion;
+ const fixed=active().mode==='fixed';$('previewNote').textContent=names[activeId]+' · '+(fixed?'저장 전 고정 상품 목록입니다.':'자동 추천 모드입니다. 아래 고정 상품은 현재 노출에 사용되지 않습니다.');
+ $('refreshPreview').disabled=!fixed||!active().products.some(p=>p.enabled);
+ if(!fixed){$('preview').replaceChildren(node('div','preview-notice','자동 추천 상품은 사용자와 조회 시점에 따라 달라집니다.\n직접 고른 상품을 미리 보려면 고정 상품 모드로 전환하세요.'));$('previewStatus').textContent='';return;}
+ if(!active().products.some(p=>p.enabled)){$('preview').replaceChildren(node('div','preview-notice','노출할 상품을 추가하면 여기에 미리보기가 나타납니다.'));$('previewStatus').textContent='';return;}
+ if(!previewVisible())return;
+ $('previewStatus').textContent='가격과 미리보기를 확인하는 중…';$('previewStatus').className='preview-status';
+ const id=activeId,payload=structuredClone(state);
+ // Preview only the selected draft; another unfinished collection must not block it.
+ for(const [key,c] of Object.entries(payload.collections)){c.label=c.label||names[key];c.message_text=c.message_text||names[key];if(!c.products.some(p=>p.enabled))c.mode='algorithm';}
+ previewTimer=setTimeout(async()=>{previewAbort=new AbortController();try{
+  const d=await api('/preview?collection_id='+id+(force?'&refresh=true':''),{method:'POST',body:JSON.stringify(payload),signal:previewAbort.signal});if(version!==previewVersion)return;paintPreview(d.response);
+  const times=(d.checked_at||[]).filter(Boolean);$('previewStatus').textContent=d.warnings.length?d.warnings.map(w=>w.title+': '+w.message).join('\n'):times.length?'가격 확인 '+new Date(Math.min(...times)*1000).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit'})+' · 새로고침으로 재조회':'';$('previewStatus').className='preview-status'+(d.warnings.length?' error':'');
+ }catch(e){if(version!==previewVersion||e.name==='AbortError')return;$('preview').replaceChildren(node('div','preview-notice','미리보기를 불러오지 못했습니다. 새로고침으로 다시 시도해주세요.'));$('previewStatus').textContent=e.message;$('previewStatus').className='preview-status error';}},force?0:450);
+}
+function paintPreview(response){
+ const root=$('preview');root.replaceChildren();for(const out of response.template.outputs){if(out.simpleText)root.append(node('div','preview-notice',out.simpleText.text));if(!out.carousel)continue;const row=node('div','preview-row');row.tabIndex=0;row.setAttribute('aria-label','상품 카드 · 좌우로 이동');
+  for(const card of out.carousel.items){const item=node('article','preview-card');const url=card.thumbnails?.[0]?.imageUrl||card.thumbnail?.imageUrl;if(url){const img=document.createElement('img');img.src=url;img.alt='';img.referrerPolicy='no-referrer';img.onerror=()=>img.hidden=true;item.append(img);}const content=node('div','preview-content');content.append(node('strong','',card.title));if(out.carousel.type==='commerceCard')content.append(node('div','preview-price',(card.discountedPrice??card.price).toLocaleString('ko-KR')+'원'));if(card.description)content.append(node('p','preview-description',card.description));for(const b of card.buttons||[])content.append(node('div','preview-cta',b.label));item.append(content);row.append(item);}root.append(row);
+ }
+}
+function setView(view){$('workspace').dataset.view=view;$('editView').setAttribute('aria-pressed',String(view==='edit'));$('previewView').setAttribute('aria-pressed',String(view==='preview'));if(state)schedulePreview();}
+$('pickFood').onclick=()=>choose('food');$('pickLiving').onclick=()=>choose('living');$('editView').onclick=()=>setView('edit');$('previewView').onclick=()=>setView('preview');
+for(const id of ['modeAuto','modeFixed'])$(id).onchange=()=>{active().mode=$(id).value;changed();renderProducts();};
+for(const id of ['collectionLabel','collectionMessage'])$(id).oninput=()=>{sync();changed();};
+$('shareText').oninput=()=>draftText[activeId]=$('shareText').value;
+$('undoDelete').onclick=()=>{const last=undo[activeId];if(!last)return;if(active().products.length>=30){message('30개까지 보관할 수 있습니다.',true);return;}if(last.product.enabled&&active().products.filter(p=>p.enabled).length>=6)last.product.enabled=false;active().products.splice(last.index,0,last.product);undo[activeId]=null;changed();renderProducts();};
+$('add').onclick=async()=>{if(busy)return;const text=$('shareText').value.trim();if(!text){$('shareText').focus();return message('상품 공유 문구나 링크를 붙여넣어주세요.',true);}if(active().products.length>=30)return message('상품은 30개까지 보관할 수 있습니다.',true);const c=active();setBusy(true);$('add').textContent='상품 확인 중…';try{const d=await api('/parse',{method:'POST',body:JSON.stringify({text})});if(c.products.some(p=>p.url===d.product.url))throw Error('이 기획전에 이미 등록한 상품입니다.');if(c.products.filter(p=>p.enabled).length>=6)d.product.enabled=false;c.products.push(d.product);draftText[activeId]='';$('shareText').value='';changed();renderProducts();message(d.warning||'상품을 추가했습니다. 저장하면 반영됩니다.');}catch(e){message(e.message,true);}finally{$('add').textContent='상품 불러오기';setBusy(false);}};
+$('copyPath').onclick=async()=>{const text=$('skillPath').textContent;try{await navigator.clipboard.writeText(text);message('POST 스킬 경로를 복사했습니다.');}catch{const range=document.createRange();range.selectNodeContents($('skillPath'));window.getSelection().removeAllRanges();window.getSelection().addRange(range);message('경로를 선택했습니다. 복사해서 사용해주세요.');}};
+$('refreshPreview').onclick=()=>schedulePreview(true);
+$('editor').onsubmit=async e=>{e.preventDefault();if(busy||!state)return;sync();try{validate();}catch(err){message(err.message,true);return;}setBusy(true);try{state=await api('',{method:'PUT',body:JSON.stringify(state)});saved=structuredClone(state);undo.food=null;undo.living=null;loadCollection();message('저장했습니다. 다음 챗봇 응답부터 적용됩니다.');}catch(err){message(err.message,true);}finally{setBusy(false);}};
+window.addEventListener('beforeunload',e=>{if(changedIds().length){e.preventDefault();e.returnValue='';}});mobile.addEventListener('change',()=>{if(state)schedulePreview();});
+(async()=>{try{state=await api('');saved=structuredClone(state);loadCollection();$('fields').disabled=false;}catch(e){$('saveStatus').textContent='설정을 불러오지 못했습니다.';message(e.message,true);}})();
 </script></body></html>

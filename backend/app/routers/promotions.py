@@ -17,6 +17,18 @@ logger = logging.getLogger(__name__)
 
 @router.post("/toss-shopping")
 async def get_toss_shopping_promotion(req: KakaoRequest | None = Body(default=None)):
+    # Legacy Kakao mapping now serves the living collection; no shared list is used.
+    return await _get_collection_promotion(req, "living")
+
+
+@router.post("/collections/{collection_id}")
+async def get_collection_promotion(collection_id: str, req: KakaoRequest | None = Body(default=None)):
+    if collection_id not in {"food", "living"}:
+        return JSONResponse({"detail": "지원하지 않는 기획전입니다."}, status_code=404)
+    return await _get_collection_promotion(req, collection_id)
+
+
+async def _get_collection_promotion(req: KakaoRequest | None, collection_id: str | None):
     user_id = req.userRequest.user.id if req and req.userRequest.user else None
     entry = _promotion_entry_metadata(req)
     source = entry["source"]
@@ -28,6 +40,7 @@ async def get_toss_shopping_promotion(req: KakaoRequest | None = Body(default=No
             source=source,
             properties={
                 "surface": source,
+                "collection_id": collection_id,
                 "entry_source": source,
                 "entry_button_id": entry["button_id"],
                 "entry_button_label": entry["button_label"],
@@ -38,12 +51,12 @@ async def get_toss_shopping_promotion(req: KakaoRequest | None = Body(default=No
         logger.exception("failed to record promotion entry click")
     try:
         product_pairs = await promotions.get_live_toss_products(
-            user_id, source, limit=6, request_id=request_id
+            user_id, source, limit=6, request_id=request_id, collection_id=collection_id
         )
     except Exception:
         logger.exception("failed to load live promotion products")
         product_pairs = []
-    if not product_pairs and promotion_settings.read_settings().mode == "fixed":
+    if not product_pairs and (collection_id or promotion_settings.read_settings().mode == "fixed"):
         return JSONResponse({"version": "2.0", "template": {"outputs": [
             {"simpleText": {"text": "상품을 준비 중입니다. 잠시 후 다시 확인해주세요."}}
         ]}})
@@ -75,10 +88,10 @@ async def get_toss_shopping_promotion(req: KakaoRequest | None = Body(default=No
             button_id=entry["button_id"], button_label=entry["button_label"],
             position=position, request_id=request_id,
             product_snapshot={key: product.get(key) for key in
-                              ("title", "button_label", "settings_revision", "selection_mode")},
+                              ("title", "button_label", "settings_revision", "selection_mode", "collection_id")},
         )
         click_urls.append(f"{promotions.common.SERVER_URL}/promotions/toss-shopping/click?token={token}")
-    return JSONResponse(promotions.create_toss_shopping_list_response(products, click_urls))
+    return JSONResponse(promotions.create_toss_shopping_list_response(products, click_urls, collection_id))
 
 
 def _promotion_entry_metadata(req: KakaoRequest | None) -> dict[str, str]:
@@ -92,7 +105,7 @@ def _promotion_entry_metadata(req: KakaoRequest | None) -> dict[str, str]:
     for payload in (req.action.clientExtra, req.action.extra):
         payload = payload or {}
         value = payload.get("source")
-        if value in {"menu_button", "quick_reply"}:
+        if value in {"menu_button", "quick_reply", "menu_inline_more"}:
             return {
                 "source": value,
                 "button_id": payload.get("button_id") or "unknown",
@@ -126,6 +139,7 @@ async def track_toss_shopping_click(token: str = Query(..., min_length=20)):
             taca_item_id=taca_item_id,
             properties={
                 "surface": surface,
+                "collection_id": snapshot.get("collection_id"),
                 "entry_source": _source,
                 "entry_button_id": button_id,
                 "entry_button_label": button_label,
