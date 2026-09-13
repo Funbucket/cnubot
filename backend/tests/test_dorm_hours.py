@@ -116,9 +116,10 @@ class BreakfastReplacementTest(unittest.TestCase):
         menu_data, inline_product = self._run(MENU_DATA, over=False)
 
         self.assertEqual(menu_data["breakfast"], MENU_DATA["breakfast"])
+        # 아침을 그대로 두면 상품·기획전 버튼만 남고 복구 버튼은 붙지 않는다.
         self.assertEqual(
             [button["label"] for button in inline_product["inline_product_output"]["commerceCard"]["buttons"]],
-            ["구매하러 가기"],
+            ["구매하러 가기", "먹거리 더 보기"],
         )
 
     def test_place_without_breakfast_is_untouched(self):
