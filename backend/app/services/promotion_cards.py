@@ -61,6 +61,12 @@ def create_inline_product_output(product: dict, click_url: str | None = None) ->
         "thumbnails": [{"imageUrl": product["image_url"]}],
         "buttons": [_inline_product_button(product, click_url)],
     }
+    target = promotion_settings.read_collection("food")
+    commerce_card["buttons"].append({
+        "action": "message", "label": "먹거리 더 보기", "messageText": target.message_text,
+        "extra": {"source": "menu_inline_more", "button_id": "food_inline_more",
+                  "button_label": "먹거리 더 보기", "collection_id": "food"},
+    })
     # discountRate는 discountedPrice가 있어야 노출되고, discount보다 우선 표시된다.
     if product.get("discount_rate"):
         commerce_card["discountRate"] = product["discount_rate"]
@@ -100,7 +106,8 @@ def create_toss_shopping_response(product: dict, click_url: str | None = None):
 
 
 def create_toss_shopping_list_response(
-    products: list[dict], click_urls: list[str | None] | None = None
+    products: list[dict], click_urls: list[str | None] | None = None,
+    collection_id: str | None = None,
 ):
     kakao_response = kakao_json_response.KakaoJsonResponse()
     click_urls = click_urls or [None] * len(products)
@@ -125,6 +132,10 @@ def create_toss_shopping_list_response(
                 row = [{key: value for key, value in card.items() if key != "thumbnail"} for card in row]
             kakao_response.add_output_to_response(kakao_response.create_carousel(
                 row, type=card_type))
+        if collection_id in {"food", "living"}:
+            other = "living" if collection_id == "food" else "food"
+            target = promotion_settings.read_collection(other)
+            kakao_response.add_quick_replies([kakao_response.create_quick_reply(target.label, target.message_text)])
         return kakao_response.get_response()
     cards = []
     for product, click_url in zip(products, click_urls):
@@ -162,4 +173,8 @@ def create_toss_shopping_list_response(
                 type="commerceCard",
             )
         )
+    if collection_id in {"food", "living"}:
+        other = "living" if collection_id == "food" else "food"
+        target = promotion_settings.read_collection(other)
+        kakao_response.add_quick_replies([kakao_response.create_quick_reply(target.label, target.message_text)])
     return kakao_response.get_response()

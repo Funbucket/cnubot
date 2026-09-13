@@ -107,9 +107,14 @@ async def parse_promotion(payload: ShareTextInput, _: str = Depends(require_admi
 
 @router.post("/promotion-settings/preview", dependencies=[Depends(require_editor)])
 async def preview_promotions(payload: promotion_settings.Settings, refresh: bool = False,
+                             collection_id: str = "living",
                              _: str = Depends(require_admin)):
     from app.services import promotions
-    pairs = await promotion_settings.resolved_fixed_products(payload, force=refresh)
+    collection = payload.collections.get(collection_id) if payload.collections else None
+    collection = collection or promotion_settings.read_collection(collection_id)
+    preview_settings = promotion_settings.Settings(mode=collection.mode, products=collection.products,
+                                                   revision=payload.revision)
+    pairs = await promotion_settings.resolved_fixed_products(preview_settings, force=refresh)
     return {"response": promotions.create_toss_shopping_list_response([p for _, p in pairs]),
             "warnings": [{"title": p["title"], "message": p["price_error"]}
                          for _, p in pairs if p.get("price_error")],

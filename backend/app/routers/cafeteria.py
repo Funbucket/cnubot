@@ -246,10 +246,10 @@ async def _pick_inline_product(user_id: str | None):
             taca_item_id=product.get("taca_item_id"),
             surface=promotions.INLINE_CARD_SURFACE,
             button_id="toss_promotion_menu_inline_card",
-            button_label="토스에서 보기",
+            button_label="특가 바로가기",
             position=1, request_id=request_id,
             product_snapshot={key: product.get(key) for key in
-                              ("title", "button_label", "settings_revision", "selection_mode")},
+                              ("title", "button_label", "settings_revision", "selection_mode", "collection_id")},
         )
         click_url = f"{common.SERVER_URL}/promotions/toss-shopping/click?token={token}"
     except Exception:
@@ -271,7 +271,7 @@ async def _record_promotion_button_exposures(user_id: str | None, response: dict
     def walk(value):
         if isinstance(value, dict):
             extra = value.get("extra")
-            if isinstance(extra, dict) and extra.get("source") in {"quick_reply", "menu_button"}:
+            if isinstance(extra, dict) and extra.get("source") in {"quick_reply", "menu_button", "menu_inline_more"}:
                 key = (extra.get("source", "unknown"), extra.get("button_id", "unknown"))
                 if key not in seen:
                     seen.add(key)
@@ -292,6 +292,7 @@ async def _record_promotion_button_exposures(user_id: str | None, response: dict
                     "surface": extra.get("source"),
                     "button_id": extra.get("button_id"),
                     "button_label": extra.get("button_label"),
+                    "collection_id": extra.get("collection_id"),
                 },
                 request_id=request_id,
             )

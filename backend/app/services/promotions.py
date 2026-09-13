@@ -356,21 +356,27 @@ async def get_live_toss_products(
     surface: str = "quick_reply",
     limit: int = 5,
     request_id: str | None = None,
+    collection_id: str | None = None,
 ) -> list[tuple[str, dict]]:
     settings = promotion_settings.read_settings()
-    if settings.mode == "fixed":
+    collection = promotion_settings.read_collection(collection_id) if collection_id else None
+    mode = collection.mode if collection else settings.mode
+    configured_products = collection.products if collection else settings.products
+    if mode == "fixed":
+        fixed = promotion_settings.fixed_products(promotion_settings.Settings(mode="fixed", products=configured_products, revision=settings.revision))
         try:
-            products = (await asyncio.wait_for(promotion_settings.resolved_fixed_products(settings), timeout=3.5))[:limit]
+            products = (await asyncio.wait_for(promotion_settings.resolved_fixed_products(promotion_settings.Settings(mode="fixed", products=configured_products, revision=settings.revision)), timeout=3.5))[:limit]
         except asyncio.TimeoutError:
-            products = promotion_settings.fixed_products(settings)[:limit]
+            products = fixed[:limit]
         for position, (key, product) in enumerate(products, 1):
             row, column = commerce_grid_position(position)
+            product["collection_id"] = collection_id
             TOSS_SHOPPING_PRODUCTS[key] = product
             try:
                 await recommendations.record_exposure(
                     user_id, surface, product.get("taca_item_id") or 0, product.get("category_ids") or [], product_key=key,
                     properties={"product_name": product["title"], "position": position,
-                                "row": row, "column": column,
+                                "row": row, "column": column, "collection_id": collection_id,
                                 "selection_mode": "fixed", "settings_revision": settings.revision,
                                 "product_button_label": product["button_label"]},
                     request_id=request_id,
@@ -380,6 +386,8 @@ async def get_live_toss_products(
                 logging.getLogger(__name__).exception("failed to record fixed product exposure")
         return products
     candidates = await _candidate_pool()
+    if collection_id == "food":
+        candidates = [item for item in candidates if "식품" in item.get("_category_names", [])]
     affinity = await recommendations.category_affinity(user_id)
     recent_ids = await recommendations.recent_item_ids(user_id)
     ranked_items = recommendations.rank_candidates_ordered(
@@ -420,6 +428,7 @@ async def get_live_toss_products(
                 "candidate_sources": item.get("_candidate_sources", []),
             }
             product = TOSS_SHOPPING_PRODUCTS[product_key]
+            product.update(collection_id=collection_id, selection_mode=mode, settings_revision=settings.revision)
             position = len(products) + 1
             row, column = commerce_grid_position(position)
             await recommendations.record_exposure(
@@ -433,6 +442,8 @@ async def get_live_toss_products(
                     "position": position,
                     "row": row,
                     "column": column,
+                    "collection_id": collection_id, "selection_mode": mode,
+                    "settings_revision": settings.revision,
                 },
                 request_id=request_id,
             )
@@ -519,11 +530,12 @@ def create_toss_promotion_button(
     label: str = TOSS_LIVING_MENU_BUTTON_LABEL,
 ):
     settings = promotion_settings.read_settings()
-    label = settings.menu_button_label or ("🛍️ 오늘의 추천 상품" if settings.mode == "fixed" else _rotating_label(MENU_BUTTON_LABELS))
+    collection = promotion_settings.read_collection("food")
+    label = collection.label
     return {
         "label": label,
         "action": "message",
-        "messageText": "쇼핑 특가",
+        "messageText": collection.message_text,
         "extra": {
             "source": "menu_button",
             "button_id": "toss_promotion_menu_button",
@@ -543,11 +555,12 @@ def get_product(product_key: str | None = None) -> dict:
 
 def create_toss_promotion_quick_reply(kakao_response, product: dict | None = None):
     settings = promotion_settings.read_settings()
-    label = settings.quick_reply_label or ("🛍️ 오늘의 추천 상품" if settings.mode == "fixed" else _rotating_label(QUICK_REPLY_LABELS))
+    collection = promotion_settings.read_collection("living")
+    label = collection.label
     if common.KAKAO_TOSS_PROMOTION_BLOCK_ID:
         return kakao_response.create_quick_reply(
             label=label,
-            message_text="쇼핑 특가",
+            message_text=collection.message_text,
             action="block",
             block_id=common.KAKAO_TOSS_PROMOTION_BLOCK_ID,
             extra={
@@ -558,7 +571,7 @@ def create_toss_promotion_quick_reply(kakao_response, product: dict | None = Non
         )
     return kakao_response.create_quick_reply(
         label=label,
-        message_text="쇼핑 특가",
+        message_text=collection.message_text,
         extra={
             "source": "quick_reply",
             "button_id": "toss_promotion_quick_reply",
@@ -618,6 +631,7 @@ async def record_inline_exposure(
             product.get("category_ids") or [], product_key=product_key,
             properties={
                 "product_name": product["title"],
+                "collection_id": "food",
                 "position": 1,
                 "selection_mode": product.get("selection_mode") or (
                     "fixed" if product_key.startswith("fixed_") else "algorithm"
@@ -638,38 +652,51 @@ async def get_inline_promotion_product(
     노출은 카드가 실제로 응답에 들어간 뒤에 record_inline_exposure로 따로 기록한다.
     """
     settings = promotion_settings.read_settings()
-    if settings.mode == "fixed":
-        # 관리자가 직접 고른 상품은 품질 게이트 대신 렌더 가능 여부만 확인한다.
+    collection = settings.collections["food"]
+    if collection.mode == "fixed":
+        first = next((p for p in collection.products if p.enabled), None)
+        if first is None:
+            return None
+        selected = promotion_settings.Settings(mode="fixed", products=[first], revision=settings.revision)
         try:
             products = await asyncio.wait_for(
-                promotion_settings.resolved_fixed_products(settings), timeout=3.5
+                promotion_settings.resolved_fixed_products(selected), timeout=3.5
             )
         except Exception:
-            products = promotion_settings.fixed_products(settings)
-        renderable = [(key, product) for key, product in products if _is_renderable_inline(product)]
-        if not renderable:
             return None
-        key, product = _rotate_fixed_product(
-            renderable, await recommendations.last_exposure_by_product(user_id, INLINE_CARD_SURFACE)
+        key, product = products[0]
+        if not _is_renderable_inline(product):
+            return None
+    else:
+        candidates = [item for item in await _candidate_pool()
+                      if "식품" in item.get("_category_names", []) and passes_inline_quality_gate(item)]
+        if not candidates:
+            return None
+        item = recommendations.rank_candidates(
+            candidates, await recommendations.category_affinity(user_id),
+            await recommendations.recent_item_ids(user_id), user_id, INLINE_CARD_SURFACE
         )
-        TOSS_SHOPPING_PRODUCTS[key] = product
-        return key, product
-
-    candidates = [item for item in await _candidate_pool() if passes_inline_quality_gate(item)]
-    if not candidates:
-        return None
-    affinity = await recommendations.category_affinity(user_id)
-    recent_ids = await recommendations.recent_item_ids(user_id)
-    item = recommendations.rank_candidates(
-        candidates, affinity, recent_ids, user_id, INLINE_CARD_SURFACE
-    )
-    if not item:
-        return None
-    return await get_live_toss_product(
-        user_id, INLINE_CARD_SURFACE,
-        preferred_item_id=int(item["tacaItemId"]), request_id=request_id,
-        record_exposure=False,
-    )
+        if not item:
+            return None
+        item_id = int(item["tacaItemId"])
+        detail = await toss_sharelink.detail(item_id)
+        if not detail or not passes_inline_quality_gate(detail):
+            return None
+        tree = await toss_sharelink.categories()
+        if not any("식품" in tree.get(int(cid), []) for cid in detail.get("categoryIds", [])):
+            return None
+        key = f"toss_item_{item_id}"
+        product = {
+            "title": detail["displayName"], "price": detail["displayPrice"],
+            "original_price": detail.get("originalPrice") or detail["displayPrice"],
+            "discount_rate": detail.get("discountRate") or 0,
+            "image_url": detail["thumbnailUrl"], "url": await toss_sharelink.issue_link(item_id),
+            "taca_item_id": item_id, "category_ids": detail.get("categoryIds", []),
+        }
+    product.update(collection_id="food", selection_mode=collection.mode,
+                   settings_revision=settings.revision, button_label="특가 바로가기")
+    TOSS_SHOPPING_PRODUCTS[key] = product
+    return key, product
 
 
 def create_toss_shopping_response(product: dict | None = None, click_url: str | None = None):
