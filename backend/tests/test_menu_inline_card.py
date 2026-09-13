@@ -222,6 +222,14 @@ class InlineProductOutputTest(unittest.TestCase):
 
         self.assertEqual(card["description"], "🏷️ 1개당 750원")
 
+    def test_gram_price_copy_joins_the_unit_price(self):
+        product = dict(INLINE_PRODUCT, show_unit_price=True, unit_count=2,
+                       show_gram_price=True, total_weight_g=2000)
+        card = promotions.create_inline_product_output(product)["commerceCard"]
+
+        self.assertEqual(card["description"], "🏷️ 1개당 3,750원\n⚖️ 100g당 375원")
+        self.assertLessEqual(len(card["description"]), 40)
+
     def test_stays_inside_kakao_commerce_card_limits(self):
         product = dict(
             INLINE_PRODUCT,

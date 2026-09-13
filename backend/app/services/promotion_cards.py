@@ -33,10 +33,21 @@ def unit_price_suffix(product: dict) -> str:
     return f"\n🏷️ 1개당 {round(price / count):,}원"
 
 
+def gram_price_suffix(product: dict) -> str:
+    """Return an optional per-100g price callout for fixed products."""
+    if not product.get("show_gram_price"):
+        return ""
+    grams = product.get("total_weight_g")
+    price = product.get("price")
+    if not isinstance(grams, int) or grams <= 0 or not isinstance(price, (int, float)) or price <= 0:
+        return ""
+    return f"\n⚖️ 100g당 {round(price / grams * 100):,}원"
+
+
 def fixed_product_description(product: dict) -> str:
     # commerceCard already renders original price, sale price, and discount
-    # rate above this area. The description is reserved for unit price only.
-    return unit_price_suffix(product).lstrip("\n")
+    # rate above this area. The description is reserved for unit prices only.
+    return (unit_price_suffix(product) + gram_price_suffix(product)).lstrip("\n")
 
 
 def _inline_product_button(product: dict, click_url: str | None) -> dict:

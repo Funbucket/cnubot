@@ -89,7 +89,10 @@ function renderProducts(){
   const details=document.createElement('details');details.open=openProducts[activeId].has(p.url);details.ontoggle=()=>details.open?openProducts[collectionId].add(p.url):openProducts[collectionId].delete(p.url);details.append(node('summary','','상품 정보 수정'));
   const grid=node('div','fields');grid.append(field('상품명',p.title,v=>{p.title=v;title.textContent=v;}),field('이미지 URL · 선택',p.image_url,v=>p.image_url=v,{max:2000,type:'url'}));
   const units=field('묶음 수량',p.unit_count,v=>p.unit_count=v?Number(v):null,{type:'number'});units.querySelector('input').min='2';units.querySelector('input').max='100000';grid.append(units);
-  const unitCheck=node('label','check');const unitInput=document.createElement('input');unitInput.type='checkbox';unitInput.checked=!!p.show_unit_price;unitInput.onchange=()=>{p.show_unit_price=unitInput.checked;changed();schedulePreview();};unitCheck.append(unitInput,document.createTextNode('1개당 가격 표시'));grid.append(unitCheck);details.append(grid,node('p','hint','상품 구매 버튼은 “특가 바로가기”로 표시됩니다.'));
+  const unitCheck=node('label','check');const unitInput=document.createElement('input');unitInput.type='checkbox';unitInput.checked=!!p.show_unit_price;unitInput.onchange=()=>{p.show_unit_price=unitInput.checked;changed();schedulePreview();};unitCheck.append(unitInput,document.createTextNode('1개당 가격 표시'));grid.append(unitCheck);
+  const grams=field('총 중량(g)',p.total_weight_g,v=>p.total_weight_g=v?Number(v):null,{type:'number'});grams.querySelector('input').min='1';grams.querySelector('input').max='1000000';grid.append(grams);
+  const gramCheck=node('label','check');const gramInput=document.createElement('input');gramInput.type='checkbox';gramInput.checked=!!p.show_gram_price;gramInput.onchange=()=>{p.show_gram_price=gramInput.checked;changed();schedulePreview();};gramCheck.append(gramInput,document.createTextNode('100g당 가격 표시'));grid.append(gramCheck);
+  details.append(grid,node('p','hint','총 중량은 묶음 전체 기준입니다. 예: 1kg 2개 → 2000. 상품 구매 버튼은 “특가 바로가기”로 표시됩니다.'));
   const footer=node('div','product-footer');const link=node('a','','원본 상품 열기 ↗');link.href=p.url;link.target='_blank';link.rel='noopener noreferrer';footer.append(link,button('상품 삭제',()=>{undo[activeId]={product:structuredClone(p),index};c.products.splice(index,1);changed();renderProducts();},'danger'));details.append(footer);item.append(details);root.append(item);
  });
  if(!c.products.length)root.append(node('div','empty',fixed?'아직 등록한 상품이 없습니다.\n아래 “상품 추가”에서 첫 상품을 등록하세요.':'보관 중인 상품이 없습니다.\n자동 추천은 등록 상품 없이도 동작합니다.'));
@@ -101,7 +104,9 @@ function validate(){
   if(!c.label.trim())reason='버튼명을 입력해주세요.';else if(!c.message_text.trim()){reason='카카오 등록 발화를 입력해주세요.';target='collectionMessage';}
   else if(c.mode==='fixed'&&!c.products.some(p=>p.enabled)){reason='고정 모드에는 노출할 상품이 최소 1개 필요합니다.';target='addDetails';}
   else if(c.products.some(p=>!p.title.trim())){reason='상품명을 입력해주세요.';target='products';}
-  else if(c.products.some(p=>p.unit_count!==null&&p.unit_count!==undefined&&(!Number.isInteger(p.unit_count)||p.unit_count<2||p.unit_count>100000))){reason='묶음 수량은 2~100000 사이의 정수로 입력해주세요.';target='products';}  if(reason){if(id!==activeId){activeId=id;loadCollection();}setView('edit');if(target.startsWith('collection'))$('buttonSettings').open=true;if(target==='addDetails')$('addDetails').open=true;$(target).scrollIntoView({block:'center'});$(target).focus?.({preventScroll:true});throw Error(names[id]+': '+reason);}
+  else if(c.products.some(p=>p.unit_count!==null&&p.unit_count!==undefined&&(!Number.isInteger(p.unit_count)||p.unit_count<2||p.unit_count>100000))){reason='묶음 수량은 2~100000 사이의 정수로 입력해주세요.';target='products';}
+  else if(c.products.some(p=>p.total_weight_g!==null&&p.total_weight_g!==undefined&&(!Number.isInteger(p.total_weight_g)||p.total_weight_g<1||p.total_weight_g>1000000))){reason='총 중량(g)은 1~1000000 사이의 정수로 입력해주세요.';target='products';}
+  if(reason){if(id!==activeId){activeId=id;loadCollection();}setView('edit');if(target.startsWith('collection'))$('buttonSettings').open=true;if(target==='addDetails')$('addDetails').open=true;$(target).scrollIntoView({block:'center'});$(target).focus?.({preventScroll:true});throw Error(names[id]+': '+reason);}
  }
 }
 function previewVisible(){return !mobile.matches||$('workspace').dataset.view==='preview';}

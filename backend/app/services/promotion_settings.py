@@ -41,6 +41,8 @@ class Product(BaseModel):
     enabled: bool = True
     show_unit_price: bool = False
     unit_count: int | None = Field(default=None, gt=1, le=100000)
+    show_gram_price: bool = False
+    total_weight_g: int | None = Field(default=None, gt=0, le=1000000)
     taca_item_id: int | None = Field(default=None, gt=0)
 
     _link = field_validator("url")(validate_link)
@@ -171,7 +173,9 @@ def parse_share_text(text: str) -> Product:
     lines = [line.strip() for line in text.replace(url, "").splitlines()
              if line.strip() and not any(word in line for word in ("수수료", "쉐어링크 활동"))]
     title = " ".join(lines) or "토스쇼핑 상품"
-    return Product(title=title, url=url, unit_count=infer_unit_count(title))
+    unit_count = infer_unit_count(title)
+    return Product(title=title, url=url, unit_count=unit_count,
+                   total_weight_g=infer_total_weight_g(title, unit_count))
 
 
 def infer_unit_count(title: str) -> int | None:
@@ -186,6 +190,21 @@ def infer_unit_count(title: str) -> int | None:
         return None
     count = int(matches[-1])
     return count if count > 1 else None
+
+
+def infer_total_weight_g(title: str, unit_count: int | None = None) -> int | None:
+    """Infer the total gram weight for the optional per-100g price message.
+
+    ``치킨텐더, 1kg, 2개`` becomes 2000g: the last weight in the title is the
+    weight of one package, so the bundle count multiplies it. Volumes (ml, L)
+    are ignored because a 100g callout would misread them.
+    """
+    matches = re.findall(r"(?<![\d.])(\d{1,5}(?:\.\d{1,2})?)\s*(kg|g)(?![a-z])", title.lower())
+    if not matches:
+        return None
+    amount, unit = matches[-1]
+    grams = round(float(amount) * (1000 if unit == "kg" else 1) * (unit_count or 1))
+    return grams if 0 < grams <= 1000000 else None
 
 
 def enrich_product(product: Product) -> Product:
@@ -254,12 +273,15 @@ async def market_product(product: Product, force: bool = False) -> dict:
                 raise ValueError("상품 가격을 확인하지 못했습니다.")
             original = original if isinstance(original, int) and original >= price else price
             rate = rate if isinstance(rate, (int, float)) and 0 <= rate <= 100 else round((original-price)/original*100) if original else 0
-            api_unit_count = infer_unit_count(str(item.get("displayName") or ""))
+            api_name = str(item.get("displayName") or "")
+            api_unit_count = infer_unit_count(api_name)
             metadata = {"taca_item_id": resolved.taca_item_id,
                         "price": price, "original_price": original,
                         "discount_rate": rate, "discount": original-price,
                         "is_sold_out": bool(item.get("isSoldOut")),
                         "unit_count": resolved.unit_count or api_unit_count,
+                        "total_weight_g": resolved.total_weight_g or infer_total_weight_g(
+                            api_name, resolved.unit_count or api_unit_count),
                         "category_ids": item.get("categoryIds") or [],
                         "market_image_url": item.get("thumbnailUrl") or resolved.image_url,
                         "price_checked_at": int(time.time()), "price_error": ""}
