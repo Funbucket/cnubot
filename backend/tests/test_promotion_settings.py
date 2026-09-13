@@ -62,7 +62,9 @@ class PromotionSettingsTest(unittest.TestCase):
         self.assertEqual(settings.fixed_products(read)[0][1]["button_label"], settings.FIXED_PRODUCT_BUTTON_LABEL)
         with self.assertRaises(ValueError):
             settings.save_settings(initial)
-        self.assertEqual(settings.read_settings(), saved)
+        # read_settings fills collections in for legacy files; the stored data must not change.
+        self.assertEqual(settings.read_settings().model_dump(exclude={"collections"}),
+                         saved.model_dump(exclude={"collections"}))
 
     def test_empty_fixed_and_duplicate_and_too_many_and_long_labels_rejected(self):
         for value in [{"mode": "fixed"}, {"products": [self.product(), self.product()]},
@@ -109,13 +111,19 @@ class PromotionSettingsTest(unittest.TestCase):
         self.assertEqual(len(settings.read_settings().products), 1)
 
     def test_editable_entry_buttons_and_defaults(self):
-        settings.save_settings(settings.Settings(mode="fixed", menu_button_label="하이뮨 가격 보기",
-            quick_reply_label="하이뮨 18개 확인", products=[self.product()]))
+        self.assertEqual(settings.read_collection("food").label, "자취생 먹을거 핫딜")
+        self.assertEqual(settings.read_collection("living").label, "자취생 꿀템")
+        settings.save_settings(settings.Settings(collections={
+            "food": settings.CollectionSettings(label="하이뮨 가격 보기", message_text="하이뮨 특가",
+                                                mode="fixed", products=[self.product()]),
+            "living": settings.CollectionSettings(label="하이뮨 18개 확인", message_text="자취생 꿀템")}))
         button = promotions.create_toss_promotion_button()
         reply = promotions.create_toss_promotion_quick_reply(KakaoJsonResponse())
         self.assertEqual(button["label"], "하이뮨 가격 보기")
+        self.assertEqual(button["messageText"], "하이뮨 특가")
         self.assertEqual(button["extra"]["button_label"], button["label"])
         self.assertEqual(reply["label"], "하이뮨 18개 확인")
+        self.assertEqual(reply["messageText"], "자취생 꿀템")
 
     def test_card_without_image_is_valid_text_card_and_no_fabricated_price(self):
         pairs = settings.fixed_products(settings.Settings(mode="fixed", products=[self.product()]))
@@ -158,7 +166,7 @@ class PromotionSettingsTest(unittest.TestCase):
         self.assertEqual(item["buttons"][0]["webLinkUrl"], self.product().url)
         page = self.client.get("/admin/recommendations", auth=self.auth)
         self.assertEqual(page.status_code, 200)
-        self.assertIn("저장하고 적용", page.text)
+        self.assertIn("모든 변경사항 저장", page.text)
 
     def test_preview_and_chat_use_identical_commerce_card_prices(self):
         item = self.product(taca_item_id=149101033, image_url="https://shopping.toss.im/a.jpg")
