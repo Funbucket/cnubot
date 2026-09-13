@@ -92,6 +92,14 @@ def render_insights(data):
         views = f'{g["views_per_user"]:.2f}회<small>{g["menu_views"]:,}회 / {g["menu_view_users"]:,}명</small>' if g.get('menu_view_users') else '<small>계측 전</small>'
         guardrail_rows.append(row(esc(g['day']), f'{g["active_users"]:,}', views, retention))
     guardrails = table(['날짜 (KST)', '활성 사용자', '1인당 학식 조회', '다음날 재방문'], guardrail_rows)
-    surfaces = table(['클릭 위치', '클릭 사용자', '클릭 횟수'], [row(esc({'commerce_card': '상품 카드', 'menu_button': '학식 메뉴 버튼', 'quick_reply': '퀵리플라이', 'promotion_block': '기타 프로모션'}.get(r['surface'], r['surface'])), f'{r["users"]:,}', f'{r["events"]:,}') for r in data.get('surfaces', [])])
+    surfaces = table(['클릭 위치', '클릭 사용자', '클릭 횟수'], [row(esc({'menu_inline_card': '메뉴 빈자리 상품', 'menu_inline_more': '먹거리 더 보기', 'commerce_card': '상품 카드', 'menu_button': '학식 메뉴 버튼', 'quick_reply': '퀵리플라이', 'promotion_block': '기타 프로모션'}.get(r['surface'], r['surface'])), f'{r["users"]:,}', f'{r["events"]:,}') for r in data.get('surfaces', [])])
+    collection_table = table(
+        ['기획전', '선택 모드', '노출 위치', '노출 사용자', '노출 횟수', '상품 클릭 사용자', '상품 클릭 횟수', '목록 진입 횟수'],
+        [row(esc({'food': '먹거리', 'living': '꿀템'}.get(r['collection_id'], r['collection_id'])),
+             esc({'fixed': '고정', 'algorithm': '자동 추천', 'unknown': '해당 없음'}.get(r['selection_mode'], r['selection_mode'])),
+             esc({'inline': '메뉴 빈자리', 'list': '기획전 목록', 'more': '먹거리 더 보기'}.get(r['placement'], r['placement'])),
+             f'{r["exposed_users"]:,}', f'{r["exposure_events"]:,}', f'{r["clicked_users"]:,}',
+             f'{r["click_events"]:,}', f'{r["entry_events"]:,}') for r in data.get('collections', [])])
+    surfaces += '<h3>기획전·선택 모드별 성과</h3><p>이번 배포 이후 기획전 정보가 기록된 이벤트를 집계합니다. 목록의 노출 횟수는 상품 카드별 횟수이며, 사용자 수는 각 행 안에서 중복 제거합니다. 목록 진입은 직접 발화도 포함합니다. 먹거리 더 보기의 클릭 구분은 카카오가 버튼 정보를 전달한 경우에만 가능합니다.</p>' + collection_table
     template = Template((Path(__file__).parent.parent / 'static' / 'insights.html').read_text())
     return template.substitute(period=esc(period), start=esc(start), end=esc(end), today=today.isoformat(), presets=presets, cards=''.join(cards), observations=observation_html, flows=''.join(flows), products=product_table, chart=chart, daily=daily_table, messages=messages, positions=positions, fatigue=fatigue, guardrails=guardrails, surfaces=surfaces)

@@ -23,6 +23,28 @@ async def get_promotion_insights(pool, start_date=None, end_date=None) -> dict[s
     developer_id = os.getenv("DEVELOPER_ID", "").strip()
     excluded_user_ids = [developer_id] if developer_id else []
     async with pool.acquire() as conn:
+        collection_rows = await conn.fetch(
+            """
+            SELECT COALESCE(properties->>'collection_id', 'unknown') AS collection_id,
+                   COALESCE(properties->>'selection_mode', 'unknown') AS selection_mode,
+                   CASE WHEN surface = 'menu_inline_card' THEN 'inline'
+                        WHEN COALESCE(properties->>'surface', source, surface) = 'menu_inline_more' THEN 'more'
+                        ELSE 'list' END AS placement,
+                   COUNT(DISTINCT user_id) FILTER (WHERE event_name IN ('promotion_exposure', 'promotion_entry_exposure'))::int AS exposed_users,
+                   COUNT(*) FILTER (WHERE event_name IN ('promotion_exposure', 'promotion_entry_exposure'))::int AS exposure_events,
+                   COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'commerce_card_click')::int AS clicked_users,
+                   COUNT(*) FILTER (WHERE event_name = 'commerce_card_click')::int AS click_events,
+                   COUNT(*) FILTER (WHERE event_name = 'promotion_entry_click')::int AS entry_events
+            FROM qualified_promotion_events
+            WHERE event_name IN ('promotion_exposure', 'commerce_card_click', 'promotion_entry_click', 'promotion_entry_exposure')
+              AND properties->>'collection_id' IN ('food', 'living')
+              AND ($1::date IS NULL OR created_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Seoul'))
+              AND ($2::date IS NULL OR created_at < (($2::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
+              AND (user_id IS NULL OR NOT (user_id = ANY($3::text[])))
+            GROUP BY 1, 2, 3
+            ORDER BY 1, 3, 2
+            """, start_date, end_date, excluded_user_ids,
+        )
         product_rows = await conn.fetch(
             """
             WITH normalized AS (
@@ -44,7 +66,7 @@ async def get_promotion_insights(pool, start_date=None, end_date=None) -> dict[s
                    COALESCE(MAX(properties->>'entry_button_id') FILTER (WHERE properties->>'entry_button_id' IS NOT NULL), '') AS entry_button_id,
                    COALESCE(MAX(properties->>'entry_button_label') FILTER (WHERE properties->>'entry_button_label' IS NOT NULL), '') AS entry_button_label,
                    COALESCE(string_agg(DISTINCT NULLIF(source, ''), ', ') FILTER (WHERE event_name = 'promotion_exposure'), '') AS entry_sources,
-                   COALESCE(string_agg(DISTINCT CASE WHEN event_name = 'commerce_card_click' THEN 'commerce_card' ELSE NULLIF(properties->>'surface', '') END, ', ') FILTER (WHERE event_name = ANY($1::text[])), '') AS click_surfaces
+                   COALESCE(string_agg(DISTINCT CASE WHEN event_name = 'commerce_card_click' THEN COALESCE(properties->>'surface', 'commerce_card') ELSE NULLIF(properties->>'surface', '') END, ', ') FILTER (WHERE event_name = ANY($1::text[])), '') AS click_surfaces
             FROM normalized
             GROUP BY product_key
             ORDER BY clicked_users DESC, exposed_users DESC, product_key
@@ -76,7 +98,7 @@ async def get_promotion_insights(pool, start_date=None, end_date=None) -> dict[s
             GROUP BY 1
             ORDER BY users DESC, surface
             """,
-            list(click_events), start_date, end_date, excluded_user_ids,
+            [*click_events, "promotion_entry_click"], start_date, end_date, excluded_user_ids,
         )
         entry_label_rows = await conn.fetch(
             """
@@ -293,6 +315,7 @@ async def get_promotion_insights(pool, start_date=None, end_date=None) -> dict[s
             clicked_users=entry_path["clicked_users"],
         )
     return {
+        "collections": [dict(row) for row in collection_rows],
         "paths": _summarize_paths(path_rows),
         "guardrails": _summarize_guardrails(guardrail_rows),
         "fatigue": [dict(row) for row in fatigue_rows],
