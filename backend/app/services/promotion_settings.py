@@ -148,7 +148,9 @@ def _migrate_legacy(settings: Settings) -> Settings:
 
 def read_collection(collection_id: str) -> CollectionSettings:
     settings = read_settings()
-    collection = settings.collections.get(collection_id) or _migrate_legacy(settings).collections["living"]
+    # A missing settings file skips the migration, so fall back to the defaults per id.
+    collections = settings.collections or _migrate_legacy(settings).collections
+    collection = collections.get(collection_id) or collections["living"]
     # The former shared-product quick-reply label must not leak into living.
     if collection_id == "living" and collection.message_text == "자취생 꿀템" and collection.label.startswith("💵"):
         collection = collection.model_copy(update={"label": "자취생 꿀템"})

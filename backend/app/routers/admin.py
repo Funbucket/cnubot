@@ -115,7 +115,8 @@ async def preview_promotions(payload: promotion_settings.Settings, refresh: bool
     preview_settings = promotion_settings.Settings(mode=collection.mode, products=collection.products,
                                                    revision=payload.revision)
     pairs = await promotion_settings.resolved_fixed_products(preview_settings, force=refresh)
-    return {"response": promotions.create_toss_shopping_list_response([p for _, p in pairs]),
+    return {"response": promotions.create_toss_shopping_list_response(
+                [p for _, p in pairs], collection_id=collection_id),
             "warnings": [{"title": p["title"], "message": p["price_error"]}
                          for _, p in pairs if p.get("price_error")],
             "checked_at": [p.get("price_checked_at") for _, p in pairs]}
