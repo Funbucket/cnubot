@@ -230,6 +230,56 @@ class InlineProductOutputTest(unittest.TestCase):
         self.assertEqual(card["description"], "🏷️ 1개당 3,750원\n⚖️ 100g당 375원")
         self.assertLessEqual(len(card["description"]), 40)
 
+    def test_shows_a_strong_toss_rating(self):
+        product = dict(INLINE_PRODUCT, review_score=4.8, review_count=1243)
+        card = promotions.create_inline_product_output(product)["commerceCard"]
+
+        self.assertEqual(card["description"], "⭐️ 4.8 (1,243)")
+
+    def test_spells_out_a_large_review_count(self):
+        product = dict(INLINE_PRODUCT, review_score=4.65, review_count=1234567)
+        card = promotions.create_inline_product_output(product)["commerceCard"]
+
+        self.assertEqual(card["description"], "⭐️ 4.7 (1,234,567)")
+        self.assertLessEqual(len(card["description"]), 40)
+
+    def test_a_huge_review_count_still_leaves_room_for_the_unit_price(self):
+        product = dict(INLINE_PRODUCT, review_score=4.65, review_count=1234567,
+                       show_unit_price=True, unit_count=2)
+        card = promotions.create_inline_product_output(product)["commerceCard"]
+
+        self.assertEqual(card["description"], "⭐️ 4.7 (1,234,567)\n🏷️ 1개당 3,750원")
+        self.assertLessEqual(len(card["description"]), 40)
+
+    def test_hides_a_rating_with_too_few_reviews(self):
+        # The inline slot demands more reviews than the carousel does.
+        product = dict(INLINE_PRODUCT, review_score=4.9, review_count=60)
+        card = promotions.create_inline_product_output(product)["commerceCard"]
+
+        self.assertEqual(card["description"], "")
+
+    def test_hides_a_weak_rating(self):
+        product = dict(INLINE_PRODUCT, review_score=3.2, review_count=4000)
+        card = promotions.create_inline_product_output(product)["commerceCard"]
+
+        self.assertEqual(card["description"], "")
+
+    def test_hides_a_rating_the_administrator_turned_off(self):
+        product = dict(INLINE_PRODUCT, review_score=4.8, review_count=1243,
+                       show_review=False)
+        card = promotions.create_inline_product_output(product)["commerceCard"]
+
+        self.assertEqual(card["description"], "")
+
+    def test_rating_leads_and_crowds_out_the_third_callout(self):
+        product = dict(INLINE_PRODUCT, review_score=4.8, review_count=1243,
+                       show_unit_price=True, unit_count=2,
+                       show_gram_price=True, total_weight_g=2000)
+        card = promotions.create_inline_product_output(product)["commerceCard"]
+
+        self.assertEqual(card["description"], "⭐️ 4.8 (1,243)\n🏷️ 1개당 3,750원")
+        self.assertLessEqual(len(card["description"]), 40)
+
     def test_stays_inside_kakao_commerce_card_limits(self):
         product = dict(
             INLINE_PRODUCT,

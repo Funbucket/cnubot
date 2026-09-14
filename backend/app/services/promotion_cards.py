@@ -6,6 +6,11 @@ COMMERCE_CARDS_PER_ROW = 3
 INLINE_CARD_BUTTON_LIMIT = 14
 COMMERCE_CARD_TITLE_LIMIT = 30
 COMMERCE_CARD_DESCRIPTION_LIMIT = 40
+# A weak rating reads worse than no rating at all, so keep the bar high.
+REVIEW_MIN_SCORE = 4.0
+REVIEW_MIN_COUNT = 50
+INLINE_REVIEW_MIN_COUNT = 100
+INLINE_DESCRIPTION_LINE_LIMIT = 2
 
 
 def _trim_product_title(title: str, limit: int = COMMERCE_CARD_TITLE_LIMIT) -> str:
@@ -18,8 +23,13 @@ def _trim_product_title(title: str, limit: int = COMMERCE_CARD_TITLE_LIMIT) -> s
 
 
 def inline_product_description(product: dict) -> str:
-    """Match the fixed product list: show only an enabled unit-price callout."""
-    return fixed_product_description(product)
+    """Lead with the rating: a first-time viewer weighs trust over unit prices."""
+    return _fit_callouts(
+        [review_suffix(product, INLINE_REVIEW_MIN_COUNT),
+         unit_price_suffix(product),
+         gram_price_suffix(product)],
+        max_lines=INLINE_DESCRIPTION_LINE_LIMIT,
+    )
 
 
 def unit_price_suffix(product: dict) -> str:
@@ -44,10 +54,45 @@ def gram_price_suffix(product: dict) -> str:
     return f"\n⚖️ 100g당 {round(price / grams * 100):,}원"
 
 
+def review_suffix(product: dict, min_count: int = REVIEW_MIN_COUNT) -> str:
+    """Return a Toss rating callout, but only when it is strong enough to help."""
+    if not product.get("show_review", True):
+        return ""
+    score = product.get("review_score")
+    count = product.get("review_count")
+    if isinstance(score, bool) or not isinstance(score, (int, float)):
+        return ""
+    if isinstance(count, bool) or not isinstance(count, int):
+        return ""
+    if score < REVIEW_MIN_SCORE or count < min_count:
+        return ""
+    # Spelling the count out in full costs at most 3 characters more than a
+    # 만 abbreviation, and the two-line inline budget absorbs that.
+    return f"\n⭐️ {score:.1f} ({count:,})"
+
+
+def _fit_callouts(suffixes: list[str], max_lines: int | None = None) -> str:
+    """Keep callouts in priority order, dropping the ones that blow the budget."""
+    kept: list[str] = []
+    used = 0
+    for line in (suffix.lstrip("\n") for suffix in suffixes):
+        if not line or (max_lines is not None and len(kept) >= max_lines):
+            continue
+        cost = len(line) + bool(kept)
+        if used + cost > COMMERCE_CARD_DESCRIPTION_LIMIT:
+            continue
+        kept.append(line)
+        used += cost
+    return "\n".join(kept)
+
+
 def fixed_product_description(product: dict) -> str:
     # commerceCard already renders original price, sale price, and discount
-    # rate above this area. The description is reserved for unit prices only.
-    return (unit_price_suffix(product) + gram_price_suffix(product)).lstrip("\n")
+    # rate above this area. The description is reserved for unit prices first —
+    # the carousel is a comparison surface — and then the rating if it still fits.
+    return _fit_callouts(
+        [unit_price_suffix(product), gram_price_suffix(product), review_suffix(product)]
+    )
 
 
 def _inline_product_button(product: dict, click_url: str | None) -> dict:

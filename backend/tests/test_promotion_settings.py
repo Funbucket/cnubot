@@ -213,6 +213,25 @@ class PromotionSettingsTest(unittest.TestCase):
         self.assertEqual(card["type"],"textCard")
         self.assertTrue(card["items"][0]["description"].startswith("품절"))
 
+    def test_market_product_carries_the_toss_rating(self):
+        item = self.product(taca_item_id=1)
+        async def run():
+            with patch.object(promotions.toss_sharelink, "detail", new_callable=AsyncMock,
+                              return_value={"tacaItemId":1,"displayPrice":10000,"originalPrice":20000,
+                                            "discountRate":50,"reviewScore":4.6,"reviewCount":820}):
+                resolved = await settings.market_product(item, force=True)
+                self.assertEqual(resolved["review_score"], 4.6)
+                self.assertEqual(resolved["review_count"], 820)
+        asyncio.run(run())
+
+    def test_carousel_puts_unit_prices_ahead_of_the_rating(self):
+        product = {**self.product().model_dump(),"selection_mode":"fixed","price":7500,
+                   "original_price":29900,"discount_rate":74,"discount":22400,
+                   "image_url":"https://example.com/a.jpg","show_unit_price":True,"unit_count":10,
+                   "review_score":4.6,"review_count":820}
+        card = promotions.create_toss_shopping_list_response([product])["template"]["outputs"][1]["carousel"]
+        self.assertEqual(card["items"][0]["description"], "🏷️ 1개당 750원\n⭐️ 4.6 (820)")
+
 
 if __name__ == "__main__":
     unittest.main()
