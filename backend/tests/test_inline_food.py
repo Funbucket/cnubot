@@ -12,22 +12,38 @@ class FoodInlineTests(unittest.IsolatedAsyncioTestCase):
         return s.Settings(collections={'food': s.CollectionSettings(label='먹거리', message_text='자취생 먹을거 핫딜', mode=mode, products=products),
                                       'living': s.CollectionSettings(label='꿀템', message_text='자취생 꿀템')})
 
-    async def test_fixed_only_resolves_first_food_and_does_not_record_before_placement(self):
+    async def test_fixed_rotates_through_food_and_does_not_record_before_placement(self):
         async def resolve(settings):
-            self.assertEqual([x.title for x in settings.products], ['first'])
-            return [('fixed_first', {'title': 'first', 'price': 1000, 'image_url': 'https://example.com/a', 'url': 'https://toss.im/_m/first'})]
-        with patch.object(s, 'read_settings', return_value=self.settings()), patch.object(s, 'resolved_fixed_products', side_effect=resolve), patch.object(p.recommendations, 'record_exposure', new_callable=AsyncMock) as exposure:
+            self.assertEqual([x.title for x in settings.products], ['first', 'second'])
+            return [('fixed_first', {'title': 'first', 'price': 1000, 'image_url': 'https://example.com/a', 'url': 'https://toss.im/_m/first'}), ('fixed_second', {'title': 'second', 'price': 1000, 'image_url': 'https://example.com/b', 'url': 'https://toss.im/_m/second'})]
+        with patch.object(s, 'read_settings', return_value=self.settings()), patch.object(s, 'resolved_fixed_products', side_effect=resolve), patch.object(p.recommendations, 'last_exposure_by_product', new=AsyncMock(return_value={})), patch.object(p.recommendations, 'record_exposure', new_callable=AsyncMock) as exposure:
             key, product = await p.get_inline_promotion_product('test')
             self.assertEqual((key, product['collection_id'], product['selection_mode']), ('fixed_first', 'food', 'fixed'))
             exposure.assert_not_awaited()
             with patch.object(s, 'read_collection', return_value=self.settings().collections['food']):
                 buttons = promotion_cards.create_inline_product_output(product)['commerceCard']['buttons']
                 self.assertEqual([b['label'] for b in buttons], ['특가 바로가기', '먹거리 더 보기'])
-                self.assertEqual(buttons[1]['messageText'], '자취생 먹을거 핫딜')
+            self.assertEqual(buttons[1]['messageText'], '자취생 먹을거 핫딜')
 
-    async def test_sold_out_first_does_not_rotate_to_second(self):
-        with patch.object(s, 'read_settings', return_value=self.settings()), patch.object(s, 'resolved_fixed_products', new=AsyncMock(return_value=[('first', {'price':1000, 'image_url':'x', 'is_sold_out':True})])):
-            self.assertIsNone(await p.get_inline_promotion_product('test'))
+    async def test_sold_out_first_rotates_to_next_renderable_product(self):
+        products = [('first', {'price':1000, 'image_url':'x', 'is_sold_out':True}), ('second', {'price':1000, 'image_url':'y', 'is_sold_out':False})]
+        with patch.object(s, 'read_settings', return_value=self.settings()), patch.object(s, 'resolved_fixed_products', new=AsyncMock(return_value=products)), patch.object(p.recommendations, 'last_exposure_by_product', new=AsyncMock(return_value={})), patch.object(p.recommendations, 'latest_exposure_collection', new=AsyncMock(return_value=None)):
+            key, _ = await p.get_inline_promotion_product('test')
+            self.assertEqual(key, 'second')
+
+    async def test_fixed_collections_alternate_by_priority_chain(self):
+        settings = self.settings()
+        living_product = s.Product(title='living', url='https://toss.im/_m/living')
+        settings.collections['living'] = s.CollectionSettings(
+            label='꿀템', message_text='자취생 꿀템', mode='fixed',
+            products=[living_product], next_collection_id='food'
+        )
+        with patch.object(s, 'read_settings', return_value=settings), \
+             patch.object(p.recommendations, 'latest_exposure_collection', new=AsyncMock(return_value='food')), \
+             patch.object(p.recommendations, 'last_exposure_by_product', new=AsyncMock(return_value={})), \
+             patch.object(s, 'resolved_fixed_products', new=AsyncMock(return_value=[('fixed_living', {'title':'living', 'price':1000, 'image_url':'y', 'url':'https://toss.im/_m/living'})])):
+            key, product = await p.get_inline_promotion_product('test')
+            self.assertEqual((key, product['collection_id']), ('fixed_living', 'living'))
 
     async def test_auto_filters_nonfood_before_ranking_and_rechecks_detail(self):
         food = {'tacaItemId': 1, 'displayName':'간식', 'displayPrice':1000, 'originalPrice':2000, 'discountRate':50, 'thumbnailUrl':'https://example.com/a', 'categoryIds':[1], '_category_names':['식품','간식']}

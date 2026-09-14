@@ -97,6 +97,30 @@ async def last_exposure_by_product(user_id: str | None, surface: str) -> dict[st
     return {row["product_key"]: row["last_exposed_at"] for row in rows}
 
 
+async def latest_exposure_collection(user_id: str | None, surface: str) -> str | None:
+    """Return the collection used by the user's most recent card exposure."""
+    if not user_id:
+        return None
+    try:
+        pool = get_pool()
+    except RuntimeError:
+        return None
+    row = await pool.fetchrow(
+        """
+        SELECT properties->>'collection_id' AS collection_id
+        FROM user_events
+        WHERE user_id = $1
+          AND surface = $2
+          AND event_name = 'promotion_exposure'
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        user_id,
+        surface,
+    )
+    return row["collection_id"] if row and row["collection_id"] else None
+
+
 async def latest_item_id(user_id: str | None, surface: str) -> int | None:
     if not user_id:
         return None

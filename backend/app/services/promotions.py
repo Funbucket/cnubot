@@ -631,7 +631,7 @@ async def record_inline_exposure(
             product.get("category_ids") or [], product_key=product_key,
             properties={
                 "product_name": product["title"],
-                "collection_id": "food",
+                "collection_id": product.get("collection_id") or "food",
                 "position": 1,
                 "selection_mode": product.get("selection_mode") or (
                     "fixed" if product_key.startswith("fixed_") else "algorithm"
@@ -652,24 +652,53 @@ async def get_inline_promotion_product(
     노출은 카드가 실제로 응답에 들어간 뒤에 record_inline_exposure로 따로 기록한다.
     """
     settings = promotion_settings.read_settings()
-    collection = settings.collections["food"]
+    collections = settings.collections
+    if not collections:
+        return None
+    collection_order = []
+    collection_id = "food" if "food" in collections else next(iter(collections))
+    while collection_id and collection_id not in collection_order:
+        collection_order.append(collection_id)
+        collection_id = collections[collection_id].next_collection_id
+    collection_order.extend(key for key in collections if key not in collection_order)
+    last_collection = await recommendations.latest_exposure_collection(
+        user_id, INLINE_CARD_SURFACE
+    )
+    if last_collection in collection_order:
+        start = collection_order.index(last_collection) + 1
+        collection_order = collection_order[start:] + collection_order[:start]
+    collection_id = next(
+        (key for key in collection_order if any(p.enabled for p in collections[key].products)),
+        None,
+    )
+    if not collection_id:
+        return None
+    collection = collections[collection_id]
     if collection.mode == "fixed":
-        first = next((p for p in collection.products if p.enabled), None)
-        if first is None:
+        enabled = [p for p in collection.products if p.enabled]
+        if not enabled:
             return None
-        selected = promotion_settings.Settings(mode="fixed", products=[first], revision=settings.revision)
+        selected = promotion_settings.Settings(mode="fixed", products=enabled, revision=settings.revision)
         try:
             products = await asyncio.wait_for(
                 promotion_settings.resolved_fixed_products(selected), timeout=3.5
             )
         except Exception:
             return None
-        key, product = products[0]
-        if not _is_renderable_inline(product):
+        renderable = [(key, product) for key, product in products if _is_renderable_inline(product)]
+        if not renderable:
             return None
+        last_exposed = await recommendations.last_exposure_by_product(user_id, INLINE_CARD_SURFACE)
+        key, product = _rotate_fixed_product(renderable, last_exposed)
     else:
-        candidates = [item for item in await _candidate_pool()
-                      if "식품" in item.get("_category_names", []) and passes_inline_quality_gate(item)]
+        allowed = set(collection.allowed_categories)
+        if collection_id == "food" and not allowed:
+            allowed = {"식품"}
+        candidates = [
+            item for item in await _candidate_pool()
+            if (not allowed or allowed.intersection(item.get("_category_names", [])))
+            and passes_inline_quality_gate(item)
+        ]
         if not candidates:
             return None
         item = recommendations.rank_candidates(
@@ -683,7 +712,10 @@ async def get_inline_promotion_product(
         if not detail or not passes_inline_quality_gate(detail):
             return None
         tree = await toss_sharelink.categories()
-        if not any("식품" in tree.get(int(cid), []) for cid in detail.get("categoryIds", [])):
+        if allowed and not any(
+            allowed.intersection(tree.get(int(cid), []))
+            for cid in detail.get("categoryIds", [])
+        ):
             return None
         key = f"toss_item_{item_id}"
         product = {
@@ -693,7 +725,7 @@ async def get_inline_promotion_product(
             "image_url": detail["thumbnailUrl"], "url": await toss_sharelink.issue_link(item_id),
             "taca_item_id": item_id, "category_ids": detail.get("categoryIds", []),
         }
-    product.update(collection_id="food", selection_mode=collection.mode,
+    product.update(collection_id=collection_id, selection_mode=collection.mode,
                    settings_revision=settings.revision, button_label="특가 바로가기")
     TOSS_SHOPPING_PRODUCTS[key] = product
     return key, product
