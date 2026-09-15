@@ -395,26 +395,43 @@ async def get_live_toss_products(
                 # Analytics failure must never replace the administrator's selection.
                 logging.getLogger(__name__).exception("failed to record fixed product exposure")
         return products
-    from app.services import recommendation_policy as policy
+    from app.services import recommendation_policy as policy, product_cache
     collection_id = collection_id or "living"
     candidates = await _candidate_pool(collection_id)
     tree = await toss_sharelink.categories() if candidates else {}
     candidates = [dict(item, _policy=classified) for item in candidates
                   if (classified := policy.classify(item, tree, collection_id))]
-    affinity = await recommendations.category_affinity(user_id)
-    recent_ids = await recommendations.recent_item_ids(user_id)
+    affinity, recent_ids = await asyncio.gather(
+        recommendations.category_affinity(user_id), recommendations.recent_item_ids(user_id))
     products: list[tuple[str, dict]] = []
     selected = []
     attempts = 0
+    prefetched = {}
     while candidates and len(products) < limit and attempts < 24:
         item = policy.choose(candidates, selected, affinity, recent_ids, limit)
         if not item:
             break
+        if int(item["tacaItemId"]) not in prefetched:
+            # Speculate along the same diversity policy, then revalidate each
+            # selected detail below. Failed products still trigger replenishment.
+            batch, planned = [], list(selected)
+            remaining = list(candidates)
+            while remaining and len(batch) < min(4, 24 - attempts):
+                candidate = policy.choose(remaining, planned, affinity, recent_ids, limit)
+                if not candidate:
+                    break
+                batch.append(int(candidate["tacaItemId"]))
+                planned.append(candidate)
+                remaining = [x for x in remaining if x["tacaItemId"] != candidate["tacaItemId"]]
+            results = await asyncio.gather(*(product_cache.detail(cid) for cid in batch), return_exceptions=True)
+            prefetched.update(zip(batch, results))
         candidates = [x for x in candidates if x["tacaItemId"] != item["tacaItemId"]]
         attempts += 1
         try:
             item_id = int(item["tacaItemId"])
-            detail = await asyncio.wait_for(toss_sharelink.detail(item_id), timeout=2)
+            detail = prefetched[item_id]
+            if isinstance(detail, BaseException):
+                continue
             if not detail or detail.get("isSoldOut") or not detail.get("displayPrice") or not detail.get("thumbnailUrl"):
                 continue
             source = {**item, **detail}
@@ -425,7 +442,7 @@ async def get_live_toss_products(
             checked = policy.choose([source], selected, affinity, recent_ids, limit)
             if not checked:
                 continue
-            link = await asyncio.wait_for(toss_sharelink.issue_link(item_id), timeout=2)
+            link = await product_cache.link(item_id)
             category_ids = source.get("categoryIds") or item.get("categoryIds", [])
             try:
                 category_tree = await toss_sharelink.categories()
