@@ -232,6 +232,19 @@ async def _annotate_candidate_categories(candidates: list[dict]) -> list[dict]:
 
 
 async def _candidate_pool(collection_id: str | None = None) -> list[dict]:
+    from app.services import product_cache
+    async def fetch():
+        result = await _fetch_candidate_pool(collection_id)
+        if not result:
+            raise toss_sharelink.TossSharelinkError("EMPTY_CANDIDATE_POOL")
+        return result
+    try:
+        return await product_cache.candidates.get(collection_id, fetch)
+    except toss_sharelink.TossSharelinkError:
+        return []
+
+
+async def _fetch_candidate_pool(collection_id: str | None = None) -> list[dict]:
     """Merge cached Toss sources into one deduplicated recommendation pool."""
     try:
         category_tree = await toss_sharelink.categories()

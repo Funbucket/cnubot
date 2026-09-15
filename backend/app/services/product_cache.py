@@ -43,6 +43,7 @@ class AsyncCache:
 
 
 details = AsyncCache()
+candidates = AsyncCache(capacity=8)
 links = AsyncCache(ttl=3600, max_age=3600)
 
 
