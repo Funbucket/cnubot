@@ -94,53 +94,43 @@ async def init_database() -> None:
             CREATE INDEX IF NOT EXISTS idx_user_events_request_time
                 ON user_events(request_id, created_at DESC);
 
+            -- 사용자별로 각 단계가 처음 성립한 시각. "직전 단계가 앞에 있었나"는
+            -- 곧 "그 단계의 첫 성립 시각 이후인가"와 같아서, 단계마다 EXISTS를
+            -- 중첩하는 대신 이 시각들과 비교하면 된다.
+            CREATE OR REPLACE VIEW user_promotion_stage_times AS
+            SELECT s1.user_id, s1.entry_exposure_at, s2.entry_click_at, s3.exposure_at
+            FROM (
+                SELECT user_id, MIN(created_at) AS entry_exposure_at
+                FROM user_events
+                WHERE user_id IS NOT NULL AND event_name = 'promotion_entry_exposure'
+                GROUP BY user_id
+            ) s1
+            LEFT JOIN LATERAL (
+                SELECT MIN(created_at) AS entry_click_at FROM user_events e
+                WHERE e.user_id = s1.user_id AND e.event_name = 'promotion_entry_click'
+                  AND e.created_at >= s1.entry_exposure_at
+            ) s2 ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT MIN(created_at) AS exposure_at FROM user_events e
+                WHERE e.user_id = s1.user_id AND e.event_name = 'promotion_exposure'
+                  AND e.created_at >= s2.entry_click_at
+            ) s3 ON TRUE;
+
             CREATE OR REPLACE VIEW qualified_promotion_events AS
             SELECT e.*,
                    CASE
                        WHEN e.event_name = 'promotion_entry_exposure' THEN 1
                        WHEN e.event_name = 'promotion_entry_click'
-                            AND EXISTS (
-                                SELECT 1 FROM user_events p
-                                WHERE p.user_id = e.user_id
-                                  AND p.event_name = 'promotion_entry_exposure'
-                                  AND p.created_at <= e.created_at
-                            ) THEN 2
+                            AND e.created_at >= q.entry_exposure_at THEN 2
                        WHEN e.event_name = 'promotion_exposure'
-                            AND EXISTS (
-                                SELECT 1 FROM user_events c
-                                WHERE c.user_id = e.user_id
-                                  AND c.event_name = 'promotion_entry_click'
-                                  AND c.created_at <= e.created_at
-                                  AND EXISTS (
-                                      SELECT 1 FROM user_events p
-                                      WHERE p.user_id = c.user_id
-                                        AND p.event_name = 'promotion_entry_exposure'
-                                        AND p.created_at <= c.created_at
-                                  )
-                            ) THEN 3
+                            AND e.created_at >= q.entry_click_at THEN 3
                        WHEN e.event_name IN ('promotion_click', 'promotion_button_click',
                                              'promotion_quick_reply_click',
                                              'promotion_block_click', 'commerce_card_click')
-                            AND EXISTS (
-                                SELECT 1 FROM user_events x
-                                WHERE x.user_id = e.user_id
-                                  AND x.event_name = 'promotion_exposure'
-                                  AND x.created_at <= e.created_at
-                                  AND EXISTS (
-                                      SELECT 1 FROM user_events c
-                                      WHERE c.user_id = x.user_id
-                                        AND c.event_name = 'promotion_entry_click'
-                                        AND c.created_at <= x.created_at
-                                        AND EXISTS (
-                                            SELECT 1 FROM user_events p
-                                            WHERE p.user_id = c.user_id
-                                              AND p.event_name = 'promotion_entry_exposure'
-                                              AND p.created_at <= c.created_at
-                                        )
-                                  )
-                            ) THEN 4
+                            AND e.created_at >= q.exposure_at THEN 4
                    END AS funnel_stage
-            FROM user_events e;
+            FROM user_events e
+            LEFT JOIN user_promotion_stage_times q ON q.user_id = e.user_id;
 
             CREATE TABLE IF NOT EXISTS experiment_variants (
                 id BIGSERIAL PRIMARY KEY,

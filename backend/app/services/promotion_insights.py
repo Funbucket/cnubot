@@ -4,11 +4,15 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import Any
 
+# 진입형은 단계 순서를 지킨 이벤트만 센다. 노출보다 먼저 누른 버튼 클릭이 섞이면
+# 퍼널이 단계마다 늘었다 줄었다 한다. 인라인형에는 진입 단계가 없어 funnel_stage가
+# 항상 NULL이므로, 같은 조건으로 거르면 인라인 집계가 통째로 사라진다.
 _PATH_EVENTS_CTE = """
                 SELECT user_id, event_name, created_at,
                        CASE WHEN surface = 'menu_inline_card' THEN 'inline' ELSE 'entry' END AS path
                 FROM qualified_promotion_events
-                  WHERE ($2::date IS NULL OR created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
+                  WHERE (surface = 'menu_inline_card' OR funnel_stage IS NOT NULL)
+                  AND ($2::date IS NULL OR created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
                   AND ($3::date IS NULL OR created_at < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
                   AND (user_id IS NULL OR NOT (user_id = ANY($4::text[])))
 """
