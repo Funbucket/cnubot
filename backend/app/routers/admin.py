@@ -122,6 +122,21 @@ async def preview_promotions(payload: promotion_settings.Settings, refresh: bool
             "checked_at": [p.get("price_checked_at") for _, p in pairs]}
 
 
+@router.get("/promotion-settings/diagnostic")
+async def recommendation_diagnostic(collection_id: str = "food", _: str = Depends(require_admin)):
+    from app.services import promotions
+    from fastapi.responses import JSONResponse
+    if collection_id not in {"food", "living"}:
+        raise HTTPException(status_code=400, detail="지원하지 않는 기획전입니다.")
+    pairs = await promotions.get_live_toss_products(
+        collection_id=collection_id, limit=6, record_exposure=False, force_algorithm=True)
+    return JSONResponse({
+        "response": promotions.create_toss_shopping_list_response([p for _, p in pairs], collection_id=collection_id),
+        "diagnostics": [{"title": p["title"], **p["recommendation_diagnostic"]} for _, p in pairs],
+        "note": "클릭 이력이 없는 사용자 기준입니다. 진단 조회는 노출 통계에 기록되지 않습니다.",
+    }, headers={"Cache-Control": "no-store"})
+
+
 @router.get("/insight", response_class=HTMLResponse, include_in_schema=False)
 @router.get("/insights", response_class=HTMLResponse)
 async def insights(

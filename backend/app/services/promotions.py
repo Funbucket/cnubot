@@ -231,7 +231,7 @@ async def _annotate_candidate_categories(candidates: list[dict]) -> list[dict]:
     return annotated
 
 
-async def _candidate_pool() -> list[dict]:
+async def _candidate_pool(collection_id: str | None = None) -> list[dict]:
     """Merge cached Toss sources into one deduplicated recommendation pool."""
     try:
         category_tree = await toss_sharelink.categories()
@@ -251,9 +251,16 @@ async def _candidate_pool() -> list[dict]:
         if matches:
             category_ids.append(matches[0][0])
 
+    if collection_id:
+        from app.services.recommendation_policy import supplement_categories
+        category_ids = supplement_categories(category_tree, collection_id)
+
+    semaphore = asyncio.Semaphore(4)
+
     async def safe_call(factory, *args):
         try:
-            return await factory(*args)
+            async with semaphore:
+                return await asyncio.wait_for(factory(*args), timeout=3)
         except Exception:
             return []
 
@@ -358,10 +365,12 @@ async def get_live_toss_products(
     limit: int = 5,
     request_id: str | None = None,
     collection_id: str | None = None,
+    record_exposure: bool = True,
+    force_algorithm: bool = False,
 ) -> list[tuple[str, dict]]:
     settings = promotion_settings.read_settings()
     collection = promotion_settings.read_collection(collection_id) if collection_id else None
-    mode = collection.mode if collection else settings.mode
+    mode = "algorithm" if force_algorithm else collection.mode if collection else settings.mode
     configured_products = collection.products if collection else settings.products
     if mode == "fixed":
         fixed = promotion_settings.fixed_products(promotion_settings.Settings(mode="fixed", products=configured_products, revision=settings.revision))
@@ -386,21 +395,37 @@ async def get_live_toss_products(
                 # Analytics failure must never replace the administrator's selection.
                 logging.getLogger(__name__).exception("failed to record fixed product exposure")
         return products
-    candidates = await _candidate_pool()
-    if collection_id == "food":
-        candidates = [item for item in candidates if "식품" in item.get("_category_names", [])]
+    from app.services import recommendation_policy as policy
+    collection_id = collection_id or "living"
+    candidates = await _candidate_pool(collection_id)
+    tree = await toss_sharelink.categories() if candidates else {}
+    candidates = [dict(item, _policy=classified) for item in candidates
+                  if (classified := policy.classify(item, tree, collection_id))]
     affinity = await recommendations.category_affinity(user_id)
     recent_ids = await recommendations.recent_item_ids(user_id)
-    ranked_items = recommendations.rank_candidates_ordered(
-        candidates, affinity, recent_ids, user_id, surface, limit
-    )
     products: list[tuple[str, dict]] = []
-    for item in ranked_items:
+    selected = []
+    attempts = 0
+    while candidates and len(products) < limit and attempts < 24:
+        item = policy.choose(candidates, selected, affinity, recent_ids, limit)
+        if not item:
+            break
+        candidates = [x for x in candidates if x["tacaItemId"] != item["tacaItemId"]]
+        attempts += 1
         try:
             item_id = int(item["tacaItemId"])
-            detail = await toss_sharelink.detail(item_id)
-            link = await toss_sharelink.issue_link(item_id)
-            source = detail or item
+            detail = await asyncio.wait_for(toss_sharelink.detail(item_id), timeout=2)
+            if not detail or detail.get("isSoldOut") or not detail.get("displayPrice") or not detail.get("thumbnailUrl"):
+                continue
+            source = {**item, **detail}
+            classified = policy.classify(source, tree, collection_id)
+            if not classified or recommendations._is_student_excluded(dict(source, _category_names=[n for p in classified["category_paths"] for n in p])):
+                continue
+            source["_policy"] = classified
+            checked = policy.choose([source], selected, affinity, recent_ids, limit)
+            if not checked:
+                continue
+            link = await asyncio.wait_for(toss_sharelink.issue_link(item_id), timeout=2)
             category_ids = source.get("categoryIds") or item.get("categoryIds", [])
             try:
                 category_tree = await toss_sharelink.categories()
@@ -429,29 +454,28 @@ async def get_live_toss_products(
                 "category_ids": category_ids,
                 "category_names": category_names,
                 "candidate_sources": item.get("_candidate_sources", []),
+                "recommendation_diagnostic": {**checked["_decision"], "reason": item["_decision"]["reason"]},
             }
             product = TOSS_SHOPPING_PRODUCTS[product_key]
             product.update(collection_id=collection_id, selection_mode=mode, settings_revision=settings.revision)
             position = len(products) + 1
             row, column = commerce_grid_position(position)
-            await recommendations.record_exposure(
-                user_id,
-                surface,
-                item_id,
-                category_ids,
-                product_key=product_key,
-                properties={
-                    "product_name": product["title"],
-                    "position": position,
-                    "row": row,
-                    "column": column,
-                    "collection_id": collection_id, "selection_mode": mode,
-                    "settings_revision": settings.revision,
-                },
-                request_id=request_id,
-            )
+            if record_exposure:
+                try:
+                    await recommendations.record_exposure(
+                        user_id, surface, item_id, category_ids, product_key=product_key,
+                        properties={
+                            "product_name": product["title"], "position": position,
+                            "row": row, "column": column, "collection_id": collection_id,
+                            "selection_mode": mode, "settings_revision": settings.revision,
+                            "recommendation_diagnostic": product["recommendation_diagnostic"],
+                        }, request_id=request_id,
+                    )
+                except Exception:
+                    logging.getLogger(__name__).exception("failed to record algorithm product exposure")
             products.append((product_key, product))
-        except (KeyError, TypeError, ValueError, toss_sharelink.TossSharelinkError):
+            selected.append(checked)
+        except (KeyError, TypeError, ValueError, asyncio.TimeoutError, toss_sharelink.TossSharelinkError):
             continue
     return products
 

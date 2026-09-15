@@ -74,7 +74,7 @@ function field(label,value,fn,{type='text',max=200}={}){const l=node('label','fi
 function move(index,delta){const list=active().products;[list[index],list[index+delta]]=[list[index+delta],list[index]];changed();renderProducts();document.querySelector('[data-product-index="'+(index+delta)+'"] .move-actions button')?.focus({preventScroll:true});}
 function renderProducts(){
  const collectionId=activeId,c=active(),fixed=c.mode==='fixed',count=c.products.filter(p=>p.enabled).length;
- $('modeBadge').textContent=fixed?'고정 상품':'자동 추천';$('modeHelp').textContent=fixed?'아래에서 노출한 상품을 지정한 순서대로 보여줍니다.':(activeId==='food'?'식품 카테고리 안에서 인기 상품과 이용 이력을 바탕으로 추천합니다.':'인기 상품과 이용 이력을 바탕으로 여러 카테고리에서 추천합니다.');
+ $('modeBadge').textContent=fixed?'고정 상품':'자동 추천';$('modeHelp').textContent=fixed?'아래에서 노출한 상품을 지정한 순서대로 보여줍니다.':(activeId==='food'?'식품 안에서 생수·간식·간편식 등 서로 다른 품목을 추천합니다.':'식품을 제외한 생활·주방·소형 가전/디지털·문구·뷰티/위생 상품을 추천합니다.');
  $('inlineNote').hidden=activeId!=='food';$('inlineNote').textContent=fixed?'메뉴 빈자리에는 첫 번째 노출 상품이 나옵니다. 품절이거나 가격·이미지를 확인할 수 없으면 생략합니다.':'메뉴 빈자리에는 먹거리 추천 중 가격·할인·수량 조건을 통과한 상품 1개가 나옵니다.';
  $('productsHeading').textContent=fixed?'고정 상품·노출 순서':'보관 중인 고정 상품';$('productCount').textContent=count+'/6개 노출 · 총 '+c.products.length+'개';
  $('listHint').textContent=fixed?'위·아래 버튼으로 순서를 바꿀 수 있습니다. 상품을 펼치면 상세 정보를 수정할 수 있습니다.':'자동 추천에는 아래 상품이 사용되지 않습니다. 고정 상품 모드로 바꾸면 등록한 목록을 사용합니다.';
@@ -114,8 +114,16 @@ function previewVisible(){return !mobile.matches||$('workspace').dataset.view===
 function schedulePreview(force=false){
  clearTimeout(previewTimer);previewAbort?.abort();const version=++previewVersion;
  const fixed=active().mode==='fixed';$('previewNote').textContent=names[activeId]+' · '+(fixed?'저장 전 고정 상품 목록입니다.':'자동 추천 모드입니다. 아래 고정 상품은 현재 노출에 사용되지 않습니다.');
- $('refreshPreview').disabled=!fixed||!active().products.some(p=>p.enabled);
- if(!fixed){$('preview').replaceChildren(node('div','preview-notice','자동 추천 상품은 사용자와 조회 시점에 따라 달라집니다.\n직접 고른 상품을 미리 보려면 고정 상품 모드로 전환하세요.'));$('previewStatus').textContent='';return;}
+ $('refreshPreview').disabled=fixed&&!active().products.some(p=>p.enabled);
+ if(!fixed){
+  $('previewNote').textContent=names[activeId]+' · 자동 추천 진단 (클릭 이력이 없는 사용자 기준)';
+  $('preview').replaceChildren(node('div','preview-notice','새로고침을 누르면 현재 추천 상품과 선정 이유를 확인합니다.'));$('previewStatus').textContent='';
+  if(force){const id=activeId;previewAbort=new AbortController();$('previewStatus').textContent='추천 후보와 상품 상태를 확인하는 중…';
+   api('/diagnostic?collection_id='+id,{signal:previewAbort.signal}).then(d=>{if(version!==previewVersion)return;paintPreview(d.response);$('previewStatus').textContent=d.note;
+    for(const p of d.diagnostics){const box=node('div','preview-notice');box.append(node('strong','',p.title),node('p','hint',p.group+' / '+p.family),node('p','hint',p.category_paths.map(x=>x.join(' > ')).join('\n')),node('p','hint',p.reason+' · 점수 '+p.score+(p.group_limit===3?' · 같은 그룹 최대 3개로 완화':'')));$('preview').append(box);}
+   }).catch(e=>{if(version!==previewVersion||e.name==='AbortError')return;$('previewStatus').textContent=e.message;});
+  }return;
+ }
  if(!active().products.some(p=>p.enabled)){$('preview').replaceChildren(node('div','preview-notice','노출할 상품을 추가하면 여기에 미리보기가 나타납니다.'));$('previewStatus').textContent='';return;}
  if(!previewVisible())return;
  $('previewStatus').textContent='가격과 미리보기를 확인하는 중…';$('previewStatus').className='preview-status';
