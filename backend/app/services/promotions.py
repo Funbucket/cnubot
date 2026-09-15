@@ -16,10 +16,9 @@ from app.services import recommendations
 from app.services import promotion_settings, promotion_cards
 from app.services.promotion_cards import (
     _trim_product_title,
-    inline_product_description,
+    product_description,
     unit_price_suffix,
-    fixed_product_description,
-    _inline_product_button,
+    product_link_button,
     create_inline_product_output,
     create_toss_shopping_list_response,
     COMMERCE_CARDS_PER_ROW, INLINE_CARD_BUTTON_LIMIT,
@@ -557,10 +556,13 @@ def get_product(product_key: str | None = None) -> dict:
     return TOSS_SHOPPING_PRODUCTS.get(product_key, TOSS_SHOPPING_PROMOTION)
 
 
-def create_toss_promotion_quick_reply(kakao_response, product: dict | None = None):
+def create_toss_promotion_quick_reply(kakao_response, product: dict | None = None,
+                                      collection_id: str = "living"):
     settings = promotion_settings.read_settings()
-    collection = promotion_settings.read_collection("living")
+    collection = promotion_settings.read_collection(collection_id)
     label = collection.label
+    # living은 기존 이벤트 이름을 유지하고, 나머지 기획전만 뒤에 id를 붙여 구분한다.
+    button_id = "toss_promotion_quick_reply" + ("" if collection_id == "living" else f"_{collection_id}")
     if common.KAKAO_TOSS_PROMOTION_BLOCK_ID:
         return kakao_response.create_quick_reply(
             label=label,
@@ -569,7 +571,7 @@ def create_toss_promotion_quick_reply(kakao_response, product: dict | None = Non
             block_id=common.KAKAO_TOSS_PROMOTION_BLOCK_ID,
             extra={
                 "source": "quick_reply",
-                "button_id": "toss_promotion_quick_reply",
+                "button_id": button_id,
                 "button_label": label,
             },
         )
@@ -578,7 +580,7 @@ def create_toss_promotion_quick_reply(kakao_response, product: dict | None = Non
         message_text=collection.message_text,
         extra={
             "source": "quick_reply",
-            "button_id": "toss_promotion_quick_reply",
+            "button_id": button_id,
             "button_label": label,
         },
     )
