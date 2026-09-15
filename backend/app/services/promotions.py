@@ -323,7 +323,7 @@ async def get_live_toss_product(
     product_key = f"toss_item_{item_id}"
     TOSS_SHOPPING_PRODUCTS[product_key] = {
         "title": source.get("displayName") or item.get("displayName", "토스쇼핑 상품"),
-        "button_label": promotion_label(source.get("displayName") or item.get("displayName", ""), category_names),
+        "button_label": promotion_settings.FIXED_PRODUCT_BUTTON_LABEL,
         "quick_reply_label": promotion_label(source.get("displayName") or item.get("displayName", ""), category_names),
         "description": "토스쇼핑 인기 상품",
         "original_price": source.get("originalPrice") or item.get("originalPrice", 0),
@@ -414,7 +414,7 @@ async def get_live_toss_products(
             product_key = f"toss_item_{item_id}"
             TOSS_SHOPPING_PRODUCTS[product_key] = {
                 "title": source.get("displayName") or item.get("displayName", "토스쇼핑 상품"),
-                "button_label": promotion_label(source.get("displayName") or item.get("displayName", ""), category_names),
+                "button_label": promotion_settings.FIXED_PRODUCT_BUTTON_LABEL,
                 "quick_reply_label": promotion_label(source.get("displayName") or item.get("displayName", ""), category_names),
                 "description": "토스쇼핑 인기 상품",
                 "original_price": source.get("originalPrice") or item.get("originalPrice", 0),
