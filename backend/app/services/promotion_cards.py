@@ -11,6 +11,12 @@ REVIEW_MIN_SCORE = 4.0
 REVIEW_MIN_COUNT = 50
 INLINE_REVIEW_MIN_COUNT = 100
 INLINE_DESCRIPTION_LINE_LIMIT = 2
+# 자동 선정 응답의 고지. 고정 상품은 promotion_settings.FIXED_PROMOTION_INTRO를 쓴다.
+ALGORITHM_PROMOTION_INTRO = (
+    "츠누봇이 토스와 준비한 특가예요 🛍️\n"
+    "• 이 링크를 통해서만 할인 혜택을 받을 수 있어요.\n"
+    "• 구매 수수료는 챗봇 서버 운영비로 사용됩니다."
+)
 
 
 def _trim_product_title(title: str, limit: int = COMMERCE_CARD_TITLE_LIMIT) -> str:
@@ -22,13 +28,20 @@ def _trim_product_title(title: str, limit: int = COMMERCE_CARD_TITLE_LIMIT) -> s
     return (head[:boundary] if boundary > limit // 2 else head).rstrip(" ,") + "…"
 
 
-def inline_product_description(product: dict) -> str:
-    """Lead with the rating: a first-time viewer weighs trust over unit prices."""
+def product_description(product: dict, *, review_min_count: int = REVIEW_MIN_COUNT,
+                        max_lines: int | None = None) -> str:
+    """Build the description for any product card, in one fixed callout order.
+
+    commerceCard already renders original price, sale price, and discount rate
+    above this area, so the description leads with unit prices — every product
+    surface is a comparison surface — and shows the rating if it still fits.
+    Surfaces only vary the budget (``max_lines``) and how many reviews earn a
+    rating (``review_min_count``); they must not reorder the callouts.
+    """
     return _fit_callouts(
-        [review_suffix(product, INLINE_REVIEW_MIN_COUNT),
-         unit_price_suffix(product),
-         gram_price_suffix(product)],
-        max_lines=INLINE_DESCRIPTION_LINE_LIMIT,
+        [unit_price_suffix(product), gram_price_suffix(product),
+         review_suffix(product, review_min_count)],
+        max_lines=max_lines,
     )
 
 
@@ -86,79 +99,86 @@ def _fit_callouts(suffixes: list[str], max_lines: int | None = None) -> str:
     return "\n".join(kept)
 
 
-def fixed_product_description(product: dict) -> str:
-    # commerceCard already renders original price, sale price, and discount
-    # rate above this area. The description is reserved for unit prices first —
-    # the carousel is a comparison surface — and then the rating if it still fits.
-    return _fit_callouts(
-        [unit_price_suffix(product), gram_price_suffix(product), review_suffix(product)]
-    )
-
-
-def _inline_product_button(product: dict, click_url: str | None) -> dict:
-    label = (product.get("button_label") or "구매하러 가기").removesuffix(" · 제휴")
+def product_link_button(product: dict, click_url: str | None, *, label_limit: int | None = None,
+                        keep_affiliate_suffix: bool = False) -> dict:
+    """The single 'go buy' webLink button shared by every product card."""
+    label = product.get("button_label") or "구매하러 가기"
+    if not keep_affiliate_suffix:
+        label = label.removesuffix(" · 제휴")
     return {
         "action": "webLink",
-        "label": label[:INLINE_CARD_BUTTON_LIMIT],
+        "label": label[:label_limit] if label_limit else label,
         "webLinkUrl": click_url or product["url"],
     }
 
 
-def create_inline_product_output(product: dict, click_url: str | None = None) -> dict:
-    """Build the commerceCard output that takes an unused meal slot."""
+def commerce_card(product: dict, click_url: str | None, description: str, title: str) -> dict:
+    """The commerceCard fields every product carousel shares.
+
+    Callers add the discount fields themselves: the surfaces disagree on when a
+    discount is worth rendering, and only the price block differs between them.
+    """
     price = product.get("price") or 0
-    original_price = product.get("original_price") or price
-    commerce_card = {
-        "title": _trim_product_title(product["title"]),
-        "description": inline_product_description(product)[:COMMERCE_CARD_DESCRIPTION_LIMIT],
-        "price": original_price,
+    return {
+        "title": title,
+        "description": description,
+        "price": product.get("original_price") or price,
         "currency": "won",
         "discountedPrice": price,
         "thumbnails": [{"imageUrl": product["image_url"]}],
-        "buttons": [_inline_product_button(product, click_url)],
+        "buttons": [product_link_button(product, click_url)],
     }
+
+
+def add_collection_quick_reply(kakao_response, collection_id: str | None) -> None:
+    """Cross-link the sibling collection, the one quick reply these lists share."""
+    if collection_id not in {"food", "living"}:
+        return
+    target = promotion_settings.read_collection("living" if collection_id == "food" else "food")
+    kakao_response.add_quick_replies([kakao_response.create_quick_reply(target.label, target.message_text)])
+
+
+def create_inline_product_output(product: dict, click_url: str | None = None) -> dict:
+    """Build the commerceCard output that takes an unused meal slot."""
+    card = commerce_card(
+        product, click_url,
+        description=product_description(
+            product, review_min_count=INLINE_REVIEW_MIN_COUNT,
+            max_lines=INLINE_DESCRIPTION_LINE_LIMIT)[:COMMERCE_CARD_DESCRIPTION_LIMIT],
+        title=_trim_product_title(product["title"]),
+    )
+    card["buttons"] = [product_link_button(product, click_url, label_limit=INLINE_CARD_BUTTON_LIMIT)]
     target = promotion_settings.read_collection("food")
-    commerce_card["buttons"].append({
+    card["buttons"].append({
         "action": "message", "label": "먹거리 더 보기", "messageText": target.message_text,
         "extra": {"source": "menu_inline_more", "button_id": "food_inline_more",
                   "button_label": "먹거리 더 보기", "collection_id": "food"},
     })
     # discountRate는 discountedPrice가 있어야 노출되고, discount보다 우선 표시된다.
     if product.get("discount_rate"):
-        commerce_card["discountRate"] = product["discount_rate"]
-    elif original_price > price:
-        commerce_card["discount"] = original_price - price
-    return {"commerceCard": commerce_card}
+        card["discountRate"] = product["discount_rate"]
+    elif card["price"] > card["discountedPrice"]:
+        card["discount"] = card["price"] - card["discountedPrice"]
+    return {"commerceCard": card}
+
+
+def _algorithm_price_line(product: dict) -> str:
+    return f"{product['discount_rate']}% 할인 · 최대할인가 {product['price']:,}원"
+
+
+def _algorithm_commerce_card(product: dict, click_url: str | None, description: str) -> dict:
+    """An algorithm-picked card always knows its discount, so always render it."""
+    card = commerce_card(product, click_url, description=description, title=product["title"])
+    card["discount"] = product["discount"]
+    card["discountRate"] = product["discount_rate"]
+    return card
 
 
 def create_toss_shopping_response(product: dict, click_url: str | None = None):
     kakao_response = kakao_json_response.KakaoJsonResponse()
-    card_description = (
-        "츠누봇이 토스와 준비한 특가예요 🛍️\n"
-        "• 이 링크를 통해서만 할인 혜택을 받을 수 있어요.\n"
-        "• 구매 수수료는 챗봇 서버 운영비로 사용됩니다.\n"
-        f"{product['discount_rate']}% 할인 · 최대할인가 {product['price']:,}원"
-    )
-    commerce_card = {
-        "title": product["title"],
-        "description": card_description,
-        "price": product["original_price"],
-        "currency": "won",
-        "discount": product["discount"],
-        "discountRate": product["discount_rate"],
-        "discountedPrice": product["price"],
-        "thumbnails": [{"imageUrl": product["image_url"]}],
-        "buttons": [
-            {
-                "action": "webLink",
-                "label": product["button_label"].removesuffix(" · 제휴"),
-                "webLinkUrl": click_url or product["url"],
-            }
-        ],
-    }
-    return kakao_response.add_output_to_response(
-        {"commerceCard": commerce_card}
-    ).get_response()
+    card = _algorithm_commerce_card(
+        product, click_url, description=f"{ALGORITHM_PROMOTION_INTRO}\n{_algorithm_price_line(product)}")
+    return kakao_response.add_output_to_response({"commerceCard": card}).get_response()
 
 
 def create_toss_shopping_list_response(
@@ -174,10 +194,10 @@ def create_toss_shopping_list_response(
         ))
         cards = []
         for product, click_url in zip(products, click_urls):
+            # FIXED_PROMOTION_INTRO에는 제휴 고지가 없어서 버튼의 ` · 제휴`를 남긴다.
             card = {"title": product["title"][:50],
-                    "description": ("품절 · " if product.get("is_sold_out") else "") + fixed_product_description(product),
-                    "buttons": [{"action": "webLink", "label": product["button_label"],
-                                 "webLinkUrl": click_url or product["url"]}]}
+                    "description": ("품절 · " if product.get("is_sold_out") else "") + product_description(product),
+                    "buttons": [product_link_button(product, click_url, keep_affiliate_suffix=True)]}
             if product.get("image_url"):
                 card["thumbnail"] = {"imageUrl": product["image_url"]}
             cards.append(card)
@@ -188,38 +208,17 @@ def create_toss_shopping_list_response(
                 row = [{key: value for key, value in card.items() if key != "thumbnail"} for card in row]
             kakao_response.add_output_to_response(kakao_response.create_carousel(
                 row, type=card_type))
-        if collection_id in {"food", "living"}:
-            other = "living" if collection_id == "food" else "food"
-            target = promotion_settings.read_collection(other)
-            kakao_response.add_quick_replies([kakao_response.create_quick_reply(target.label, target.message_text)])
+        add_collection_quick_reply(kakao_response, collection_id)
         return kakao_response.get_response()
-    cards = []
-    for product, click_url in zip(products, click_urls):
-        cards.append(
-            {
-                "title": product["title"],
-                "description": fixed_product_description(product) if is_fixed else f"{product['discount_rate']}% 할인 · 최대할인가 {product['price']:,}원",
-                "price": product["original_price"],
-                "currency": "won",
-                "discount": product["discount"],
-                "discountRate": product["discount_rate"],
-                "discountedPrice": product["price"],
-                "thumbnails": [{"imageUrl": product["image_url"]}],
-                "buttons": [
-                    {
-                        "action": "webLink",
-                        "label": product["button_label"].removesuffix(" · 제휴"),
-                        "webLinkUrl": click_url or product["url"],
-                    }
-                ],
-            }
-        )
+    cards = [
+        _algorithm_commerce_card(
+            product, click_url,
+            description=product_description(product) if is_fixed else _algorithm_price_line(product))
+        for product, click_url in zip(products, click_urls)
+    ]
     kakao_response.add_output_to_response(
         kakao_response.create_simple_text(
-            promotion_settings.FIXED_PROMOTION_INTRO if is_fixed else
-            "츠누봇이 토스와 준비한 특가예요 🛍️\n"
-            "• 이 링크를 통해서만 할인 혜택을 받을 수 있어요.\n"
-            "• 구매 수수료는 챗봇 서버 운영비로 사용됩니다."
+            promotion_settings.FIXED_PROMOTION_INTRO if is_fixed else ALGORITHM_PROMOTION_INTRO
         )
     )
     for start in range(0, len(cards), COMMERCE_CARDS_PER_ROW):
@@ -229,8 +228,5 @@ def create_toss_shopping_list_response(
                 type="commerceCard",
             )
         )
-    if collection_id in {"food", "living"}:
-        other = "living" if collection_id == "food" else "food"
-        target = promotion_settings.read_collection(other)
-        kakao_response.add_quick_replies([kakao_response.create_quick_reply(target.label, target.message_text)])
+    add_collection_quick_reply(kakao_response, collection_id)
     return kakao_response.get_response()
