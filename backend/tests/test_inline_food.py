@@ -31,6 +31,16 @@ class FoodInlineTests(unittest.IsolatedAsyncioTestCase):
             key, _ = await p.get_inline_promotion_product('test')
             self.assertEqual(key, 'second')
 
+    def test_living_inline_card_uses_living_more_button(self):
+        product = {'title': 'living', 'price': 1000, 'image_url': 'https://example.com/living',
+                   'url': 'https://toss.im/_m/living', 'collection_id': 'living'}
+        with patch.object(s, 'read_collection', return_value=s.CollectionSettings(
+                label='꿀템', message_text='자취생 꿀템')):
+            buttons = promotion_cards.create_inline_product_output(product)['commerceCard']['buttons']
+        self.assertEqual(buttons[1]['label'], '꿀템 더 보기')
+        self.assertEqual(buttons[1]['messageText'], '자취생 꿀템')
+        self.assertEqual(buttons[1]['extra']['button_id'], 'living_inline_more')
+
     async def test_fixed_collections_alternate_by_priority_chain(self):
         settings = self.settings()
         living_product = s.Product(title='living', url='https://toss.im/_m/living')

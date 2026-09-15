@@ -148,11 +148,13 @@ def create_inline_product_output(product: dict, click_url: str | None = None) ->
         title=_trim_product_title(product["title"]),
     )
     card["buttons"] = [product_link_button(product, click_url, label_limit=INLINE_CARD_BUTTON_LIMIT)]
-    target = promotion_settings.read_collection("food")
+    collection_id = product.get("collection_id") or "food"
+    target = promotion_settings.read_collection(collection_id)
+    more_label = "먹거리 더 보기" if collection_id == "food" else "꿀템 더 보기"
     card["buttons"].append({
-        "action": "message", "label": "먹거리 더 보기", "messageText": target.message_text,
-        "extra": {"source": "menu_inline_more", "button_id": "food_inline_more",
-                  "button_label": "먹거리 더 보기", "collection_id": "food"},
+        "action": "message", "label": more_label, "messageText": target.message_text,
+        "extra": {"source": "menu_inline_more", "button_id": f"{collection_id}_inline_more",
+                  "button_label": more_label, "collection_id": collection_id},
     })
     # discountRate는 discountedPrice가 있어야 노출되고, discount보다 우선 표시된다.
     if product.get("discount_rate"):
