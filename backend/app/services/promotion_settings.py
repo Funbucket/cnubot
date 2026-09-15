@@ -43,6 +43,9 @@ class Product(BaseModel):
     unit_count: int | None = Field(default=None, gt=1, le=100000)
     show_gram_price: bool = False
     total_weight_g: int | None = Field(default=None, gt=0, le=1000000)
+    # Ratings arrive from Toss on their own and are gated on strength, so the
+    # administrator opts out rather than in.
+    show_review: bool = True
     taca_item_id: int | None = Field(default=None, gt=0)
 
     _link = field_validator("url")(validate_link)
@@ -150,11 +153,7 @@ def read_collection(collection_id: str) -> CollectionSettings:
     settings = read_settings()
     # A missing settings file skips the migration, so fall back to the defaults per id.
     collections = settings.collections or _migrate_legacy(settings).collections
-    collection = collections.get(collection_id) or collections["living"]
-    # The former shared-product quick-reply label must not leak into living.
-    if collection_id == "living" and collection.message_text == "자취생 꿀템" and collection.label.startswith("💵"):
-        collection = collection.model_copy(update={"label": "자취생 꿀템"})
-    return collection
+    return collections.get(collection_id) or collections["living"]
 
 
 def product_key(url: str) -> str:
@@ -284,6 +283,8 @@ async def market_product(product: Product, force: bool = False) -> dict:
                         "unit_count": resolved.unit_count or api_unit_count,
                         "total_weight_g": resolved.total_weight_g or infer_total_weight_g(
                             api_name, resolved.unit_count or api_unit_count),
+                        "review_score": item.get("reviewScore"),
+                        "review_count": item.get("reviewCount"),
                         "category_ids": item.get("categoryIds") or [],
                         "market_image_url": item.get("thumbnailUrl") or resolved.image_url,
                         "price_checked_at": int(time.time()), "price_error": ""}

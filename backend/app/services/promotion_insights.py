@@ -4,11 +4,15 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import Any
 
+# 진입형은 단계 순서를 지킨 이벤트만 센다. 노출보다 먼저 누른 버튼 클릭이 섞이면
+# 퍼널이 단계마다 늘었다 줄었다 한다. 인라인형에는 진입 단계가 없어 funnel_stage가
+# 항상 NULL이므로, 같은 조건으로 거르면 인라인 집계가 통째로 사라진다.
 _PATH_EVENTS_CTE = """
                 SELECT user_id, event_name, created_at,
                        CASE WHEN surface = 'menu_inline_card' THEN 'inline' ELSE 'entry' END AS path
                 FROM qualified_promotion_events
-                  WHERE ($2::date IS NULL OR created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
+                  WHERE (surface = 'menu_inline_card' OR funnel_stage IS NOT NULL)
+                  AND ($2::date IS NULL OR created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
                   AND ($3::date IS NULL OR created_at < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
                   AND (user_id IS NULL OR NOT (user_id = ANY($4::text[])))
 """
@@ -196,7 +200,9 @@ async def get_promotion_insights(pool, start_date=None, end_date=None) -> dict[s
                 FROM events
                 WHERE (path = 'entry' AND event_name = 'promotion_entry_exposure')
                    OR (path = 'inline' AND event_name = 'promotion_exposure')
-            ), actions AS (
+            ), actions AS MATERIALIZED (
+                -- MATERIALIZED가 없으면 아래 EXISTS가 노출 한 건마다 events 전체를
+                -- 다시 훑는다. 실제 행동 이벤트는 수백 건뿐이라 미리 좁혀 둔다.
                 SELECT user_id, path, created_at
                 FROM events
                 WHERE (path = 'entry' AND event_name = 'promotion_entry_click')
@@ -251,52 +257,19 @@ async def get_promotion_insights(pool, start_date=None, end_date=None) -> dict[s
             """,
             start_date, end_date, excluded_user_ids,
         )
+        # 퍼널 단계별 사용자 수는 아래에서 path_rows로 채운다. 여기서는 한 번의
+        # 스캔으로 끝나는 이벤트 건수만 센다.
         totals = await conn.fetchrow(
             """
-            WITH filtered_events AS (
-                SELECT event_name, user_id, created_at
-                FROM user_events
-                WHERE ($2::date IS NULL OR created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
-                  AND ($3::date IS NULL OR created_at < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
-                  AND (user_id IS NULL OR NOT (user_id = ANY($4::text[])))
-            ), entry_exposures AS (
-                SELECT user_id,
-                       MIN(created_at) AS entry_exposure_at
-                FROM filtered_events
-                WHERE user_id IS NOT NULL AND event_name = 'promotion_entry_exposure'
-                GROUP BY user_id
-            ), entry_clicks AS (
-                SELECT x.*, (SELECT MIN(e.created_at) FROM filtered_events e
-                    WHERE e.user_id = x.user_id AND e.event_name = 'promotion_entry_click'
-                      AND e.created_at >= x.entry_exposure_at) AS entry_click_at
-                FROM entry_exposures x
-            ), product_exposures AS (
-                SELECT x.*, (SELECT MIN(e.created_at) FROM filtered_events e
-                    WHERE e.user_id = x.user_id AND e.event_name = 'promotion_exposure'
-                      AND e.created_at >= x.entry_click_at) AS product_exposure_at
-                FROM entry_clicks x
-            ), user_steps AS (
-                SELECT x.*, (SELECT MIN(e.created_at) FROM filtered_events e
-                    WHERE e.user_id = x.user_id AND e.event_name = ANY($1::text[])
-                      AND e.created_at >= x.product_exposure_at) AS product_click_at
-                FROM product_exposures x
-            )
-            SELECT COUNT(*) FILTER (WHERE entry_exposure_at IS NOT NULL)::int AS entry_exposed_users,
-                   COUNT(*) FILTER (WHERE entry_exposure_at IS NOT NULL
-                                         AND entry_click_at >= entry_exposure_at)::int AS entry_users,
-                   COUNT(*) FILTER (WHERE entry_exposure_at IS NOT NULL
-                                         AND entry_click_at IS NOT NULL
-                                         AND product_exposure_at >= entry_click_at)::int AS exposed_users,
-                   COUNT(*) FILTER (WHERE entry_exposure_at IS NOT NULL
-                                         AND entry_click_at IS NOT NULL
-                                         AND product_exposure_at IS NOT NULL
-                                         AND product_click_at >= product_exposure_at)::int AS clicked_users,
-                   (SELECT COUNT(*) FROM filtered_events WHERE event_name = 'promotion_entry_exposure')::int AS entry_exposure_events,
-                   (SELECT COUNT(*) FROM filtered_events WHERE event_name = 'promotion_entry_click')::int AS entry_events,
-                   (SELECT COUNT(*) FROM filtered_events WHERE event_name = 'promotion_exposure')::int AS exposure_events,
-                   (SELECT COUNT(*) FROM filtered_events WHERE event_name = ANY($1::text[]))::int AS click_events,
-                   (SELECT COUNT(*) FROM filtered_events)::int AS events
-            FROM user_steps
+            SELECT COUNT(*) FILTER (WHERE event_name = 'promotion_entry_exposure')::int AS entry_exposure_events,
+                   COUNT(*) FILTER (WHERE event_name = 'promotion_entry_click')::int AS entry_events,
+                   COUNT(*) FILTER (WHERE event_name = 'promotion_exposure')::int AS exposure_events,
+                   COUNT(*) FILTER (WHERE event_name = ANY($1::text[]))::int AS click_events,
+                   COUNT(*)::int AS events
+            FROM user_events
+            WHERE ($2::date IS NULL OR created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
+              AND ($3::date IS NULL OR created_at < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
+              AND (user_id IS NULL OR NOT (user_id = ANY($4::text[])))
             """,
             list(click_events), start_date, end_date, excluded_user_ids,
         )
@@ -304,15 +277,18 @@ async def get_promotion_insights(pool, start_date=None, end_date=None) -> dict[s
     # The qualification view allows a user to click an older Kakao message.
     # Reuse the same qualified path counts for the funnel so a historical
     # button click is not counted in one panel and dropped from another.
+    # 진입 경로 행이 없다는 것은 진입 이벤트 자체가 없다는 뜻이라 0이 맞다.
     entry_path = next((row for row in path_rows if row["path"] == "entry"), None)
+    totals.update(
+        entry_exposed_users=entry_path["entry_exposed_users"] if entry_path else 0,
+        entry_users=entry_path["entry_users"] if entry_path else 0,
+        exposed_users=entry_path["exposed_users"] if entry_path else 0,
+        clicked_users=entry_path["clicked_users"] if entry_path else 0,
+    )
     if entry_path:
         totals.update(
-            entry_exposed_users=entry_path["entry_exposed_users"],
             entry_exposure_events=entry_path["entry_exposure_events"],
-            entry_users=entry_path["entry_users"],
-            exposed_users=entry_path["exposed_users"],
             exposure_events=entry_path["exposure_events"],
-            clicked_users=entry_path["clicked_users"],
         )
     return {
         "collections": [dict(row) for row in collection_rows],

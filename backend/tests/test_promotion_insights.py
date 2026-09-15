@@ -16,10 +16,41 @@ class PromotionInsightsTest(unittest.IsolatedAsyncioTestCase):
             SET TIME ZONE 'UTC';
             CREATE TEMP TABLE user_events (
                 user_id TEXT, event_name TEXT, created_at TIMESTAMPTZ,
-                properties JSONB DEFAULT '{}', source TEXT, product_key TEXT,
-                experiment_id BIGINT, variant_key TEXT
+                properties JSONB DEFAULT '{}', source TEXT, surface TEXT,
+                product_key TEXT, experiment_id BIGINT, variant_key TEXT
             );
-            CREATE TEMP VIEW qualified_promotion_events AS SELECT * FROM pg_temp.user_events;
+            CREATE TEMP VIEW user_promotion_stage_times AS
+            SELECT s1.user_id, s1.entry_exposure_at, s2.entry_click_at, s3.exposure_at
+            FROM (
+                SELECT user_id, MIN(created_at) AS entry_exposure_at
+                FROM pg_temp.user_events
+                WHERE user_id IS NOT NULL AND event_name = 'promotion_entry_exposure'
+                GROUP BY user_id
+            ) s1
+            LEFT JOIN LATERAL (
+                SELECT MIN(created_at) AS entry_click_at FROM pg_temp.user_events e
+                WHERE e.user_id = s1.user_id AND e.event_name = 'promotion_entry_click'
+                  AND e.created_at >= s1.entry_exposure_at
+            ) s2 ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT MIN(created_at) AS exposure_at FROM pg_temp.user_events e
+                WHERE e.user_id = s1.user_id AND e.event_name = 'promotion_exposure'
+                  AND e.created_at >= s2.entry_click_at
+            ) s3 ON TRUE;
+            CREATE TEMP VIEW qualified_promotion_events AS
+            SELECT e.*, CASE
+                WHEN e.event_name = 'promotion_entry_exposure' THEN 1
+                WHEN e.event_name = 'promotion_entry_click'
+                     AND e.created_at >= q.entry_exposure_at THEN 2
+                WHEN e.event_name = 'promotion_exposure'
+                     AND e.created_at >= q.entry_click_at THEN 3
+                WHEN e.event_name IN ('promotion_click', 'promotion_button_click',
+                                      'promotion_quick_reply_click',
+                                      'promotion_block_click', 'commerce_card_click')
+                     AND e.created_at >= q.exposure_at THEN 4
+              END AS funnel_stage
+            FROM pg_temp.user_events e
+            LEFT JOIN pg_temp.user_promotion_stage_times q ON q.user_id = e.user_id;
         """)
         conn = self.conn
 
@@ -55,6 +86,8 @@ class PromotionInsightsTest(unittest.IsolatedAsyncioTestCase):
         await self.event("invalid", "promotion_exposure", "2026-09-10 10:02+09")
         data = await experiments.get_promotion_insights(date(2026,9,10), date(2026,9,10))
         totals = data["totals"]
+        # "repeat"은 09:00 클릭이 노출보다 앞서지만 10:01에 다시 눌러 단계를 채운다.
+        # "invalid"는 앞선 클릭뿐이라 버튼 노출에서 멈춘다.
         self.assertEqual([totals[key] for key in ("entry_exposed_users", "entry_users", "exposed_users", "clicked_users")], [2,1,1,1])
 
     async def test_korean_day_boundaries_independent_of_database_timezone(self):
