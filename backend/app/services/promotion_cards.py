@@ -138,6 +138,20 @@ def add_collection_quick_reply(kakao_response, collection_id: str | None) -> Non
     kakao_response.add_quick_replies([kakao_response.create_quick_reply(target.label, target.message_text)])
 
 
+def add_refresh_quick_reply(kakao_response, collection_id: str | None, product_count: int) -> None:
+    """Add a same-collection refresh action only for a full six-product list."""
+    if product_count != 6 or collection_id not in {"food", "living"}:
+        return
+    current = promotion_settings.read_collection(collection_id)
+    kakao_response.add_quick_replies([
+        kakao_response.create_quick_reply(
+            "새로고침",
+            current.message_text,
+            extra={"source": "promotion_refresh", "collection_id": collection_id},
+        )
+    ])
+
+
 def create_inline_product_output(product: dict, click_url: str | None = None) -> dict:
     """Build the commerceCard output that takes an unused meal slot."""
     card = commerce_card(
@@ -211,6 +225,7 @@ def create_toss_shopping_list_response(
             kakao_response.add_output_to_response(kakao_response.create_carousel(
                 row, type=card_type))
         add_collection_quick_reply(kakao_response, collection_id)
+        add_refresh_quick_reply(kakao_response, collection_id, len(products))
         return kakao_response.get_response()
     cards = [
         _algorithm_commerce_card(
@@ -231,4 +246,5 @@ def create_toss_shopping_list_response(
             )
         )
     add_collection_quick_reply(kakao_response, collection_id)
+    add_refresh_quick_reply(kakao_response, collection_id, len(products))
     return kakao_response.get_response()

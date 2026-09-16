@@ -144,6 +144,29 @@ class PromotionSettingsTest(unittest.TestCase):
         self.assertEqual(len(outputs[1]["carousel"]["items"][0]["title"]), 50)
         self.assertEqual(outputs[2]["carousel"]["items"][0]["buttons"][0]["webLinkUrl"], "https://toss.im/_m/3")
 
+    def test_six_product_collection_adds_refresh_quick_reply(self):
+        fixed = settings.Settings(
+            mode="fixed",
+            products=[self.product(str(i), image_url="https://shopping.toss.im/a.jpg") for i in range(6)],
+        )
+        products = [product for _, product in settings.fixed_products(fixed)]
+        response = promotions.create_toss_shopping_list_response(products, collection_id="food")
+        replies = response["template"]["quickReplies"]
+
+        self.assertEqual([reply["label"] for reply in replies], ["자취생 꿀템", "새로고침"])
+        self.assertEqual(replies[1]["messageText"], "자취생 먹을거 핫딜")
+        self.assertEqual(replies[1]["extra"], {"source": "promotion_refresh", "collection_id": "food"})
+
+    def test_short_collection_does_not_add_refresh_quick_reply(self):
+        fixed = settings.Settings(
+            mode="fixed",
+            products=[self.product(str(i), image_url="https://shopping.toss.im/a.jpg") for i in range(5)],
+        )
+        products = [product for _, product in settings.fixed_products(fixed)]
+        response = promotions.create_toss_shopping_list_response(products, collection_id="food")
+
+        self.assertEqual([reply["label"] for reply in response["template"]["quickReplies"]], ["자취생 꿀템"])
+
     def test_old_click_keeps_original_link_and_metadata_after_edit(self):
         product = self.product()
         key = settings.product_key(product.url)
