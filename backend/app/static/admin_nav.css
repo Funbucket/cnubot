@@ -6,3 +6,47 @@
 .admin-topbar .admin-nav a[aria-current="page"]{background:#e5f4f0;color:#087f70;border-bottom:0}
 .admin-page-heading{display:flex;align-items:end;justify-content:space-between;gap:24px;margin:28px 0 24px}
 @media(max-width:700px){.admin-topbar{align-items:flex-start;flex-direction:column;gap:8px;padding:15px 16px 10px}.admin-topbar .admin-nav{width:100%;gap:4px;overflow-x:auto}.admin-topbar .admin-nav a{padding:9px 10px}.admin-page-heading{display:block;margin:22px 0 18px}}
+
+/* Keep navigation independent of each page's typography and generic headers. */
+body > .admin-topbar{box-sizing:border-box;width:100%;margin:0;min-height:68px;font:16px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:normal;align-items:center}
+.admin-topbar .admin-brand{font-size:16px;line-height:normal}
+.admin-topbar .admin-nav{flex-wrap:nowrap;line-height:normal}
+.admin-topbar .admin-nav a{display:block;line-height:normal;letter-spacing:normal}
+.admin-topbar .admin-nav a:focus-visible{outline:3px solid #59a5ec;outline-offset:3px}
+/* Experiments and event documentation share the product editor's visual base. */
+body.admin-unified{--green:#087563;--muted:#576b73;--line:#dce5e1;margin:0;background:#f4f7f6;color:#182a37;font:16px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-synthesis:none}
+.admin-unified *{box-sizing:border-box}
+.admin-unified main,.admin-unified main.shell{max-width:1260px;margin:auto;padding:28px 28px 70px}
+.admin-unified .admin-page-heading{display:block;margin:0 0 24px}
+.admin-unified h1{font-size:30px;letter-spacing:-.045em;line-height:normal;margin:0 0 8px}
+.admin-unified h2{font-size:18px;letter-spacing:normal}
+.admin-unified h3{font-size:15px}
+.admin-unified p{line-height:1.6}
+.admin-unified .admin-page-heading p{color:var(--muted);margin:0}
+.admin-unified .eyebrow{display:block;font:750 11px system-ui,sans-serif;letter-spacing:.12em;color:var(--green);margin:0 0 8px}
+.admin-unified .muted,.admin-unified .sub,.admin-unified .hint,.admin-unified .field-help,.admin-unified .count{color:var(--muted)}
+.admin-unified button,.admin-unified input,.admin-unified textarea,.admin-unified select{font-family:inherit}
+.admin-unified button{min-height:44px;border:1px solid transparent;border-radius:10px;padding:10px 15px;font-size:14px;font-weight:650;background:var(--green);color:white}
+.admin-unified button.secondary{background:white;border-color:#cbd8d2;color:#29483e}
+.admin-unified input,.admin-unified textarea,.admin-unified select{border:1px solid #b8c9c0;background:white;color:#182a37;border-radius:9px;padding:11px 12px;font-size:16px}
+.admin-unified a:focus-visible,.admin-unified button:focus-visible,.admin-unified input:focus-visible,.admin-unified textarea:focus-visible,.admin-unified select:focus-visible{outline:3px solid #59a5ec;outline-offset:3px}
+.admin-unified .card,.admin-unified .experiment-card,.admin-unified form#new-experiment,.admin-events main>section{background:white;border:1px solid var(--line);border-radius:16px;padding:22px;box-shadow:none}
+.admin-unified form#new-experiment{border-top:4px solid var(--green)}
+.admin-unified .meta-grid div,.admin-unified .live-summary,.admin-unified .metric,.admin-unified .variants li{background:#f0f6f3}
+.admin-unified .live-label,.admin-unified .step b,.admin-unified .links a{color:var(--green)}
+.admin-unified .progress i{background:var(--green)}
+.admin-unified .status-completed{background:#eaf3ef;color:#285745}
+.admin-unified .step,.admin-unified .note{background:#f0f6f3;color:#38584a}
+.admin-unified .note{border-left-color:var(--green);font-size:14px}
+.admin-unified td,.admin-unified th{border-bottom-color:var(--line)}
+.admin-unified th{color:var(--muted)}
+.admin-events main>section{margin-top:18px}
+.admin-events h2{margin:0 0 12px}
+.admin-events h3{margin:0 0 8px}
+.admin-events li{line-height:1.6;margin:6px 0}
+.admin-events .controls{gap:12px}
+.admin-events .controls label{font-size:13px;line-height:1.6}
+.admin-events #status{font-size:13px;color:var(--muted)}
+@media(max-width:1020px){.admin-unified main,.admin-unified main.shell{padding:24px 20px 60px}}
+@media(max-width:760px){.admin-unified main,.admin-unified main.shell{padding:22px 14px 50px}.admin-unified h1{font-size:26px}.admin-unified .admin-page-heading{margin-bottom:18px}.admin-unified .admin-page-heading p{font-size:13px}.admin-unified .card,.admin-unified .experiment-card,.admin-unified form#new-experiment,.admin-events main>section{padding:16px;border-radius:13px}.admin-events .flow{grid-template-columns:1fr}}
+@media(max-width:700px){body>.admin-topbar{align-items:flex-start;gap:8px;padding:15px 16px 10px}.admin-topbar .admin-nav{max-width:100%;min-width:0}.admin-topbar .admin-nav a{flex-shrink:0}}

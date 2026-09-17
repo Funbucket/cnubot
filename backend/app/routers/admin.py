@@ -66,6 +66,12 @@ async def recommendations(_: str = Depends(require_admin)):
                         headers={"Cache-Control": "no-store"})
 
 
+@router.get("/events", response_class=HTMLResponse)
+async def event_collection(_: str = Depends(require_admin)):
+    path = Path(__file__).parent.parent / "static" / "events.html"
+    return HTMLResponse(path.read_text(), headers={"Cache-Control": "no-store"})
+
+
 @router.get("/assets/admin_nav.css", response_class=PlainTextResponse, include_in_schema=False)
 async def admin_navigation_css():
     path = Path(__file__).parent.parent / "static" / "admin_nav.css"
