@@ -255,6 +255,27 @@ class PromotionSettingsTest(unittest.TestCase):
         card = promotions.create_toss_shopping_list_response([product])["template"]["outputs"][1]["carousel"]
         self.assertEqual(card["items"][0]["description"], "🏷️ 1개당 750원\n⭐️ 4.6 (820)")
 
+    def test_algorithm_carousel_uses_the_fixed_product_description_format(self):
+        product = {"title": "생수 500ml 2개", "selection_mode": "algorithm",
+                   "price": 1800, "original_price": 3000, "discount": 1200,
+                   "discount_rate": 40, "image_url": "https://example.com/a.jpg",
+                   "url": "https://example.com/product",
+                   "review_score": 4.6, "review_count": 820,
+                   "show_unit_price": True, "unit_count": 2,
+                   "show_gram_price": True, "total_weight_g": 1000}
+        card = promotions.create_toss_shopping_list_response([product])["template"]["outputs"][1]["carousel"]
+        self.assertEqual(card["items"][0]["description"],
+                         "🏷️ 1개당 900원\n⚖️ 100g당 180원\n⭐️ 4.6 (820)")
+
+    def test_automatic_product_title_derives_unit_and_weight_fields(self):
+        product = promotions._add_automatic_merchandising_fields({
+            "title": "닭가슴살 1kg 2개", "price": 10000,
+        })
+        self.assertEqual(product["unit_count"], 2)
+        self.assertEqual(product["total_weight_g"], 2000)
+        self.assertTrue(product["show_unit_price"])
+        self.assertTrue(product["show_gram_price"])
+
 
 if __name__ == "__main__":
     unittest.main()

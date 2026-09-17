@@ -61,10 +61,39 @@ class FoodInlineTests(unittest.IsolatedAsyncioTestCase):
         def rank(candidates, *args):
             self.assertEqual(candidates, [food])
             return candidates[0]
-        with patch.object(s,'read_settings',return_value=self.settings('algorithm')), patch.object(p,'_candidate_pool',new=AsyncMock(return_value=[nonfood,food])), patch.object(p.recommendations,'category_affinity',new=AsyncMock(return_value={})), patch.object(p.recommendations,'recent_item_ids',new=AsyncMock(return_value=[])), patch.object(p.recommendations,'rank_candidates',side_effect=rank), patch.object(p.toss_sharelink,'detail',new=AsyncMock(return_value=food)), patch.object(p.toss_sharelink,'categories',new=AsyncMock(return_value={1:['식품','간식']})), patch.object(p.toss_sharelink,'issue_link',new=AsyncMock(return_value='https://toss.im/_m/food')):
+        with patch.object(s,'read_settings',return_value=self.settings('algorithm')), patch.object(p,'_candidate_pool',new=AsyncMock(return_value=[nonfood,food])), patch.object(p.recommendations,'category_affinity',new=AsyncMock(return_value={})), patch.object(p.recommendations,'recent_item_ids',new=AsyncMock(return_value=[])), patch.object(p.recommendations,'rank_candidates',side_effect=rank), patch.object(p.toss_sharelink,'detail',new=AsyncMock(return_value=food)), patch.object(p.toss_sharelink,'categories',new=AsyncMock(return_value={1:['식품','간식','과자']})), patch.object(p.toss_sharelink,'issue_link',new=AsyncMock(return_value='https://toss.im/_m/food')):
             _, product = await p.get_inline_promotion_product('test')
             self.assertEqual(product['collection_id'], 'food')
             self.assertEqual(product['selection_mode'], 'algorithm')
+
+    async def test_auto_living_never_selects_a_food_candidate(self):
+        food = {'tacaItemId': 1, 'displayName': '명태포 400g 2개', 'displayPrice': 1000,
+                'originalPrice': 2000, 'discountRate': 50, 'thumbnailUrl': 'https://example.com/food',
+                'categoryIds': [1], '_category_names': ['식품', '수산']}
+        living = {'tacaItemId': 2, 'displayName': '무선 청소기', 'displayPrice': 1000,
+                  'originalPrice': 2000, 'discountRate': 50, 'thumbnailUrl': 'https://example.com/living',
+                  'categoryIds': [2], '_category_names': ['생활용품', '청소용품']}
+        def rank(candidates, *args):
+            self.assertEqual(candidates, [living])
+            return candidates[0]
+        living_settings = self.settings('algorithm')
+        living_settings.collections['food'].products = []
+        living_settings.collections['living'].mode = 'algorithm'
+        living_settings.collections['living'].products = [
+            s.Product(title='living seed', url='https://toss.im/_m/living-seed')
+        ]
+        with patch.object(s, 'read_settings', return_value=living_settings), \
+             patch.object(p, '_candidate_pool', new=AsyncMock(return_value=[food, living])) as pool, \
+             patch.object(p.recommendations, 'category_affinity', new=AsyncMock(return_value={})), \
+             patch.object(p.recommendations, 'recent_item_ids', new=AsyncMock(return_value=[])), \
+             patch.object(p.recommendations, 'rank_candidates', side_effect=rank), \
+             patch.object(p.toss_sharelink, 'detail', new=AsyncMock(return_value=living)), \
+             patch.object(p.toss_sharelink, 'categories', new=AsyncMock(return_value={
+                 1: ['식품', '수산', '건어물'], 2: ['생활용품', '청소용품', '청소기']})), \
+             patch.object(p.toss_sharelink, 'issue_link', new=AsyncMock(return_value='https://toss.im/_m/living')):
+            _, product = await p.get_inline_promotion_product('test')
+        pool.assert_awaited_once_with('living')
+        self.assertEqual(product['collection_id'], 'living')
 
     async def test_click_preserves_signed_collection_and_surface(self):
         product={'title':'first','collection_id':'food','selection_mode':'fixed','settings_revision':3,'button_label':'특가 바로가기'}

@@ -178,10 +178,6 @@ def create_inline_product_output(product: dict, click_url: str | None = None) ->
     return {"commerceCard": card}
 
 
-def _algorithm_price_line(product: dict) -> str:
-    return f"{product['discount_rate']}% 할인 · 최대할인가 {product['price']:,}원"
-
-
 def _algorithm_commerce_card(product: dict, click_url: str | None, description: str) -> dict:
     """An algorithm-picked card always knows its discount, so always render it."""
     card = commerce_card(product, click_url, description=description, title=product["title"])
@@ -193,7 +189,7 @@ def _algorithm_commerce_card(product: dict, click_url: str | None, description: 
 def create_toss_shopping_response(product: dict, click_url: str | None = None):
     kakao_response = kakao_json_response.KakaoJsonResponse()
     card = _algorithm_commerce_card(
-        product, click_url, description=f"{ALGORITHM_PROMOTION_INTRO}\n{_algorithm_price_line(product)}")
+        product, click_url, description=product_description(product))
     return kakao_response.add_output_to_response({"commerceCard": card}).get_response()
 
 
@@ -230,7 +226,7 @@ def create_toss_shopping_list_response(
     cards = [
         _algorithm_commerce_card(
             product, click_url,
-            description=product_description(product) if is_fixed else _algorithm_price_line(product))
+            description=product_description(product))
         for product, click_url in zip(products, click_urls)
     ]
     kakao_response.add_output_to_response(

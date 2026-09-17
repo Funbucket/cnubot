@@ -61,6 +61,20 @@ MENU_BUTTON_LABELS = (
 TOSS_CANDIDATE_POOL_SIZE = 100
 
 
+def _add_automatic_merchandising_fields(product: dict) -> dict:
+    """Derive optional unit/weight callouts from an automatic product title."""
+    title = str(product.get("title") or "")
+    unit_count = promotion_settings.infer_unit_count(title)
+    total_weight_g = promotion_settings.infer_total_weight_g(title, unit_count)
+    product.update(
+        unit_count=unit_count,
+        total_weight_g=total_weight_g,
+        show_unit_price=unit_count is not None,
+        show_gram_price=total_weight_g is not None,
+    )
+    return product
+
+
 KST = ZoneInfo("Asia/Seoul")
 
 # 학식 응답에 상품을 바로 끼워넣는 카드는 진입 버튼과 달리 무시 비용이 크므로,
@@ -341,7 +355,7 @@ async def get_live_toss_product(
         if category_tree.get(int(category_id))
     ]
     product_key = f"toss_item_{item_id}"
-    TOSS_SHOPPING_PRODUCTS[product_key] = {
+    TOSS_SHOPPING_PRODUCTS[product_key] = _add_automatic_merchandising_fields({
         "title": source.get("displayName") or item.get("displayName", "토스쇼핑 상품"),
         "button_label": promotion_settings.FIXED_PRODUCT_BUTTON_LABEL,
         "quick_reply_label": promotion_label(source.get("displayName") or item.get("displayName", ""), category_names),
@@ -358,7 +372,7 @@ async def get_live_toss_product(
         "category_ids": category_ids,
         "category_names": category_names,
         "candidate_sources": item.get("_candidate_sources", []),
-    }
+    })
     if record_exposure:
         await recommendations.record_exposure(
             user_id,
@@ -467,7 +481,7 @@ async def get_live_toss_products(
                 if category_tree.get(int(category_id))
             ]
             product_key = f"toss_item_{item_id}"
-            TOSS_SHOPPING_PRODUCTS[product_key] = {
+            TOSS_SHOPPING_PRODUCTS[product_key] = _add_automatic_merchandising_fields({
                 "title": source.get("displayName") or item.get("displayName", "토스쇼핑 상품"),
                 "button_label": promotion_settings.FIXED_PRODUCT_BUTTON_LABEL,
                 "quick_reply_label": promotion_label(source.get("displayName") or item.get("displayName", ""), category_names),
@@ -485,7 +499,7 @@ async def get_live_toss_products(
                 "category_names": category_names,
                 "candidate_sources": item.get("_candidate_sources", []),
                 "recommendation_diagnostic": {**checked["_decision"], "reason": item["_decision"]["reason"]},
-            }
+            })
             product = TOSS_SHOPPING_PRODUCTS[product_key]
             product.update(collection_id=collection_id, selection_mode=mode, settings_revision=settings.revision)
             position = len(products) + 1
@@ -751,11 +765,19 @@ async def get_inline_promotion_product(
         last_exposed = await recommendations.last_exposure_by_product(user_id, INLINE_CARD_SURFACE)
         key, product = _rotate_fixed_product(renderable, last_exposed)
     else:
+        from app.services import recommendation_policy as policy
         allowed = set(collection.allowed_categories)
         if collection_id == "food" and not allowed:
             allowed = {"식품"}
+        try:
+            category_tree = await toss_sharelink.categories()
+        except Exception:
+            # Without category data we cannot prove that a living candidate is
+            # not food, so do not expose an unclassified inline product.
+            return None
         candidates = [
-            item for item in await _candidate_pool()
+            item for item in await _candidate_pool(collection_id)
+            if policy.classify(item, category_tree, collection_id)
             if (not allowed or allowed.intersection(item.get("_category_names", [])))
             and passes_inline_quality_gate(item)
         ]
@@ -771,21 +793,21 @@ async def get_inline_promotion_product(
         detail = await toss_sharelink.detail(item_id)
         if not detail or not passes_inline_quality_gate(detail):
             return None
-        tree = await toss_sharelink.categories()
+        tree = category_tree
         if allowed and not any(
             allowed.intersection(tree.get(int(cid), []))
             for cid in detail.get("categoryIds", [])
         ):
             return None
         key = f"toss_item_{item_id}"
-        product = {
+        product = _add_automatic_merchandising_fields({
             "title": detail["displayName"], "price": detail["displayPrice"],
             "original_price": detail.get("originalPrice") or detail["displayPrice"],
             "discount_rate": detail.get("discountRate") or 0,
             "image_url": detail["thumbnailUrl"], "url": await toss_sharelink.issue_link(item_id),
             "review_score": detail.get("reviewScore"), "review_count": detail.get("reviewCount"),
             "taca_item_id": item_id, "category_ids": detail.get("categoryIds", []),
-        }
+        })
     product.update(collection_id=collection_id, selection_mode=collection.mode,
                    settings_revision=settings.revision, button_label="특가 바로가기")
     TOSS_SHOPPING_PRODUCTS[key] = product
