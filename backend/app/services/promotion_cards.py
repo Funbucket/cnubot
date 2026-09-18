@@ -263,7 +263,6 @@ def create_toss_shopping_list_response(
                 row = [{key: value for key, value in card.items() if key != "thumbnail"} for card in row]
             kakao_response.add_output_to_response(kakao_response.create_carousel(
                 row, type=card_type))
-        add_today_deals_quick_reply(kakao_response, collection_id)
         add_collection_quick_reply(kakao_response, collection_id)
         add_refresh_quick_reply(kakao_response, collection_id, len(products))
         return kakao_response.get_response()
@@ -285,7 +284,6 @@ def create_toss_shopping_list_response(
                 type="commerceCard",
             )
         )
-    add_today_deals_quick_reply(kakao_response, collection_id)
     add_collection_quick_reply(kakao_response, collection_id)
     add_refresh_quick_reply(kakao_response, collection_id, len(products))
     return kakao_response.get_response()

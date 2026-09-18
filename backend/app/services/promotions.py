@@ -819,6 +819,25 @@ async def record_inline_exposure(
         logging.getLogger(__name__).exception("failed to record inline product exposure")
 
 
+async def _get_inline_today_deal_product(
+    user_id: str | None,
+) -> tuple[str, dict] | None:
+    """Pick one not-recently-exposed item from today's deals for a menu slot."""
+    try:
+        pairs = await get_today_deal_products(
+            user_id=user_id, limit=30, record_exposure=False,
+        )
+    except Exception:
+        return None
+    renderable = [(key, product) for key, product in pairs if _is_renderable_inline(product)]
+    if not renderable:
+        return None
+    last_exposed = await recommendations.last_exposure_by_product(user_id, INLINE_CARD_SURFACE)
+    key, product = _rotate_fixed_product(renderable, last_exposed)
+    product.update(collection_id="today_deals", selection_mode="today_deals")
+    return key, product
+
+
 async def get_inline_promotion_product(
     user_id: str | None, request_id: str | None = None
 ) -> tuple[str, dict] | None:
@@ -830,7 +849,7 @@ async def get_inline_promotion_product(
     collections = settings.collections
     if not collections:
         return None
-    collection_order = []
+    collection_order = ["today_deals"]
     collection_id = "food" if "food" in collections else next(iter(collections))
     while collection_id and collection_id not in collection_order:
         collection_order.append(collection_id)
@@ -842,10 +861,18 @@ async def get_inline_promotion_product(
     if last_collection in collection_order:
         start = collection_order.index(last_collection) + 1
         collection_order = collection_order[start:] + collection_order[:start]
-    collection_id = next(
-        (key for key in collection_order if any(p.enabled for p in collections[key].products)),
-        None,
-    )
+    collection_id = None
+    for candidate_id in collection_order:
+        if candidate_id == "today_deals":
+            selected = await _get_inline_today_deal_product(user_id)
+            if selected:
+                key, product = selected
+                TOSS_SHOPPING_PRODUCTS[key] = product
+                return key, product
+            continue
+        if any(p.enabled for p in collections[candidate_id].products):
+            collection_id = candidate_id
+            break
     if not collection_id:
         return None
     collection = collections[collection_id]

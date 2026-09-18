@@ -153,10 +153,9 @@ class PromotionSettingsTest(unittest.TestCase):
         response = promotions.create_toss_shopping_list_response(products, collection_id="food")
         replies = response["template"]["quickReplies"]
 
-        self.assertEqual([reply["label"] for reply in replies], ["🔥 오늘 특가", "자취생 꿀템", "새로고침"])
-        self.assertEqual(replies[0]["messageText"], "오늘 특가")
-        self.assertEqual(replies[2]["extra"]["source"], "promotion_refresh")
-        self.assertEqual(replies[1]["messageText"], "자취생 꿀템")
+        self.assertEqual([reply["label"] for reply in replies], ["자취생 꿀템", "새로고침"])
+        self.assertEqual(replies[1]["extra"]["source"], "promotion_refresh")
+        self.assertEqual(replies[0]["messageText"], "자취생 꿀템")
 
     def test_short_collection_also_adds_refresh_quick_reply(self):
         fixed = settings.Settings(
@@ -166,7 +165,7 @@ class PromotionSettingsTest(unittest.TestCase):
         products = [product for _, product in settings.fixed_products(fixed)]
         response = promotions.create_toss_shopping_list_response(products, collection_id="food")
 
-        self.assertEqual([reply["label"] for reply in response["template"]["quickReplies"]], ["🔥 오늘 특가", "자취생 꿀템", "새로고침"])
+        self.assertEqual([reply["label"] for reply in response["template"]["quickReplies"]], ["자취생 꿀템", "새로고침"])
 
     def test_today_deals_does_not_repeat_collection_and_adds_refresh(self):
         products = [{"title": str(i), "image_url": "https://shopping.toss.im/a.jpg",

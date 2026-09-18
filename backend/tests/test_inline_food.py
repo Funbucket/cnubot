@@ -12,6 +12,26 @@ class FoodInlineTests(unittest.IsolatedAsyncioTestCase):
         return s.Settings(collections={'food': s.CollectionSettings(label='🍱 자취생 먹을거', message_text='자취생 먹을거 핫딜', mode=mode, products=products),
                                       'living': s.CollectionSettings(label='꿀템', message_text='자취생 꿀템')})
 
+    def setUp(self):
+        self.today_deals = patch.object(p, '_get_inline_today_deal_product', new=AsyncMock(return_value=None))
+        self.today_deals.start()
+
+    def tearDown(self):
+        self.today_deals.stop()
+
+    async def test_inline_priority_starts_with_today_deals(self):
+        today = ('today_deal_1', {
+            'title': '오늘 특가 상품', 'price': 1000, 'image_url': 'https://example.com/today',
+            'url': 'https://toss.im/_m/today', 'collection_id': 'today_deals',
+            'selection_mode': 'today_deals',
+        })
+        self.today_deals.stop()
+        with patch.object(s, 'read_settings', return_value=self.settings()), \
+             patch.object(p, '_get_inline_today_deal_product', new=AsyncMock(return_value=today)), \
+             patch.object(p.recommendations, 'latest_exposure_collection', new=AsyncMock(return_value=None)):
+            key, product = await p.get_inline_promotion_product('test')
+        self.assertEqual((key, product['collection_id']), ('today_deal_1', 'today_deals'))
+
     async def test_fixed_rotates_through_food_and_does_not_record_before_placement(self):
         async def resolve(settings):
             self.assertEqual([x.title for x in settings.products], ['first', 'second'])
@@ -22,7 +42,7 @@ class FoodInlineTests(unittest.IsolatedAsyncioTestCase):
             exposure.assert_not_awaited()
             with patch.object(s, 'read_collection', return_value=self.settings().collections['food']):
                 buttons = promotion_cards.create_inline_product_output(product)['commerceCard']['buttons']
-                self.assertEqual([b['label'] for b in buttons], ['특가 바로가기', '먹거리 더 보기'])
+            self.assertEqual([b['label'] for b in buttons], ['특가 바로가기', '먹거리 더 보기'])
             self.assertEqual(buttons[1]['messageText'], '자취생 먹을거 핫딜')
 
     async def test_sold_out_first_rotates_to_next_renderable_product(self):
