@@ -200,16 +200,22 @@ class PromotionSettingsTest(unittest.TestCase):
             "thumbnailUrl": f"https://example.com/{index}.jpg",
             "categoryIds": [],
         } for index in range(1, 9)]
-        recent = [{}, {index: object() for index in range(1, 7)}]
+        recent = [
+            {},
+            {index: object() for index in range(1, 7)},
+            {index: object() for index in range(1, 9)},
+        ]
         with patch.object(promotions.toss_sharelink, "today_deals", new=AsyncMock(return_value=items)), \
              patch("app.services.product_cache.link", new=AsyncMock(side_effect=lambda item_id: f"https://toss.im/_m/{item_id}")), \
              patch.object(promotions.recommendations, "recent_item_ids", new=AsyncMock(side_effect=recent)), \
              patch.object(promotions.recommendations, "record_exposure", new=AsyncMock()):
             first = asyncio.run(promotions.get_today_deal_products("test-user", limit=6))
             second = asyncio.run(promotions.get_today_deal_products("test-user", limit=6))
+            third = asyncio.run(promotions.get_today_deal_products("test-user", limit=6))
 
         self.assertEqual([product[1]["taca_item_id"] for product in first], list(range(1, 7)))
         self.assertEqual([product[1]["taca_item_id"] for product in second], [7, 8])
+        self.assertEqual([product[1]["taca_item_id"] for product in third], list(range(1, 7)))
 
     def test_old_click_keeps_original_link_and_metadata_after_edit(self):
         product = self.product()

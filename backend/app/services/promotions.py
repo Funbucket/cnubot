@@ -291,11 +291,11 @@ async def get_today_deal_products(
     fresh = [item for item in current if int(item.get("tacaItemId", 0)) not in recent_ids]
     if fresh:
         current = fresh
-    elif recent_ids:
-        current = sorted(
-            current,
-            key=lambda item: recent_ids.get(int(item.get("tacaItemId", 0))),
-        )
+    elif current and recent_ids:
+        # The whole active pool has completed one rotation. Start the next
+        # round from the API's original order instead of treating this as an
+        # empty result or continuing from an arbitrary last-exposed item.
+        current = list(current)
     current = current[:limit]
 
     async def build(item: dict, position: int) -> tuple[str, dict] | None:
