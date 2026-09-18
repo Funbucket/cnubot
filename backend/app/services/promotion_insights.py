@@ -10,7 +10,7 @@ from typing import Any
 _PATH_EVENTS_CTE = """
                 SELECT user_id, event_name, created_at,
                        CASE WHEN surface = 'menu_inline_card' THEN 'inline' ELSE 'entry' END AS path
-                FROM qualified_promotion_events
+                FROM insights_scoped_events
                   WHERE (surface = 'menu_inline_card' OR funnel_stage IS NOT NULL)
                   AND ($2::date IS NULL OR created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
                   AND ($3::date IS NULL OR created_at < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
@@ -27,6 +27,66 @@ async def get_promotion_insights(pool, start_date=None, end_date=None) -> dict[s
     developer_id = os.getenv("DEVELOPER_ID", "").strip()
     excluded_user_ids = [developer_id] if developer_id else []
     async with pool.acquire() as conn:
+        # Scope the expensive global funnel qualification to users active in the
+        # requested period. The dashboard panels reuse this temporary result.
+        await conn.execute("DROP TABLE IF EXISTS pg_temp.insights_scoped_events")
+        await conn.execute(
+            """
+            CREATE TEMP TABLE insights_scoped_events AS
+            WITH scoped_users AS (
+                SELECT DISTINCT user_id
+                FROM user_events
+                WHERE user_id IS NOT NULL
+                  AND ($1::date IS NULL OR created_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Seoul'))
+                  AND ($2::date IS NULL OR created_at < (($2::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
+                  AND NOT (user_id = ANY($3::text[]))
+            ), stage_times AS (
+                SELECT u.user_id, s1.entry_exposure_at, s2.entry_click_at, s3.exposure_at
+                FROM scoped_users u
+                JOIN LATERAL (
+                    SELECT MIN(created_at) AS entry_exposure_at
+                    FROM user_events e
+                    WHERE e.user_id = u.user_id
+                      AND e.event_name = 'promotion_entry_exposure'
+                ) s1 ON s1.entry_exposure_at IS NOT NULL
+                LEFT JOIN LATERAL (
+                    SELECT MIN(created_at) AS entry_click_at
+                    FROM user_events e
+                    WHERE e.user_id = u.user_id
+                      AND e.event_name = 'promotion_entry_click'
+                      AND e.created_at >= s1.entry_exposure_at
+                ) s2 ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT MIN(created_at) AS exposure_at
+                    FROM user_events e
+                    WHERE e.user_id = u.user_id
+                      AND e.event_name = 'promotion_exposure'
+                      AND e.created_at >= s2.entry_click_at
+                ) s3 ON TRUE
+            )
+            SELECT e.*,
+                   CASE
+                       WHEN e.event_name = 'promotion_entry_exposure' THEN 1
+                       WHEN e.event_name = 'promotion_entry_click'
+                            AND e.created_at >= q.entry_exposure_at THEN 2
+                       WHEN e.event_name = 'promotion_exposure'
+                            AND e.created_at >= q.entry_click_at THEN 3
+                       WHEN e.event_name IN ('promotion_click', 'promotion_button_click',
+                                             'promotion_quick_reply_click',
+                                             'promotion_block_click', 'commerce_card_click')
+                            AND e.created_at >= q.exposure_at THEN 4
+                   END AS funnel_stage
+            FROM user_events e
+            LEFT JOIN stage_times q ON q.user_id = e.user_id
+            WHERE ($1::date IS NULL OR e.created_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Seoul'))
+              AND ($2::date IS NULL OR e.created_at < (($2::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
+              AND (e.user_id IS NULL OR NOT (e.user_id = ANY($3::text[])))
+            """,
+            start_date, end_date, excluded_user_ids,
+        )
+        await conn.execute(
+            "CREATE INDEX ON insights_scoped_events (user_id, created_at DESC)"
+        )
         collection_rows = await conn.fetch(
             """
             SELECT COALESCE(properties->>'collection_id', 'unknown') AS collection_id,
@@ -39,7 +99,7 @@ async def get_promotion_insights(pool, start_date=None, end_date=None) -> dict[s
                    COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'commerce_card_click')::int AS clicked_users,
                    COUNT(*) FILTER (WHERE event_name = 'commerce_card_click')::int AS click_events,
                    COUNT(*) FILTER (WHERE event_name = 'promotion_entry_click')::int AS entry_events
-            FROM qualified_promotion_events
+            FROM insights_scoped_events
             WHERE event_name IN ('promotion_exposure', 'commerce_card_click', 'promotion_entry_click', 'promotion_entry_exposure')
               AND properties->>'collection_id' IN ('food', 'living')
               AND ($1::date IS NULL OR created_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Seoul'))
@@ -54,7 +114,7 @@ async def get_promotion_insights(pool, start_date=None, end_date=None) -> dict[s
             WITH normalized AS (
                 SELECT COALESCE(e.product_key, e.properties->>'product_key', v.config->>'product_key', 'unknown') AS product_key,
                        e.user_id, e.event_name, e.properties, e.source
-                FROM qualified_promotion_events e
+                FROM insights_scoped_events e
                 LEFT JOIN experiment_variants v
                   ON v.experiment_id = e.experiment_id AND v.variant_key = e.variant_key
                 WHERE ($2::date IS NULL OR e.created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
@@ -81,7 +141,7 @@ async def get_promotion_insights(pool, start_date=None, end_date=None) -> dict[s
             """
             WITH all_events AS (
                 SELECT event_name, user_id, properties, source, created_at
-                FROM qualified_promotion_events
+                FROM insights_scoped_events
             )
             SELECT CASE
                        WHEN event_name = 'promotion_entry_click' THEN COALESCE(properties->>'entry_source', source, 'unknown')
@@ -108,7 +168,7 @@ async def get_promotion_insights(pool, start_date=None, end_date=None) -> dict[s
             """
             WITH all_events AS (
                 SELECT event_name, user_id, properties, source, created_at
-                FROM qualified_promotion_events
+                FROM insights_scoped_events
             )
             SELECT COALESCE(properties->>'button_label', properties->>'entry_button_label', '') AS label,
                    COALESCE(properties->>'entry_source', source, 'unknown') AS source,
@@ -133,7 +193,7 @@ async def get_promotion_insights(pool, start_date=None, end_date=None) -> dict[s
             """
             WITH all_events AS (
                 SELECT event_name, user_id, properties, created_at
-                FROM qualified_promotion_events
+                FROM insights_scoped_events
             )
             SELECT (properties->>'position')::int AS position,
                    MAX((properties->>'row')::int)::int AS row,
@@ -157,7 +217,7 @@ async def get_promotion_insights(pool, start_date=None, end_date=None) -> dict[s
             """
             WITH all_events AS (
                 SELECT event_name, user_id, created_at
-                FROM qualified_promotion_events
+                FROM insights_scoped_events
             )
             SELECT (created_at AT TIME ZONE 'Asia/Seoul')::date AS day,
                    COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'promotion_exposure')::int AS exposed_users,
@@ -290,7 +350,7 @@ async def get_promotion_insights(pool, start_date=None, end_date=None) -> dict[s
             entry_exposure_events=entry_path["entry_exposure_events"],
             exposure_events=entry_path["exposure_events"],
         )
-    return {
+    result = {
         "collections": [dict(row) for row in collection_rows],
         "paths": _summarize_paths(path_rows),
         "guardrails": _summarize_guardrails(guardrail_rows),
@@ -304,6 +364,7 @@ async def get_promotion_insights(pool, start_date=None, end_date=None) -> dict[s
         "start_date": start_date,
         "end_date": end_date,
     }
+    return result
 
 
 def _summarize_paths(rows) -> list[dict[str, Any]]:
