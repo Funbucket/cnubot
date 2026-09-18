@@ -116,6 +116,11 @@ async def preview_promotions(payload: promotion_settings.Settings, refresh: bool
                              collection_id: str = "living",
                              _: str = Depends(require_admin)):
     from app.services import promotions
+    if collection_id == "today_deals":
+        pairs = await promotions.get_today_deal_products(record_exposure=False, limit=6)
+        return {"response": promotions.create_toss_shopping_list_response(
+                    [p for _, p in pairs], collection_id="today_deals"),
+                "warnings": [], "checked_at": []}
     collection = payload.collections.get(collection_id) if payload.collections else None
     collection = collection or promotion_settings.read_collection(collection_id)
     preview_settings = promotion_settings.Settings(mode=collection.mode, products=collection.products,

@@ -130,24 +130,67 @@ def commerce_card(product: dict, click_url: str | None, description: str, title:
     }
 
 
-def add_collection_quick_reply(kakao_response, collection_id: str | None) -> None:
-    """Cross-link the sibling collection, the one quick reply these lists share."""
+def add_today_deals_quick_reply(kakao_response, collection_id: str | None) -> None:
+    """Show today's-deals entry before collection navigation."""
     if collection_id not in {"food", "living"}:
         return
-    target = promotion_settings.read_collection("living" if collection_id == "food" else "food")
-    kakao_response.add_quick_replies([kakao_response.create_quick_reply(target.label, target.message_text)])
+    kakao_response.add_quick_replies([
+        kakao_response.create_quick_reply(
+            "🔥 오늘 특가",
+            "오늘 특가",
+            extra={"source": "quick_reply", "button_id": "today_deals_quick_reply",
+                   "button_label": "🔥 오늘 특가", "collection_id": "today_deals"},
+        )
+    ])
+
+
+def add_collection_quick_reply(kakao_response, collection_id: str | None) -> None:
+    """Add collection navigation without repeating the collection just viewed."""
+    if collection_id == "today_deals":
+        food = promotion_settings.read_collection("food")
+        living = promotion_settings.read_collection("living")
+        kakao_response.add_quick_replies([
+            kakao_response.create_quick_reply(
+                food.label, food.message_text,
+                extra={"source": "quick_reply", "button_id": "toss_promotion_quick_reply_food",
+                       "button_label": food.label, "collection_id": "food"},
+            ),
+            kakao_response.create_quick_reply(
+                living.label, living.message_text,
+                extra={"source": "quick_reply", "button_id": "toss_promotion_quick_reply",
+                       "button_label": living.label, "collection_id": "living"},
+            ),
+        ])
+        return
+    if collection_id not in {"food", "living"}:
+        return
+    target_ids = ("food", "living") if collection_id == "today_deals" else (
+        "living" if collection_id == "food" else "food",
+    )
+    kakao_response.add_quick_replies([
+        kakao_response.create_quick_reply(
+            (target := promotion_settings.read_collection(target_id)).label,
+            target.message_text,
+            extra={"source": "quick_reply", "button_id": f"toss_promotion_quick_reply_{target_id}",
+                   "button_label": target.label, "collection_id": target_id},
+        )
+        for target_id in target_ids
+    ])
 
 
 def add_refresh_quick_reply(kakao_response, collection_id: str | None, product_count: int) -> None:
-    """Add a same-collection refresh action only for a full six-product list."""
-    if product_count != 6 or collection_id not in {"food", "living"}:
+    """Add refresh whenever the result contains at least one product."""
+    if product_count <= 0 or collection_id not in {"food", "living", "today_deals"}:
         return
-    current = promotion_settings.read_collection(collection_id)
+    label = "새로고침"
+    message_text = ("오늘 특가" if collection_id == "today_deals"
+                    else promotion_settings.read_collection(collection_id).message_text)
     kakao_response.add_quick_replies([
         kakao_response.create_quick_reply(
-            "새로고침",
-            current.message_text,
-            extra={"source": "promotion_refresh", "collection_id": collection_id},
+            label,
+            message_text,
+            extra={"source": "promotion_refresh", "button_id": "promotion_refresh",
+                   "button_label": label, "collection_id": collection_id},
         )
     ])
 
@@ -220,6 +263,7 @@ def create_toss_shopping_list_response(
                 row = [{key: value for key, value in card.items() if key != "thumbnail"} for card in row]
             kakao_response.add_output_to_response(kakao_response.create_carousel(
                 row, type=card_type))
+        add_today_deals_quick_reply(kakao_response, collection_id)
         add_collection_quick_reply(kakao_response, collection_id)
         add_refresh_quick_reply(kakao_response, collection_id, len(products))
         return kakao_response.get_response()
@@ -241,6 +285,7 @@ def create_toss_shopping_list_response(
                 type="commerceCard",
             )
         )
+    add_today_deals_quick_reply(kakao_response, collection_id)
     add_collection_quick_reply(kakao_response, collection_id)
     add_refresh_quick_reply(kakao_response, collection_id, len(products))
     return kakao_response.get_response()

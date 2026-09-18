@@ -113,10 +113,10 @@ async def best_categories(category_id: int, size: int = 30) -> list[dict[str, An
     return items
 
 
-async def today_deals(size: int = 30) -> list[dict[str, Any]]:
+async def today_deals(size: int = 30, force_refresh: bool = False) -> list[dict[str, Any]]:
     global _today_deals_cache
     now = time.time()
-    if _today_deals_cache and _today_deals_cache[0] > now:
+    if not force_refresh and _today_deals_cache and _today_deals_cache[0] > now:
         return _today_deals_cache[1]
     body = await asyncio.to_thread(
         _get_sync,

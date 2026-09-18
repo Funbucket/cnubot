@@ -21,6 +21,47 @@ async def get_toss_shopping_promotion(req: KakaoRequest | None = Body(default=No
     return await _get_collection_promotion(req, "living")
 
 
+@router.post("/collections/today-deals")
+async def get_today_deals(req: KakaoRequest | None = Body(default=None)):
+    user_id = req.userRequest.user.id if req and req.userRequest.user else None
+    entry = _promotion_entry_metadata(req)
+    request_id = str(uuid.uuid4())
+    try:
+        await experiments.record_funnel_event(
+            user_id, "promotion_entry_click", source=entry["source"],
+            properties={"surface": "today_deals", "collection_id": "today_deals",
+                        "entry_source": entry["source"], "entry_button_id": entry["button_id"],
+                        "entry_button_label": entry["button_label"]}, request_id=request_id,
+        )
+    except Exception:
+        logger.exception("failed to record today deals entry click")
+    pairs = await promotions.get_today_deal_products(
+        user_id=user_id, limit=6, request_id=request_id, record_exposure=True,
+        force_refresh=entry["source"] == "promotion_refresh",
+    )
+    if not pairs:
+        return JSONResponse({"version": "2.0", "template": {"outputs": [
+            {"simpleText": {"text": "현재 진행 중인 오늘 특가가 없습니다."}}
+        ], "quickReplies": []}})
+    click_urls = []
+    for position, (product_key, product) in enumerate(pairs, 1):
+        if not user_id:
+            click_urls.append(None)
+            continue
+        token = promotions.create_tracking_token(
+            user_id, product_key, "today_deals", category_ids=product.get("category_ids"),
+            target_url=product.get("url"), taca_item_id=product.get("taca_item_id"),
+            surface="today_deals", button_id="today_deals_product", button_label="특가 바로가기",
+            position=position, request_id=request_id,
+            product_snapshot={"title": product.get("title"), "button_label": "특가 바로가기",
+                              "selection_mode": "today_deals", "collection_id": "today_deals"},
+        )
+        click_urls.append(f"{promotions.common.SERVER_URL}/promotions/toss-shopping/click?token={token}")
+    return JSONResponse(promotions.create_toss_shopping_list_response(
+        [product for _, product in pairs], click_urls, collection_id="today_deals",
+    ))
+
+
 @router.post("/collections/{collection_id}")
 async def get_collection_promotion(collection_id: str, req: KakaoRequest | None = Body(default=None)):
     if collection_id not in {"food", "living"}:
@@ -105,7 +146,7 @@ def _promotion_entry_metadata(req: KakaoRequest | None) -> dict[str, str]:
     for payload in (req.action.clientExtra, req.action.extra):
         payload = payload or {}
         value = payload.get("source")
-        if value in {"menu_button", "quick_reply", "menu_inline_more"}:
+        if value in {"menu_button", "quick_reply", "menu_inline_more", "promotion_refresh"}:
             return {
                 "source": value,
                 "button_id": payload.get("button_id") or "unknown",

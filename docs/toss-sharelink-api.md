@@ -81,6 +81,15 @@ Authorization: Bearer <access_token>
 
 ## 3. 상품 목록 조회
 
+### 하루특가 상품 목록
+
+```text
+GET https://sharelink.toss.im/openapi/products/today-deals?size=30
+Authorization: Bearer <access_token>
+```
+
+이 응답은 당일 특가 상품과 각 상품의 `endAt`을 반환한다. `isSoldOut` 상품과 `endAt`이 지난 상품은 노출하지 않으며, 캐시 만료는 가장 빠른 `endAt`보다 늦지 않게 설정한다. 첫 페이지 최대 30개 중 카카오 응답에는 최대 6개를 사용한다. 필요 스코프는 `sharelink:read`다.
+
 ```text
 GET https://sharelink.toss.im/openapi/products/best-selling?size=5
 Authorization: Bearer <access_token>

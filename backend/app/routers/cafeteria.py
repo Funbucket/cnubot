@@ -271,7 +271,7 @@ async def _record_promotion_button_exposures(user_id: str | None, response: dict
     def walk(value):
         if isinstance(value, dict):
             extra = value.get("extra")
-            if isinstance(extra, dict) and extra.get("source") in {"quick_reply", "menu_button", "menu_inline_more"}:
+            if isinstance(extra, dict) and extra.get("source") in {"quick_reply", "menu_button", "menu_inline_more", "promotion_refresh"}:
                 key = (extra.get("source", "unknown"), extra.get("button_id", "unknown"))
                 if key not in seen:
                     seen.add(key)

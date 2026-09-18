@@ -9,7 +9,7 @@ class FoodInlineTests(unittest.IsolatedAsyncioTestCase):
     def settings(self, mode='fixed'):
         products = [s.Product(title=name, url='https://toss.im/_m/'+name, enabled=enabled)
                     for name, enabled in [('hidden', False), ('first', True), ('second', True)]]
-        return s.Settings(collections={'food': s.CollectionSettings(label='먹거리', message_text='자취생 먹을거 핫딜', mode=mode, products=products),
+        return s.Settings(collections={'food': s.CollectionSettings(label='🍱 자취생 먹을거', message_text='자취생 먹을거 핫딜', mode=mode, products=products),
                                       'living': s.CollectionSettings(label='꿀템', message_text='자취생 꿀템')})
 
     async def test_fixed_rotates_through_food_and_does_not_record_before_placement(self):

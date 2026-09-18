@@ -111,7 +111,7 @@ class PromotionSettingsTest(unittest.TestCase):
         self.assertEqual(len(settings.read_settings().products), 1)
 
     def test_editable_entry_buttons_and_defaults(self):
-        self.assertEqual(settings.read_collection("food").label, "자취생 먹을거 핫딜")
+        self.assertEqual(settings.read_collection("food").label, "🍱 자취생 먹을거")
         self.assertEqual(settings.read_collection("living").label, "자취생 꿀템")
         settings.save_settings(settings.Settings(collections={
             "food": settings.CollectionSettings(label="하이뮨 가격 보기", message_text="하이뮨 특가",
@@ -144,7 +144,7 @@ class PromotionSettingsTest(unittest.TestCase):
         self.assertEqual(len(outputs[1]["carousel"]["items"][0]["title"]), 50)
         self.assertEqual(outputs[2]["carousel"]["items"][0]["buttons"][0]["webLinkUrl"], "https://toss.im/_m/3")
 
-    def test_six_product_collection_adds_refresh_quick_reply(self):
+    def test_collection_adds_refresh_quick_reply(self):
         fixed = settings.Settings(
             mode="fixed",
             products=[self.product(str(i), image_url="https://shopping.toss.im/a.jpg") for i in range(6)],
@@ -153,11 +153,12 @@ class PromotionSettingsTest(unittest.TestCase):
         response = promotions.create_toss_shopping_list_response(products, collection_id="food")
         replies = response["template"]["quickReplies"]
 
-        self.assertEqual([reply["label"] for reply in replies], ["자취생 꿀템", "새로고침"])
-        self.assertEqual(replies[1]["messageText"], "자취생 먹을거 핫딜")
-        self.assertEqual(replies[1]["extra"], {"source": "promotion_refresh", "collection_id": "food"})
+        self.assertEqual([reply["label"] for reply in replies], ["🔥 오늘 특가", "자취생 꿀템", "새로고침"])
+        self.assertEqual(replies[0]["messageText"], "오늘 특가")
+        self.assertEqual(replies[2]["extra"]["source"], "promotion_refresh")
+        self.assertEqual(replies[1]["messageText"], "자취생 꿀템")
 
-    def test_short_collection_does_not_add_refresh_quick_reply(self):
+    def test_short_collection_also_adds_refresh_quick_reply(self):
         fixed = settings.Settings(
             mode="fixed",
             products=[self.product(str(i), image_url="https://shopping.toss.im/a.jpg") for i in range(5)],
@@ -165,7 +166,51 @@ class PromotionSettingsTest(unittest.TestCase):
         products = [product for _, product in settings.fixed_products(fixed)]
         response = promotions.create_toss_shopping_list_response(products, collection_id="food")
 
-        self.assertEqual([reply["label"] for reply in response["template"]["quickReplies"]], ["자취생 꿀템"])
+        self.assertEqual([reply["label"] for reply in response["template"]["quickReplies"]], ["🔥 오늘 특가", "자취생 꿀템", "새로고침"])
+
+    def test_today_deals_does_not_repeat_collection_and_adds_refresh(self):
+        products = [{"title": str(i), "image_url": "https://shopping.toss.im/a.jpg",
+                     "price": 100, "original_price": 200, "discount": 100,
+                     "discount_rate": 50, "url": "https://toss.im/_m/" + str(i)}
+                    for i in range(6)]
+        response = promotions.create_toss_shopping_list_response(products, collection_id="today_deals")
+
+        replies = response["template"]["quickReplies"]
+        self.assertEqual([reply["label"] for reply in replies], ["🍱 자취생 먹을거", "자취생 꿀템", "새로고침"])
+        self.assertEqual(replies[-1]["messageText"], "오늘 특가")
+
+    def test_today_deals_keeps_collection_navigation_and_refresh_when_short(self):
+        products = [{"title": str(i), "image_url": "https://shopping.toss.im/a.jpg",
+                     "price": 100, "original_price": 200, "discount": 100,
+                     "discount_rate": 50, "url": "https://toss.im/_m/" + str(i)}
+                    for i in range(5)]
+        response = promotions.create_toss_shopping_list_response(products, collection_id="today_deals")
+        replies = response["template"]["quickReplies"]
+        self.assertEqual([reply["label"] for reply in replies], [
+            "🍱 자취생 먹을거", "자취생 꿀템", "새로고침"
+        ])
+        self.assertEqual(replies[-1]["messageText"], "오늘 특가")
+
+    def test_today_deals_rotates_past_exposures_before_limiting(self):
+        items = [{
+            "tacaItemId": index,
+            "displayName": f"오늘 특가 {index}",
+            "displayPrice": 100,
+            "originalPrice": 200,
+            "discountRate": 50,
+            "thumbnailUrl": f"https://example.com/{index}.jpg",
+            "categoryIds": [],
+        } for index in range(1, 9)]
+        recent = [{}, {index: object() for index in range(1, 7)}]
+        with patch.object(promotions.toss_sharelink, "today_deals", new=AsyncMock(return_value=items)), \
+             patch("app.services.product_cache.link", new=AsyncMock(side_effect=lambda item_id: f"https://toss.im/_m/{item_id}")), \
+             patch.object(promotions.recommendations, "recent_item_ids", new=AsyncMock(side_effect=recent)), \
+             patch.object(promotions.recommendations, "record_exposure", new=AsyncMock()):
+            first = asyncio.run(promotions.get_today_deal_products("test-user", limit=6))
+            second = asyncio.run(promotions.get_today_deal_products("test-user", limit=6))
+
+        self.assertEqual([product[1]["taca_item_id"] for product in first], list(range(1, 7)))
+        self.assertEqual([product[1]["taca_item_id"] for product in second], [7, 8])
 
     def test_old_click_keeps_original_link_and_metadata_after_edit(self):
         product = self.product()

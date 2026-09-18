@@ -258,6 +258,94 @@ async def _candidate_pool(collection_id: str | None = None) -> list[dict]:
         return []
 
 
+async def get_today_deal_products(
+    user_id: str | None = None,
+    limit: int = 6,
+    request_id: str | None = None,
+    record_exposure: bool = True,
+    force_refresh: bool = False,
+) -> list[tuple[str, dict]]:
+    """Return current Sharelink day-deal items as renderable commerce products."""
+    from app.services import product_cache
+
+    now = datetime.now(KST)
+    try:
+        items = await toss_sharelink.today_deals(30, force_refresh=force_refresh)
+    except Exception:
+        return []
+    current = []
+    for item in items:
+        if item.get("isSoldOut") or not item.get("displayPrice") or not item.get("thumbnailUrl"):
+            continue
+        end_at = item.get("endAt")
+        if end_at:
+            try:
+                if datetime.fromisoformat(end_at) <= now:
+                    continue
+            except (TypeError, ValueError):
+                pass
+        current.append(item)
+    # Keep the full candidate pool until after exposure-based rotation.  Slicing
+    # here would make the first page repeat forever even when more deals exist.
+    recent_ids = await recommendations.recent_item_ids(user_id, hours=24)
+    fresh = [item for item in current if int(item.get("tacaItemId", 0)) not in recent_ids]
+    if fresh:
+        current = fresh
+    elif recent_ids:
+        current = sorted(
+            current,
+            key=lambda item: recent_ids.get(int(item.get("tacaItemId", 0))),
+        )
+    current = current[:limit]
+
+    async def build(item: dict, position: int) -> tuple[str, dict] | None:
+        try:
+            item_id = int(item["tacaItemId"])
+            link = await product_cache.link(item_id)
+            product_key = f"today_deal_{item_id}"
+            product = _add_automatic_merchandising_fields({
+                "title": item.get("displayName", "오늘 특가 상품"),
+                "button_label": promotion_settings.FIXED_PRODUCT_BUTTON_LABEL,
+                "quick_reply_label": promotion_label(item.get("displayName", "")),
+                "description": "오늘만 진행되는 토스 특가",
+                "original_price": item.get("originalPrice") or item.get("displayPrice", 0),
+                "price": item.get("displayPrice", 0),
+                "discount": max((item.get("originalPrice") or 0) - item.get("displayPrice", 0), 0),
+                "discount_rate": item.get("discountRate") or 0,
+                "url": link,
+                "image_url": item["thumbnailUrl"],
+                "review_score": item.get("reviewScore"),
+                "review_count": item.get("reviewCount"),
+                "taca_item_id": item_id,
+                "category_ids": item.get("categoryIds") or [],
+                "candidate_sources": ["today_deals"],
+                "deal_end_at": item.get("endAt"),
+                "collection_id": "today_deals",
+                "selection_mode": "today_deals",
+            })
+            TOSS_SHOPPING_PRODUCTS[product_key] = product
+            if record_exposure:
+                try:
+                    await recommendations.record_exposure(
+                        user_id, "today_deals", item_id, product["category_ids"],
+                        product_key=product_key,
+                        properties={"product_name": product["title"], "position": position,
+                                    "selection_mode": "today_deals", "deal_end_at": item.get("endAt")},
+                        request_id=request_id,
+                    )
+                except Exception:
+                    logging.getLogger(__name__).exception("failed to record today deal exposure")
+            return product_key, product
+        except (KeyError, TypeError, ValueError, asyncio.TimeoutError, toss_sharelink.TossSharelinkError):
+            return None
+
+    results = await asyncio.gather(
+        *(build(item, position) for position, item in enumerate(current, 1)),
+        return_exceptions=True,
+    )
+    return [result for result in results if isinstance(result, tuple)]
+
+
 async def _fetch_candidate_pool(collection_id: str | None = None) -> list[dict]:
     """Merge cached Toss sources into one deduplicated recommendation pool."""
     try:
@@ -650,6 +738,19 @@ def create_toss_promotion_quick_reply(kakao_response, product: dict | None = Non
             "source": "quick_reply",
             "button_id": button_id,
             "button_label": label,
+        },
+    )
+
+
+def create_today_deals_quick_reply(kakao_response):
+    return kakao_response.create_quick_reply(
+        label="🔥 오늘 특가",
+        message_text="오늘 특가",
+        extra={
+            "source": "quick_reply",
+            "button_id": "today_deals_quick_reply",
+            "button_label": "🔥 오늘 특가",
+            "collection_id": "today_deals",
         },
     )
 

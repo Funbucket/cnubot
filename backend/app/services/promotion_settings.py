@@ -142,7 +142,7 @@ def _migrate_legacy(settings: Settings) -> Settings:
     base = {"label": settings.quick_reply_label or "자취생 꿀템",
             "message_text": "자취생 꿀템", "mode": settings.mode,
             "products": settings.products}
-    food = {"label": "자취생 먹을거 핫딜", "message_text": "자취생 먹을거 핫딜",
+    food = {"label": "🍱 자취생 먹을거", "message_text": "자취생 먹을거 핫딜",
             "mode": "algorithm", "products": [], "allowed_categories": ["식품", "간식", "음료", "농산", "축산", "수산"],
             "next_collection_id": "living"}
     base["next_collection_id"] = "food"

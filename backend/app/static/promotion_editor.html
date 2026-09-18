@@ -18,7 +18,7 @@
 <form id="editor" novalidate>
 <fieldset id="fields" disabled>
 <div class="collection-picker" role="group" aria-label="관리할 기획전">
-<button type="button" class="collection-option" id="pickFood" data-collection="food" aria-pressed="true"><strong>자취생 먹을거 핫딜</strong><span>메뉴 버튼 · 메뉴 빈자리</span><span class="state" id="foodState">불러오는 중</span></button>
+<button type="button" class="collection-option" id="pickFood" data-collection="food" aria-pressed="true"><strong>🍱 자취생 먹을거</strong><span>메뉴 버튼 · 메뉴 빈자리</span><span class="state" id="foodState">불러오는 중</span></button>
 <button type="button" class="collection-option" id="pickLiving" data-collection="living" aria-pressed="false"><strong>자취생 꿀템</strong><span>일반 퀵리플라이</span><span class="state" id="livingState">불러오는 중</span></button>
 </div>
 <div class="mobile-view" role="group" aria-label="화면 보기"><button id="editView" type="button" aria-pressed="true">설정·상품 편집</button><button id="previewView" type="button" aria-pressed="false">미리보기</button></div>
@@ -33,7 +33,7 @@
 <div id="products" class="product-list"></div>
 <details id="addDetails" class="add-details"><summary>＋ 상품 추가</summary><label class="field" for="shareText">공유 문구 또는 토스 공유 링크</label><textarea id="shareText" rows="3" maxlength="5000" placeholder="토스에서 복사한 상품 문구나 공유 링크를 붙여넣으세요."></textarea><button id="add" type="button">상품 불러오기</button><p class="hint">한 번에 하나씩 추가합니다. 노출은 최대 6개, 숨김 포함 30개까지 보관할 수 있습니다.</p></details>
 </section></div>
-<aside class="preview-panel" aria-label="선택한 기획전 미리보기"><section class="card"><div class="section-top"><h2>미리보기</h2><button id="refreshPreview" class="secondary" type="button">새로고침</button></div><p id="previewNote" class="preview-note"></p><div id="preview" class="phone"></div><p id="previewStatus" class="preview-status" role="status"></p><p class="hint">카드 안에서 좌우로 넘겨보세요. 실제 카카오톡에서는 기기에 따라 글꼴과 배치가 달라질 수 있습니다.</p></section></aside>
+<aside class="preview-panel" aria-label="선택한 기획전 미리보기"><section class="card"><div class="section-top"><h2>미리보기</h2><div><button id="todayDealsPreview" class="secondary" type="button">오늘 특가 확인</button><button id="refreshPreview" class="secondary" type="button">새로고침</button></div></div><p id="previewNote" class="preview-note"></p><div id="preview" class="phone"></div><p id="previewStatus" class="preview-status" role="status"></p><p class="hint">카드 안에서 좌우로 넘겨보세요. 실제 카카오톡에서는 기기에 따라 글꼴과 배치가 달라질 수 있습니다.</p></section></aside>
 </div></fieldset>
 <div class="savebar"><div class="save-info"><strong id="saveStatus" role="status">설정 불러오는 중…</strong><span id="saveDetail">기획전별로 독립 저장됩니다.</span></div><p id="message" class="message" role="status" aria-live="polite"></p><button id="save" type="submit" disabled>모든 변경사항 저장</button></div>
 </form></main>
@@ -140,6 +140,12 @@ function paintPreview(response){
   for(const card of out.carousel.items){const item=node('article','preview-card');const url=card.thumbnails?.[0]?.imageUrl||card.thumbnail?.imageUrl;if(url){const img=document.createElement('img');img.src=url;img.alt='';img.referrerPolicy='no-referrer';img.onerror=()=>img.hidden=true;item.append(img);}const content=node('div','preview-content');content.append(node('strong','',card.title));if(out.carousel.type==='commerceCard')content.append(node('div','preview-price',(card.discountedPrice??card.price).toLocaleString('ko-KR')+'원'));if(card.description)content.append(node('p','preview-description',card.description));for(const b of card.buttons||[])content.append(node('div','preview-cta',b.label));item.append(content);row.append(item);}root.append(row);
  }
 }
+async function previewTodayDeals(){
+ if(!state)return;const version=++previewVersion;previewAbort?.abort();previewAbort=new AbortController();
+ $('previewNote').textContent='오늘 특가 · Sharelink API 현재 응답';$('previewStatus').textContent='오늘 특가를 조회하는 중…';$('previewStatus').className='preview-status';
+ try{const d=await api('/preview?collection_id=today_deals',{method:'POST',body:JSON.stringify(state),signal:previewAbort.signal});if(version!==previewVersion)return;paintPreview(d.response);$('previewStatus').textContent='관리자 진단 조회는 노출 통계에 기록되지 않습니다.';}
+ catch(e){if(e.name!=='AbortError'){$('previewStatus').textContent=e.message;$('previewStatus').className='preview-status error';}}
+}
 function setView(view){$('workspace').dataset.view=view;$('editView').setAttribute('aria-pressed',String(view==='edit'));$('previewView').setAttribute('aria-pressed',String(view==='preview'));if(state)schedulePreview();}
 $('pickFood').onclick=()=>choose('food');$('pickLiving').onclick=()=>choose('living');$('editView').onclick=()=>setView('edit');$('previewView').onclick=()=>setView('preview');
 for(const id of ['modeAuto','modeFixed'])$(id).onchange=()=>{active().mode=$(id).value;changed();renderProducts();};
@@ -149,6 +155,7 @@ $('undoDelete').onclick=()=>{const last=undo[activeId];if(!last)return;if(active
 $('add').onclick=async()=>{if(busy)return;const text=$('shareText').value.trim();if(!text){$('shareText').focus();return message('상품 공유 문구나 링크를 붙여넣어주세요.',true);}if(active().products.length>=30)return message('상품은 30개까지 보관할 수 있습니다.',true);const c=active();setBusy(true);$('add').textContent='상품 확인 중…';try{const d=await api('/parse',{method:'POST',body:JSON.stringify({text})});if(c.products.some(p=>p.url===d.product.url))throw Error('이 기획전에 이미 등록한 상품입니다.');if(c.products.filter(p=>p.enabled).length>=6)d.product.enabled=false;c.products.push(d.product);draftText[activeId]='';$('shareText').value='';changed();renderProducts();message(d.warning||'상품을 추가했습니다. 저장하면 반영됩니다.');}catch(e){message(e.message,true);}finally{$('add').textContent='상품 불러오기';setBusy(false);}};
 $('copyPath').onclick=async()=>{const text=$('skillPath').textContent;try{await navigator.clipboard.writeText(text);message('POST 스킬 경로를 복사했습니다.');}catch{const range=document.createRange();range.selectNodeContents($('skillPath'));window.getSelection().removeAllRanges();window.getSelection().addRange(range);message('경로를 선택했습니다. 복사해서 사용해주세요.');}};
 $('refreshPreview').onclick=()=>schedulePreview(true);
+$('todayDealsPreview').onclick=previewTodayDeals;
 $('editor').onsubmit=async e=>{e.preventDefault();if(busy||!state)return;sync();try{validate();}catch(err){message(err.message,true);return;}setBusy(true);try{state=await api('',{method:'PUT',body:JSON.stringify(state)});saved=structuredClone(state);undo.food=null;undo.living=null;loadCollection();message('저장했습니다. 다음 챗봇 응답부터 적용됩니다.');}catch(err){message(err.message,true);}finally{setBusy(false);}};
 window.addEventListener('beforeunload',e=>{if(changedIds().length){e.preventDefault();e.returnValue='';}});mobile.addEventListener('change',()=>{if(state)schedulePreview();});
 (async()=>{try{state=await api('');saved=structuredClone(state);loadCollection();$('fields').disabled=false;}catch(e){$('saveStatus').textContent='설정을 불러오지 못했습니다.';message(e.message,true);}})();
