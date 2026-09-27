@@ -207,10 +207,19 @@ def create_inline_product_output(product: dict, click_url: str | None = None) ->
     card["buttons"] = [product_link_button(product, click_url, label_limit=INLINE_CARD_BUTTON_LIMIT)]
     collection_id = product.get("collection_id") or "food"
     target = promotion_settings.read_collection(collection_id)
-    more_label = "먹거리 더 보기" if collection_id == "food" else "꿀템 더 보기"
+    if collection_id == "today_deals":
+        more_label = "특가 더 보기"
+        more_message_text = "오늘 특가"
+        more_source = "quick_reply"
+        more_button_id = "today_deals_inline_more"
+    else:
+        more_label = "먹거리 더 보기" if collection_id == "food" else "꿀템 더 보기"
+        more_message_text = target.message_text
+        more_source = "menu_inline_more"
+        more_button_id = f"{collection_id}_inline_more"
     card["buttons"].append({
-        "action": "message", "label": more_label, "messageText": target.message_text,
-        "extra": {"source": "menu_inline_more", "button_id": f"{collection_id}_inline_more",
+        "action": "message", "label": more_label, "messageText": more_message_text,
+        "extra": {"source": more_source, "button_id": more_button_id,
                   "button_label": more_label, "collection_id": collection_id},
     })
     # discountRate는 discountedPrice가 있어야 노출되고, discount보다 우선 표시된다.
@@ -263,6 +272,7 @@ def create_toss_shopping_list_response(
                 row = [{key: value for key, value in card.items() if key != "thumbnail"} for card in row]
             kakao_response.add_output_to_response(kakao_response.create_carousel(
                 row, type=card_type))
+        add_today_deals_quick_reply(kakao_response, collection_id)
         add_collection_quick_reply(kakao_response, collection_id)
         add_refresh_quick_reply(kakao_response, collection_id, len(products))
         return kakao_response.get_response()
@@ -284,6 +294,7 @@ def create_toss_shopping_list_response(
                 type="commerceCard",
             )
         )
+    add_today_deals_quick_reply(kakao_response, collection_id)
     add_collection_quick_reply(kakao_response, collection_id)
     add_refresh_quick_reply(kakao_response, collection_id, len(products))
     return kakao_response.get_response()

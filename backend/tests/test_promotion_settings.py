@@ -153,9 +153,9 @@ class PromotionSettingsTest(unittest.TestCase):
         response = promotions.create_toss_shopping_list_response(products, collection_id="food")
         replies = response["template"]["quickReplies"]
 
-        self.assertEqual([reply["label"] for reply in replies], ["자취생 꿀템", "새로고침"])
-        self.assertEqual(replies[1]["extra"]["source"], "promotion_refresh")
-        self.assertEqual(replies[0]["messageText"], "자취생 꿀템")
+        self.assertEqual([reply["label"] for reply in replies], ["🔥 오늘 특가", "자취생 꿀템", "새로고침"])
+        self.assertEqual(replies[2]["extra"]["source"], "promotion_refresh")
+        self.assertEqual(replies[1]["messageText"], "자취생 꿀템")
 
     def test_short_collection_also_adds_refresh_quick_reply(self):
         fixed = settings.Settings(
@@ -165,7 +165,7 @@ class PromotionSettingsTest(unittest.TestCase):
         products = [product for _, product in settings.fixed_products(fixed)]
         response = promotions.create_toss_shopping_list_response(products, collection_id="food")
 
-        self.assertEqual([reply["label"] for reply in response["template"]["quickReplies"]], ["자취생 꿀템", "새로고침"])
+        self.assertEqual([reply["label"] for reply in response["template"]["quickReplies"]], ["🔥 오늘 특가", "자취생 꿀템", "새로고침"])
 
     def test_today_deals_does_not_repeat_collection_and_adds_refresh(self):
         products = [{"title": str(i), "image_url": "https://shopping.toss.im/a.jpg",
@@ -202,8 +202,8 @@ class PromotionSettingsTest(unittest.TestCase):
         } for index in range(1, 9)]
         recent = [
             {},
-            {index: object() for index in range(1, 7)},
-            {index: object() for index in range(1, 9)},
+            {index: 1 for index in range(1, 7)},
+            {index: 1 if index in (5, 6) else 2 for index in range(1, 9)},
         ]
         with patch.object(promotions.toss_sharelink, "today_deals", new=AsyncMock(return_value=items)), \
              patch("app.services.product_cache.link", new=AsyncMock(side_effect=lambda item_id: f"https://toss.im/_m/{item_id}")), \
@@ -214,8 +214,51 @@ class PromotionSettingsTest(unittest.TestCase):
             third = asyncio.run(promotions.get_today_deal_products("test-user", limit=6))
 
         self.assertEqual([product[1]["taca_item_id"] for product in first], list(range(1, 7)))
-        self.assertEqual([product[1]["taca_item_id"] for product in second], [7, 8])
-        self.assertEqual([product[1]["taca_item_id"] for product in third], list(range(1, 7)))
+        self.assertEqual([product[1]["taca_item_id"] for product in second], [7, 8, 1, 2, 3, 4])
+        self.assertEqual([product[1]["taca_item_id"] for product in third], [5, 6, 1, 2, 3, 4])
+
+    def test_today_deals_never_substitutes_unverified_deals_when_data_fails(self):
+        with patch.object(
+            promotions.toss_sharelink,
+            "today_deals",
+            new=AsyncMock(side_effect=RuntimeError("quota")),
+        ), patch.object(
+            promotions.recommendations,
+            "recent_item_ids",
+            new=AsyncMock(return_value={}),
+        ), patch.object(
+            promotions.recommendations,
+            "record_exposure",
+            new=AsyncMock(),
+        ):
+            products = asyncio.run(promotions.get_today_deal_products("test-user", limit=2))
+
+        self.assertEqual(products, [])
+
+    def test_collection_api_failure_repeats_configured_cards_after_full_cycle(self):
+        for collection_id in ('food', 'living'):
+            with self.subTest(collection_id=collection_id):
+                products = [self.product(str(i), image_url='https://example.com/item.jpg') for i in range(6)]
+                collection = settings.CollectionSettings(label=collection_id, message_text=collection_id, products=products)
+                keys = [settings.product_key(p.url) for p in products]
+                recent = [dict.fromkeys(keys, n) if n else {} for n in range(4)]
+                with patch.object(settings, 'read_collection', return_value=collection), \
+                     patch.object(promotions, 'get_live_toss_products', AsyncMock(side_effect=promotions.toss_sharelink.TossSharelinkError('quota'))), \
+                     patch.object(promotions.recommendations, 'last_exposure_by_product', AsyncMock(side_effect=recent)), \
+                     patch.object(promotions.recommendations, 'record_exposure', AsyncMock()), \
+                     patch('app.routers.promotions.experiments.record_funnel_event', AsyncMock()):
+                    pages = []
+                    for _ in range(4):
+                        response = self.client.post('/promotions/collections/'+collection_id)
+                        self.assertEqual(response.status_code, 200)
+                        body = response.json()
+                        self.assertNotIn('상품을 준비 중입니다', response.text)
+                        cards = [card for output in body['template']['outputs']
+                                 for card in output.get('carousel', {}).get('items', [])]
+                        self.assertTrue(all('price' not in card for card in cards))
+                        pages.append([card['buttons'][0]['webLinkUrl'] for card in cards])
+                urls = [p.url for p in products]
+                self.assertEqual(pages, [urls] * 4)
 
     def test_old_click_keeps_original_link_and_metadata_after_edit(self):
         product = self.product()

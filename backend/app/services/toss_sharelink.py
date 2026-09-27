@@ -66,6 +66,12 @@ def _access_token_sync() -> str:
 
 
 def _get_sync(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    from app.services import product_snapshot
+    return product_snapshot.response(path, params)
+
+
+def _get_live_sync(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    """External access reserved for the scheduled collector."""
     response = requests.get(
         f"https://sharelink.toss.im{path}",
         params=params,
@@ -76,6 +82,15 @@ def _get_sync(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]
 
 
 def _post_sync(path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    from app.services import product_snapshot
+    key = str(payload.get("tacaItemId")) + ":" + str(payload.get("publisherId"))
+    url = product_snapshot.read().get("links", {}).get(key)
+    if path != "/openapi/links" or not url:
+        raise TossSharelinkError("PRODUCT_LINK_NOT_COLLECTED")
+    return {"success": {"shortUrl": url}}
+
+
+def _post_live_sync(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     response = requests.post(
         f"https://sharelink.toss.im{path}",
         json=payload,
@@ -86,65 +101,33 @@ def _post_sync(path: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 async def best_selling(size: int = 10) -> list[dict[str, Any]]:
-    now = time.time()
-    cached = _best_cache.get(size)
-    if cached and cached[0] > now:
-        return cached[1]
     body = await asyncio.to_thread(_get_sync, "/openapi/products/best-selling", {"size": size})
     items = body.get("success", {}).get("items", [])
-    _best_cache[size] = (now + 3600, items)
     return items
 
 
 async def best_categories(category_id: int, size: int = 30) -> list[dict[str, Any]]:
-    key = (int(category_id), int(size))
-    now = time.time()
-    cached = _category_best_cache.get(key)
-    if cached and cached[0] > now:
-        return cached[1]
     body = await asyncio.to_thread(
         _get_sync,
         f"/openapi/products/best-categories/{int(category_id)}",
         {"size": size},
     )
     items = body.get("success", {}).get("items", [])
-    # Category rankings are refreshed daily according to the ShareLink API.
-    _category_best_cache[key] = (now + 86400, items)
     return items
 
 
 async def today_deals(size: int = 30, force_refresh: bool = False) -> list[dict[str, Any]]:
-    global _today_deals_cache
-    now = time.time()
-    if not force_refresh and _today_deals_cache and _today_deals_cache[0] > now:
-        return _today_deals_cache[1]
+    # force_refresh is retained for callers; even refresh reads only disk.
     body = await asyncio.to_thread(
         _get_sync,
         "/openapi/products/today-deals",
         {"size": size},
     )
     items = body.get("success", {}).get("items", [])
-    end_times = [
-        item.get("endAt") for item in items if item.get("endAt")
-    ]
-    # Recheck at least hourly, and never keep a cache beyond the earliest deal end.
-    expiry = now + 3600
-    if end_times:
-        try:
-            from datetime import datetime
-            earliest = min(datetime.fromisoformat(value).timestamp() for value in end_times)
-            expiry = min(expiry, earliest)
-        except (TypeError, ValueError):
-            pass
-    _today_deals_cache = (max(expiry, now + 60), items)
     return items
 
 
 async def categories() -> dict[int, list[str]]:
-    global _category_cache
-    now = time.time()
-    if _category_cache and _category_cache[0] > now:
-        return _category_cache[1]
     body = await asyncio.to_thread(_get_sync, "/openapi/categories")
     flattened: dict[int, list[str]] = {}
 
@@ -157,7 +140,6 @@ async def categories() -> dict[int, list[str]]:
             walk(node.get("children", []), path)
 
     walk(body.get("success", {}).get("categories", []), [])
-    _category_cache = (now + 86400, flattened)
     return flattened
 
 

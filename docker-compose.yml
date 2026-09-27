@@ -47,5 +47,18 @@ services:
         condition: service_healthy
     restart: always
 
+  product-collector:
+    build:
+      context: ./backend
+    entrypoint: ["python", "-m", "app.jobs.collect_products"]
+    environment:
+      TOSS_ACCESS_KEY: ${TOSS_ACCESS_KEY}
+      TOSS_SECRET_KEY: ${TOSS_SECRET_KEY}
+      TOSS_PUBLISHER_ID: ${TOSS_PUBLISHER_ID}
+      MENU_DATA_DIR: /data/menus
+    volumes:
+      - ./data:/data/menus
+    restart: always
+
 volumes:
   backend-postgres-db-volume:

@@ -93,6 +93,10 @@ async def init_database() -> None:
             ALTER TABLE user_events ADD COLUMN IF NOT EXISTS request_id TEXT;
             CREATE INDEX IF NOT EXISTS idx_user_events_request_time
                 ON user_events(request_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_user_events_created_time
+                ON user_events(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_user_events_collection_time
+                ON user_events((properties->>'collection_id'), created_at DESC);
 
             -- 사용자별로 각 단계가 처음 성립한 시각. "직전 단계가 앞에 있었나"는
             -- 곧 "그 단계의 첫 성립 시각 이후인가"와 같아서, 단계마다 EXISTS를

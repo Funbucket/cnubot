@@ -10,11 +10,19 @@
 @media(max-width:1020px){.workspace{grid-template-columns:minmax(0,1fr) 320px;gap:16px}main{padding:24px 20px 150px}.card{padding:18px}.fields{grid-template-columns:1fr}}
 @media(max-width:760px){main{padding:22px 14px 170px}.page-heading{margin-bottom:18px}h1{font-size:26px}.page-heading p{font-size:13px}.collection-picker{gap:8px;margin-bottom:14px}.collection-option{padding:13px 11px;gap:7px}.collection-option[aria-pressed=true]{padding:12px 10px}.collection-option strong{font-size:14px;line-height:1.45}.collection-option span{font-size:11px}.workspace{display:block}.preview-panel{position:static;max-height:none;overflow:visible}.mobile-view{display:flex;gap:6px;background:#e6ede8;border-radius:10px;padding:4px;margin-bottom:16px}.mobile-view button{flex:1;background:transparent;color:#456153;min-height:44px}.mobile-view button[aria-pressed=true]{background:white;color:var(--green);box-shadow:0 1px 4px #20352c15}.workspace[data-view=edit] .preview-panel{display:none}.workspace[data-view=preview] .edit-panel{display:none}.card{padding:16px;border-radius:13px}.stack{gap:14px}.fields{grid-template-columns:1fr}.mode-options label{padding:10px;gap:6px}.mode-options strong{font-size:13px}.mode-options small{font-size:11px}.mode-options input{width:18px;height:18px}.savebar{padding:12px 14px;padding-bottom:max(12px,env(safe-area-inset-bottom));gap:10px;flex-wrap:wrap}.save-info{min-width:130px}.savebar button{min-width:120px;padding:10px 12px;font-size:13px}.save-info strong{font-size:13px}.save-info span{font-size:11px}.savebar .message{flex-basis:100%;order:3;max-height:66px;overflow:auto}.product-head{padding:12px}.product-actions{padding:0 12px 8px}.preview-panel .card{padding:16px}.phone{max-width:430px;margin:auto}.preview-card img{height:190px}}
 @media(prefers-reduced-motion:no-preference){button{transition:background .12s,border-color .12s}}
+.batch-status{margin-bottom:20px}.batch-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin:16px 0}.batch-metrics strong{display:block;margin-top:4px;font-size:15px}.batch-collections{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}.batch-collection{padding:14px;border:1px solid var(--line);border-radius:10px}.batch-collection strong{display:block;margin-bottom:8px}
 </style></head>
 <body>
 <header class="admin-topbar"><a class="admin-brand" href="/admin"><span class="admin-brand-mark">C</span>CNU ADMIN</a><nav class="admin-nav" aria-label="관리자 메뉴"><a href="/admin/recommendations" aria-current="page">상품·버튼 관리</a><a href="/admin/insights">인사이트</a><a href="/admin/experiments">실험실</a><a href="/admin/events">이벤트 수집</a></nav></header>
 <main>
 <div class="page-heading"><div class="eyebrow">SHOPPING COLLECTIONS</div><h1>상품·버튼 관리</h1><p>기획전을 선택하고, 상품과 노출 방식을 관리하세요.</p></div>
+<section class="card batch-status" aria-labelledby="batchHeading">
+<div class="section-top"><h2 id="batchHeading">자동 추천 · 배치 수집 현황</h2><button type="button" class="secondary" id="refreshBatch">상태 새로고침</button></div>
+<p id="batchNotice" role="status" aria-live="polite">수집 상태를 불러오는 중…</p>
+<div id="batchMetrics" class="batch-metrics"></div><div id="batchCollections" class="batch-collections"></div>
+<p class="hint">매일 00:05 · 06:05 · 12:05 · 18:05 (한국시간) 수집 예정. 상태 조회는 Toss API를 호출하지 않습니다. 1분마다 갱신됩니다.</p>
+<p class="hint">조회 예약량은 이 배치가 요청 전에 잡아둔 상품 수입니다. Toss 계정의 실제 사용량·남은 한도가 아닙니다. 후보 수는 다양성 조건 적용 전이며, 부족하면 상품이 반복되거나 6개 미만일 수 있습니다. 다음 시각은 예정값으로 수집 서비스의 실제 실행 여부를 보장하지 않습니다.</p>
+</section>
 <form id="editor" novalidate>
 <fieldset id="fields" disabled>
 <div class="collection-picker" role="group" aria-label="관리할 기획전">
@@ -49,6 +57,27 @@ const changedIds=()=>state?Object.keys(names).filter(id=>JSON.stringify(state.co
 function message(text,error=false){$('message').textContent=text;$('message').className='message'+(error?' error':'');}
 function node(tag,cls,text){const el=document.createElement(tag);if(cls)el.className=cls;if(text!==undefined)el.textContent=text;return el;}
 function button(text,fn,kind='secondary'){const b=node('button',kind,text);b.type='button';b.onclick=fn;return b;}
+async function loadBatchStatus(){
+ const refresh=$('refreshBatch');if(refresh.disabled)return;refresh.disabled=true;
+ try{
+  const d=await api('/collection-status');
+  const date=value=>value?new Date(value).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'}):'기록 없음';
+  const status={not_started:'첫 수집 대기',running:'수집 시작 기록 있음',ok:'마지막 수집 성공',failed:'마지막 수집 실패',quota_exceeded:'마지막 수집: 한도 초과'};
+  $('batchNotice').textContent=(status[d.status]||'상태 확인 필요')+(d.blocked_today?' · 오늘 추가 조회 중단. 다음 수집 예정까지 저장된 목록을 사용합니다.':d.pending?' · 수집 예정 시각이 지났습니다. 서비스 실행 상태를 확인하세요.':'')+' · 확인 '+date(d.checked_at);
+  $('batchNotice').className=d.blocked_today||d.status==='failed'?'error':'';
+  $('batchMetrics').replaceChildren();
+  for(const [label,value] of [['마지막 수집 시작',date(d.last_attempt_at)],['마지막 성공 데이터',date(d.last_success_at)],['다음 수집 예정',date(d.next_run_at)],['저장된 전체 상품',d.stored_count+'개'],['오늘 배치 조회 예약량',d.reserved_today.toLocaleString()+' / '+d.local_daily_budget.toLocaleString()+'개']]){
+   const box=node('div');box.append(node('small','',label),node('strong','',value));$('batchMetrics').append(box);
+  }
+  $('batchCollections').replaceChildren();
+  const serving={snapshot:'저장된 후보로 자동 추천',fallback:'대체 등록 상품 사용',fixed:'고정 상품 모드',empty:'표시할 상품 없음'};
+  for(const c of d.collections){const box=node('div','batch-collection');box.append(node('strong','',c.label),node('span','badge',serving[c.serving]),node('p','hint','사용 가능한 저장 후보 '+c.available_count+'개 · 등록 상품 '+c.configured_count+'개'));$('batchCollections').append(box);}
+ }catch(e){$('batchNotice').textContent='상태 조회 실패: '+e.message+' 이전 표시가 있다면 최신 정보가 아닙니다.';$('batchNotice').className='error';}
+ finally{refresh.disabled=false;}
+}
+$('refreshBatch').onclick=loadBatchStatus;
+loadBatchStatus();
+setInterval(()=>{if(!document.hidden)loadBatchStatus();},60000);
 function updateStatus(){
  const ids=changedIds();$('save').disabled=busy||!ids.length;
  $('saveStatus').textContent=busy?'처리 중…':ids.length?ids.map(id=>names[id]).join(' · ')+' 변경사항 있음':'모든 변경사항 저장됨';

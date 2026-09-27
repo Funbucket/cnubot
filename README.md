@@ -25,6 +25,8 @@ docker compose exec -T backend python -m app.jobs.scrape_menus all
 
 수집된 메뉴는 `data/menus/`에 저장됩니다.
 
+상품 자동 추천은 `product-collector` 서비스가 하루 4회 수집한 저장 데이터를 사용합니다. 새로고침은 사용자별 노출 이력으로 상품을 순환합니다. 수집 일정·장애 시 동작·수동 실행은 [상품 배치 수집](docs/product-collection.md)을 참고하세요.
+
 ## Stack
 
 FastAPI · Uvicorn · PostgreSQL · Docker Compose

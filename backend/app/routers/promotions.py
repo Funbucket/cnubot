@@ -97,6 +97,10 @@ async def _get_collection_promotion(req: KakaoRequest | None, collection_id: str
     except Exception:
         logger.exception("failed to load live promotion products")
         product_pairs = []
+    if not product_pairs and collection_id:
+        product_pairs = await promotions.get_collection_fallback_products(
+            user_id, source, collection_id, limit=6, request_id=request_id,
+        )
     if not product_pairs and (collection_id or promotion_settings.read_settings().mode == "fixed"):
         return JSONResponse({"version": "2.0", "template": {"outputs": [
             {"simpleText": {"text": "상품을 준비 중입니다. 잠시 후 다시 확인해주세요."}}

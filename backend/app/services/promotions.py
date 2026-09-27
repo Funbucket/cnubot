@@ -272,7 +272,8 @@ async def get_today_deal_products(
     try:
         items = await toss_sharelink.today_deals(30, force_refresh=force_refresh)
     except Exception:
-        return []
+        # Never advertise unrelated or expired products as today's deals.
+        items = []
     current = []
     for item in items:
         if item.get("isSoldOut") or not item.get("displayPrice") or not item.get("thumbnailUrl"):
@@ -287,22 +288,17 @@ async def get_today_deal_products(
         current.append(item)
     # Keep the full candidate pool until after exposure-based rotation.  Slicing
     # here would make the first page repeat forever even when more deals exist.
-    recent_ids = await recommendations.recent_item_ids(user_id, hours=24)
+    recent_ids = await recommendations.recent_item_ids(user_id, hours=48, collection_id="today_deals")
     fresh = [item for item in current if int(item.get("tacaItemId", 0)) not in recent_ids]
-    if fresh:
-        current = fresh
-    elif current and recent_ids:
-        # The whole active pool has completed one rotation. Start the next
-        # round from the API's original order instead of treating this as an
-        # empty result or continuing from an arbitrary last-exposed item.
-        current = list(current)
+    seen = [item for item in current if int(item.get("tacaItemId", 0)) in recent_ids]
+    current = fresh + sorted(seen, key=lambda item: recent_ids[int(item.get("tacaItemId", 0))])
     current = current[:limit]
 
     async def build(item: dict, position: int) -> tuple[str, dict] | None:
         try:
             item_id = int(item["tacaItemId"])
-            link = await product_cache.link(item_id)
-            product_key = f"today_deal_{item_id}"
+            link = item.get("_fallback_url") or await product_cache.link(item_id)
+            product_key = item.get("_product_key") or f"today_deal_{item_id}"
             product = _add_automatic_merchandising_fields({
                 "title": item.get("displayName", "오늘 특가 상품"),
                 "button_label": promotion_settings.FIXED_PRODUCT_BUTTON_LABEL,
@@ -330,7 +326,8 @@ async def get_today_deal_products(
                         user_id, "today_deals", item_id, product["category_ids"],
                         product_key=product_key,
                         properties={"product_name": product["title"], "position": position,
-                                    "selection_mode": "today_deals", "deal_end_at": item.get("endAt")},
+                                    "selection_mode": "today_deals", "collection_id": "today_deals",
+                                    "deal_end_at": item.get("endAt")},
                         request_id=request_id,
                     )
                 except Exception:
@@ -474,6 +471,38 @@ async def get_live_toss_product(
     return product_key, TOSS_SHOPPING_PRODUCTS[product_key]
 
 
+async def get_collection_fallback_products(user_id, surface, collection_id, limit=6, request_id=None):
+    """Reuse this collection's configured links when live recommendations fail."""
+    settings = promotion_settings.read_settings()
+    collection = promotion_settings.read_collection(collection_id)
+    products = promotion_settings.fixed_products(promotion_settings.Settings(
+        products=collection.products, revision=settings.revision,
+    ))
+    try:
+        recent = await recommendations.last_exposure_by_product(user_id, surface)
+    except Exception:
+        recent = {}
+    fresh = [pair for pair in products if pair[0] not in recent]
+    products = fresh or sorted(products, key=lambda pair: recent[pair[0]])
+    products = products[:limit]
+    for position, (key, product) in enumerate(products, 1):
+        product.update(collection_id=collection_id)
+        TOSS_SHOPPING_PRODUCTS[key] = product
+        try:
+            row, column = commerce_grid_position(position)
+            await recommendations.record_exposure(
+                user_id, surface, product.get('taca_item_id') or 0, [],
+                product_key=key, request_id=request_id,
+                properties={'product_name': product['title'], 'collection_id': collection_id,
+                            'selection_mode': 'fixed', 'fallback': True,
+                            'position': position, 'row': row, 'column': column,
+                            'settings_revision': settings.revision},
+            )
+        except Exception:
+            logging.getLogger(__name__).exception('failed to record collection fallback exposure')
+    return products
+
+
 async def get_live_toss_products(
     user_id: str | None = None,
     surface: str = "quick_reply",
@@ -517,7 +546,10 @@ async def get_live_toss_products(
     candidates = [dict(item, _policy=classified) for item in candidates
                   if (classified := policy.classify(item, tree, collection_id))]
     affinity, recent_ids = await asyncio.gather(
-        recommendations.category_affinity(user_id), recommendations.recent_item_ids(user_id))
+        recommendations.category_affinity(user_id),
+        recommendations.recent_item_ids(user_id, hours=48, collection_id=collection_id))
+    # Keep timestamps across rounds: the policy chooses least recently seen
+    # items after exhaustion, instead of repeating the highest-ranked page.
     products: list[tuple[str, dict]] = []
     selected = []
     attempts = 0
@@ -861,21 +893,29 @@ async def get_inline_promotion_product(
     if last_collection in collection_order:
         start = collection_order.index(last_collection) + 1
         collection_order = collection_order[start:] + collection_order[:start]
-    collection_id = None
     for candidate_id in collection_order:
-        if candidate_id == "today_deals":
-            selected = await _get_inline_today_deal_product(user_id)
-            if selected:
-                key, product = selected
-                TOSS_SHOPPING_PRODUCTS[key] = product
-                return key, product
+        try:
+            if candidate_id == "today_deals":
+                selected = await _get_inline_today_deal_product(user_id)
+            elif any(p.enabled for p in collections[candidate_id].products):
+                selected = await _get_inline_collection_product(
+                    user_id, settings, candidate_id
+                )
+            else:
+                continue
+        except Exception:
+            logging.getLogger(__name__).exception("failed to load inline collection %s", candidate_id)
             continue
-        if any(p.enabled for p in collections[candidate_id].products):
-            collection_id = candidate_id
-            break
-    if not collection_id:
-        return None
-    collection = collections[collection_id]
+        if selected:
+            key, product = selected
+            TOSS_SHOPPING_PRODUCTS[key] = product
+            return key, product
+    return None
+
+
+async def _get_inline_collection_product(user_id, settings, collection_id):
+    """Try one collection; the caller continues the rotation if it is unavailable."""
+    collection = settings.collections[collection_id]
     if collection.mode == "fixed":
         enabled = [p for p in collection.products if p.enabled]
         if not enabled:

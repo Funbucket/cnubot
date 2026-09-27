@@ -32,6 +32,42 @@ class FoodInlineTests(unittest.IsolatedAsyncioTestCase):
             key, product = await p.get_inline_promotion_product('test')
         self.assertEqual((key, product['collection_id']), ('today_deal_1', 'today_deals'))
 
+    async def test_empty_meal_gets_card_when_rotated_collection_api_fails(self):
+        from app.routers import cafeteria as menu_routes
+        from tests.test_menu_inline_card import MENU_DATA
+        settings = self.settings('algorithm')
+        settings.collections['living'].mode = 'algorithm'
+        settings.collections['living'].products = settings.collections['food'].products
+        today = ('today_deal_test', {
+            'title': '상품', 'price': 1000, 'image_url': 'https://example.com/item.jpg',
+            'url': 'https://toss.im/_m/test', 'collection_id': 'today_deals',
+        })
+        req = KakaoRequest.model_validate({'userRequest': {
+            'utterance': '월요일상록회관', 'user': {'id': 'test'}}})
+        with patch.object(s, 'read_settings', return_value=settings), \
+             patch.object(p.recommendations, 'latest_exposure_collection', AsyncMock(return_value='today_deals')), \
+             patch.object(p.toss_sharelink, 'categories', AsyncMock(side_effect=p.toss_sharelink.TossSharelinkError('quota'))) as categories, \
+             patch.object(p, '_get_inline_today_deal_product', AsyncMock(return_value=today)), \
+             patch.object(menu_routes, '_inline_card_enabled', return_value=True), \
+             patch.object(p, '_tracking_secret', return_value=b'test-only-key'), \
+             patch.object(p, 'record_inline_exposure', AsyncMock()) as exposure, \
+             patch.object(menu_routes, '_record_menu_view', AsyncMock()), \
+             patch.object(menu_routes, '_record_promotion_button_exposures', AsyncMock()):
+            response = await menu_routes._menu_response(
+                req, '월요일', dict(MENU_DATA, breakfast=[]), '상록회관', 'test')
+        self.assertIn('commerceCard', response['template']['outputs'][0])
+        self.assertEqual(categories.await_count, 2)
+        exposure.assert_awaited_once()
+
+    def test_today_deals_inline_card_has_today_deals_more_button(self):
+        product = {'title': 'today', 'price': 1000, 'image_url': 'https://example.com/today',
+                   'url': 'https://toss.im/_m/today', 'collection_id': 'today_deals',
+                   'button_label': '특가 바로가기'}
+        buttons = promotion_cards.create_inline_product_output(product)['commerceCard']['buttons']
+        self.assertEqual([button['label'] for button in buttons], ['특가 바로가기', '특가 더 보기'])
+        self.assertEqual(buttons[1]['messageText'], '오늘 특가')
+        self.assertEqual(buttons[1]['extra']['button_id'], 'today_deals_inline_more')
+
     async def test_fixed_rotates_through_food_and_does_not_record_before_placement(self):
         async def resolve(settings):
             self.assertEqual([x.title for x in settings.products], ['first', 'second'])

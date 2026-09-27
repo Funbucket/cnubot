@@ -37,7 +37,7 @@ from app.services.admin_views import (
 router = APIRouter()
 security = HTTPBasic()
 _insights_cache: dict[tuple[date | None, date | None], tuple[float, dict[str, Any]]] = {}
-_INSIGHTS_CACHE_SECONDS = 20
+_INSIGHTS_CACHE_SECONDS = 300
 
 
 def require_admin(credentials: HTTPBasicCredentials = Depends(security)) -> str:
@@ -87,6 +87,13 @@ def require_editor(x_promotion_editor: str = Header(default="")):
 async def get_promotion_settings(_: str = Depends(require_admin)):
     from fastapi.responses import JSONResponse
     return JSONResponse(promotion_settings.read_settings().model_dump(), headers={"Cache-Control": "no-store"})
+
+
+@router.get("/promotion-settings/collection-status")
+async def product_collection_status(_: str = Depends(require_admin)):
+    from fastapi.responses import JSONResponse
+    from app.services.product_collection_status import summary
+    return JSONResponse(await asyncio.to_thread(summary), headers={"Cache-Control": "no-store"})
 
 
 @router.put("/promotion-settings", dependencies=[Depends(require_editor)])

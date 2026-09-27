@@ -77,6 +77,20 @@ class DiversityTest(unittest.TestCase):
 
 
 class SelectionTest(unittest.IsolatedAsyncioTestCase):
+    async def test_algorithm_starts_next_round_after_all_candidates_were_exposed(self):
+        candidates = [item(1), item(2)] + [item(20+c, c) for c in range(2, 7)]
+        recent = {candidate["tacaItemId"]: index for index, candidate in enumerate(candidates)}
+        with patch.object(promotions, "_candidate_pool", AsyncMock(return_value=candidates)), \
+             patch.object(promotions.toss_sharelink, "categories", AsyncMock(return_value=TREE)), \
+             patch.object(promotions.toss_sharelink, "detail", AsyncMock(side_effect=lambda cid: next(
+                 dict(candidate) for candidate in candidates if candidate["tacaItemId"] == cid))), \
+             patch.object(promotions.toss_sharelink, "issue_link", AsyncMock(return_value="https://toss.im/_m/test")), \
+             patch.object(promotions.recommendations, "category_affinity", AsyncMock(return_value={})), \
+             patch.object(promotions.recommendations, "recent_item_ids", AsyncMock(return_value=recent)):
+            result = await promotions.get_live_toss_products(collection_id="food", limit=6,
+                force_algorithm=True, record_exposure=False)
+        self.assertEqual(len(result), 6)
+
     async def test_failed_detail_replenishes_and_diagnostic_does_not_record(self):
         candidates = [item(1), item(2)] + [item(20+c, c) for c in range(2, 7)]
         async def detail(cid):

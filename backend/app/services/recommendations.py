@@ -51,7 +51,7 @@ async def category_affinity(user_id: str | None) -> dict[int, float]:
     return {int(row["category_id"]): float(row["score"]) for row in rows}
 
 
-async def recent_item_ids(user_id: str | None, hours: int = 24) -> dict[int, object]:
+async def recent_item_ids(user_id: str | None, hours: int = 24, collection_id: str | None = None) -> dict[int, object]:
     if not user_id:
         return {}
     try:
@@ -65,10 +65,13 @@ async def recent_item_ids(user_id: str | None, hours: int = 24) -> dict[int, obj
         WHERE user_id = $1
           AND event_name = 'promotion_exposure'
           AND created_at >= NOW() - ($2 * INTERVAL '1 hour')
+          AND taca_item_id IS NOT NULL
+          AND ($3::text IS NULL OR properties->>'collection_id' = $3)
         GROUP BY taca_item_id
         """,
         user_id,
         hours,
+        collection_id,
     )
     return {int(row["taca_item_id"]): row["last_exposed_at"] for row in rows}
 
