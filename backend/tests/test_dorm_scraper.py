@@ -1,8 +1,15 @@
 import unittest
+from datetime import date
+from unittest import mock
 
 from bs4 import BeautifulSoup
 
-from app.scrapers.dorm import _parse_chart_data, _parse_inwon, extract_menus_from_cell
+from app.scrapers.dorm import (
+    _parse_chart_data,
+    _parse_inwon,
+    extract_menus_from_cell,
+    scrape_current_week_dorm_menu,
+)
 
 
 class DormScraperTest(unittest.TestCase):
@@ -72,6 +79,38 @@ class DormScraperTest(unittest.TestCase):
 
     def test_parse_crowding_chart_data(self):
         self.assertEqual(_parse_chart_data("1,2,3,4,5,6,7,8,9"), list(range(1, 10)))
+
+    @mock.patch("app.scrapers.dorm.scrape_dorm_menu")
+    def test_current_week_chooses_page_containing_today(self, scrape):
+        scrape.side_effect = [
+            {"date": "10/05 ~ 10/11", "menu": ["next"]},
+            {"date": "09/28 ~ 10/04", "menu": ["current"]},
+        ]
+
+        result = scrape_current_week_dorm_menu(
+            "https://example.test/menu?page={page}", today=date(2026, 9, 28)
+        )
+
+        self.assertEqual(result["menu"], ["current"])
+        self.assertEqual(
+            [call.args[0] for call in scrape.call_args_list],
+            [
+                "https://example.test/menu?page=1",
+                "https://example.test/menu?page=2",
+            ],
+        )
+
+    @mock.patch("app.scrapers.dorm.scrape_dorm_menu")
+    def test_current_week_fails_when_no_candidate_contains_today(self, scrape):
+        scrape.side_effect = [
+            {"date": "10/05 ~ 10/11", "menu": ["next"]},
+            {"date": "09/21 ~ 09/27", "menu": ["previous"]},
+        ]
+
+        with self.assertRaises(ValueError):
+            scrape_current_week_dorm_menu(
+                "https://example.test/menu?page={page}", today=date(2026, 9, 28)
+            )
 
 
 if __name__ == "__main__":

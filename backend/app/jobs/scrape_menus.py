@@ -2,8 +2,8 @@ import argparse
 from pathlib import Path
 
 from app.scrapers.cnu_food import scrape_mobile_food_menu
-from app.scrapers.dorm import scrape_dorm_hours, scrape_dorm_menu
-from app.scrapers.settings import DORM_URL, get_mobile_food_url
+from app.scrapers.dorm import scrape_current_week_dorm_menu, scrape_dorm_hours
+from app.scrapers.settings import DORM_URL_TEMPLATE, get_mobile_food_url
 from app.utils import common
 from app.utils.json_files import write_json_atomic as _write_json
 
@@ -12,7 +12,7 @@ SCRAPABLE_PLACES = ["dorm", "hall_2", "hall_3", "sangrok", "life_science"]
 
 def scrape_place(place: str) -> dict:
     if place == "dorm":
-        return scrape_dorm_menu(DORM_URL)
+        return scrape_current_week_dorm_menu(DORM_URL_TEMPLATE)
     if place in {"hall_2", "hall_3", "sangrok", "life_science"}:
         return scrape_mobile_food_menu(get_mobile_food_url(place), place)
     raise ValueError(f"Unsupported place: {place}")

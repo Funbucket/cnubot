@@ -4,7 +4,8 @@ import pytz
 
 KST = pytz.timezone("Asia/Seoul")
 
-DORM_URL = "https://dorm.cnu.ac.kr/html/kr/sub03/sub03_0304.html?mode=sch&page=1"
+DORM_URL = "https://dorm.cnu.ac.kr/html/kr/sub03/sub03_0304.html?mode=sch&page=2"
+DORM_URL_TEMPLATE = "https://dorm.cnu.ac.kr/html/kr/sub03/sub03_0304.html?mode=sch&page={page}"
 
 MOBILE_FOOD_URLS = {
     "hall_2": (

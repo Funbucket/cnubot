@@ -1,5 +1,7 @@
 import json
 import re
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 import requests
 from bs4 import BeautifulSoup as bs
@@ -43,6 +45,27 @@ def scrape_dorm_menu(url: str) -> dict:
         )
 
     return data
+
+
+def scrape_current_week_dorm_menu(
+    url_template: str, today: date | None = None, pages: tuple[int, ...] = (1, 2)
+) -> dict:
+    """Fetch candidate pages and keep the page whose range contains today.
+
+    The dorm site changes which page number represents the current week as the
+    schedule advances, so selecting a fixed page can silently save next week's
+    menu.  Fail closed when neither candidate contains today.
+    """
+    target = today or datetime.now(ZoneInfo("Asia/Seoul")).date()
+    candidates = [
+        scrape_dorm_menu(url_template.format(page=page)) for page in pages
+    ]
+    for candidate in candidates:
+        start, end = _parse_date_range(candidate.get("date", ""), target.year)
+        if start and end and start <= target <= end:
+            return candidate
+    ranges = ", ".join(candidate.get("date", "날짜 정보 없음") for candidate in candidates)
+    raise ValueError(f"Could not find dorm menu for {target.isoformat()} among: {ranges}")
 
 
 def scrape_dorm_menu_json(url: str) -> str:
@@ -170,6 +193,21 @@ def _extract_date_range(soup) -> str:
     except Exception:
         return date_range_raw
 
+
+def _parse_date_range(value: str, year: int) -> tuple[date | None, date | None]:
+    """Parse the normalized MM/DD ~ MM/DD range stored in menu data."""
+    match = re.fullmatch(r"(\d{1,2})/(\d{1,2})\s*~\s*(\d{1,2})/(\d{1,2})", value)
+    if not match:
+        return None, None
+    month1, day1, month2, day2 = (int(part) for part in match.groups())
+    try:
+        start = date(year, month1, day1)
+        end = date(year, month2, day2)
+    except ValueError:
+        return None, None
+    if end < start:
+        end = date(year + 1, month2, day2)
+    return start, end
 
 def _parse_inwon(text: str) -> tuple[int, int]:
     values = text.strip().split("|")
