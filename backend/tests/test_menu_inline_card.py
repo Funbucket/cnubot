@@ -3,6 +3,7 @@ from datetime import datetime
 from unittest import mock
 
 from app.routers import cafeteria as cafeteria_router
+from app.schemas.kakao_request import KakaoRequest
 from app.services import cafeteria, promotion_cards, promotions
 
 
@@ -126,6 +127,20 @@ class InlineCardAudienceTest(unittest.TestCase):
 
 
 class MenuInlineCardResponseTest(unittest.TestCase):
+    def test_no_menu_notice_keeps_weekday_quick_replies(self):
+        response = cafeteria.create_no_menu_response("토요일", "기숙사")
+
+        self.assertEqual(
+            response["template"]["outputs"],
+            [{"simpleText": {"text": "운영 중인 메뉴가 없어요 🥲"}}],
+        )
+        replies = response["template"]["quickReplies"]
+        self.assertEqual(len(replies), 7)
+        self.assertEqual(
+            [reply["messageText"] for reply in replies],
+            [f"{weekday}요일기숙사" for weekday in "월화수목금토일"],
+        )
+
     def test_menu_keeps_three_meal_rows_without_inline_product(self):
         response = cafeteria.create_menu_response("월요일", MENU_DATA, "상록회관")
         outputs = response["template"]["outputs"]
@@ -193,6 +208,29 @@ class MenuInlineCardResponseTest(unittest.TestCase):
                     "월요일", menu_data, "상록회관", inline_product_output=output
                 )
                 self.assertLessEqual(len(response["template"]["outputs"]), 3)
+
+
+class MissingMenuRouteTest(unittest.IsolatedAsyncioTestCase):
+    async def test_missing_day_returns_notice_with_weekday_navigation(self):
+        request = KakaoRequest.model_validate({
+            "userRequest": {
+                "utterance": "토요일기숙사",
+                "user": {"id": "test-user"},
+            }
+        })
+        with mock.patch.object(cafeteria_router.common, "load_data", mock.AsyncMock(
+            return_value={"place": "dorm", "menu": []}
+        )):
+            response = await cafeteria_router.get_menu_by_day(request)
+
+        self.assertEqual(
+            response["template"]["outputs"][0]["simpleText"]["text"],
+            "운영 중인 메뉴가 없어요 🥲",
+        )
+        self.assertEqual(
+            response["template"]["quickReplies"][0]["messageText"],
+            "월요일기숙사",
+        )
 
 
 class InlineProductOutputTest(unittest.TestCase):

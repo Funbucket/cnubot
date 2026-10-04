@@ -235,6 +235,16 @@ def create_menu_response(
     return _finish_menu_response(kakao_response, day, place, today_kor)
 
 
+def create_no_menu_response(day: str, place: str):
+    """Return the empty-menu notice with the same weekday navigation as a menu."""
+    return _finish_menu_response(
+        kakao_json_response.KakaoJsonResponse(),
+        day,
+        place,
+        common.get_today_in_korean(),
+    )
+
+
 def _finish_menu_response(kakao_response, day: str, place: str, today_kor: str):
     quick_replies = [
         kakao_response.create_quick_reply(

@@ -4,7 +4,7 @@ import uuid
 
 from app.schemas.kakao_request import KakaoRequest
 from app.services import cafeteria, experiments, promotions
-from app.utils import common, kakao_json_response
+from app.utils import common
 from fastapi import APIRouter, Body, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
@@ -101,11 +101,7 @@ async def get_menu_by_day(req: KakaoRequest):
 
     menu_data = common.get_menu_by_day(data, kor_day)
     if not menu_data:
-        kakao_response = kakao_json_response.KakaoJsonResponse()
-        simple_text = kakao_response.create_simple_text("운영 중인 메뉴가 없어요 🥲")
-        kakao_response.add_output_to_response(simple_text)
-
-        return kakao_response.get_response()
+        return cafeteria.create_no_menu_response(kor_day, place)
 
     response = await _menu_response(req, kor_day, menu_data, place, place_key)
     return JSONResponse(response)
