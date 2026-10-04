@@ -128,6 +128,7 @@ async def _menu_response(
 ) -> dict:
     """Build a menu response, placing the inline product card when it fits."""
     user_id = req.userRequest.user.id if req.userRequest.user else None
+    menu_data_without_inline = menu_data
     chosen = None if _wants_breakfast(req) else await _pick_inline_product(user_id)
     inline_product = {}
     if chosen:
@@ -145,7 +146,14 @@ async def _menu_response(
 
     placed = bool(chosen) and _inline_card_placed(response, inline_product)
     if placed:
-        await promotions.record_inline_exposure(user_id, product_key, product, request_id)
+        placed = await promotions.record_inline_exposure(
+            user_id, product_key, product, request_id
+        )
+        if not placed:
+            # Another concurrent request may have claimed today's one exposure.
+            response = cafeteria.create_menu_response(
+                kor_day, menu_data_without_inline, place
+            )
     await _record_menu_view(user_id, place_key, kor_day, placed)
     await _record_promotion_button_exposures(user_id, response)
     return response
@@ -229,6 +237,13 @@ def _inline_card_enabled(user_id: str | None) -> bool:
 
 async def _pick_inline_product(user_id: str | None):
     if not _inline_card_enabled(user_id):
+        return None
+    try:
+        if await promotions.has_inline_exposure_today(user_id):
+            return None
+    except Exception:
+        # 광고 빈도 확인에 실패하면 반복 노출보다 미노출을 선택한다.
+        logger.exception("failed to check inline promotion daily cap")
         return None
     request_id = str(uuid.uuid4())
     try:

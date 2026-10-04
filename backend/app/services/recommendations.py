@@ -124,6 +124,36 @@ async def latest_exposure_collection(user_id: str | None, surface: str) -> str |
     return row["collection_id"] if row and row["collection_id"] else None
 
 
+async def has_promotion_exposure_today(user_id: str | None, surface: str) -> bool:
+    """Return whether this user has already seen this promotion surface today (KST).
+
+    The cap fails closed when event storage is unavailable so a tracking outage does
+    not turn into repeated advertising.
+    """
+    if not user_id:
+        return True
+    try:
+        pool = get_pool()
+    except RuntimeError:
+        return True
+    return bool(await pool.fetchval(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM user_events
+            WHERE user_id = $1
+              AND surface = $2
+              AND event_name = 'promotion_exposure'
+              AND created_at >= date_trunc(
+                    'day', NOW() AT TIME ZONE 'Asia/Seoul'
+                  ) AT TIME ZONE 'Asia/Seoul'
+        )
+        """,
+        user_id,
+        surface,
+    ))
+
+
 async def latest_item_id(user_id: str | None, surface: str) -> int | None:
     if not user_id:
         return None
@@ -174,6 +204,61 @@ async def record_exposure(
         user_id, surface, taca_item_id, product_key, request_id,
         json.dumps({"category_ids": list(category_ids), **(properties or {})}),
     )
+
+
+async def record_exposure_once_today(
+    user_id: str | None,
+    surface: str,
+    taca_item_id: int,
+    category_ids: Sequence[int],
+    product_key: str | None = None,
+    properties: dict | None = None,
+    request_id: str | None = None,
+) -> bool:
+    """Atomically record at most one exposure per user and KST calendar day."""
+    if not user_id:
+        return False
+    try:
+        pool = get_pool()
+    except RuntimeError:
+        return False
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            # Serialize concurrent menu requests for this user and surface.
+            await conn.fetchval(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                f"promotion-daily-cap:{user_id}:{surface}",
+            )
+            already_exposed = await conn.fetchval(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM user_events
+                    WHERE user_id = $1
+                      AND surface = $2
+                      AND event_name = 'promotion_exposure'
+                      AND created_at >= date_trunc(
+                            'day', NOW() AT TIME ZONE 'Asia/Seoul'
+                          ) AT TIME ZONE 'Asia/Seoul'
+                )
+                """,
+                user_id,
+                surface,
+            )
+            if already_exposed:
+                return False
+            await conn.execute(
+                """
+                INSERT INTO user_events
+                    (event_id, user_id, surface, taca_item_id, event_name,
+                     product_key, request_id, properties)
+                VALUES ($1, $2, $3, $4, 'promotion_exposure', $5, $6, $7::jsonb)
+                """,
+                str(uuid.uuid4()),
+                user_id, surface, taca_item_id, product_key, request_id,
+                json.dumps({"category_ids": list(category_ids), **(properties or {})}),
+            )
+    return True
 
 
 async def record_category_click(

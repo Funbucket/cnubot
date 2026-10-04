@@ -830,10 +830,10 @@ def _rotate_fixed_product(
 
 async def record_inline_exposure(
     user_id: str | None, product_key: str, product: dict, request_id: str | None = None
-) -> None:
-    """Record the exposure only once the card is known to be in the response."""
+) -> bool:
+    """Record one daily exposure once the card is known to fit in the response."""
     try:
-        await recommendations.record_exposure(
+        return await recommendations.record_exposure_once_today(
             user_id, INLINE_CARD_SURFACE, product.get("taca_item_id") or 0,
             product.get("category_ids") or [], product_key=product_key,
             properties={
@@ -849,6 +849,14 @@ async def record_inline_exposure(
         )
     except Exception:
         logging.getLogger(__name__).exception("failed to record inline product exposure")
+        return False
+
+
+async def has_inline_exposure_today(user_id: str | None) -> bool:
+    """Apply the menu-inline frequency cap using the Korean calendar day."""
+    return await recommendations.has_promotion_exposure_today(
+        user_id, INLINE_CARD_SURFACE
+    )
 
 
 async def _get_inline_today_deal_product(

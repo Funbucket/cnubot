@@ -49,8 +49,9 @@ class FoodInlineTests(unittest.IsolatedAsyncioTestCase):
              patch.object(p.toss_sharelink, 'categories', AsyncMock(side_effect=p.toss_sharelink.TossSharelinkError('quota'))) as categories, \
              patch.object(p, '_get_inline_today_deal_product', AsyncMock(return_value=today)), \
              patch.object(menu_routes, '_inline_card_enabled', return_value=True), \
+             patch.object(p, 'has_inline_exposure_today', AsyncMock(return_value=False)), \
              patch.object(p, '_tracking_secret', return_value=b'test-only-key'), \
-             patch.object(p, 'record_inline_exposure', AsyncMock()) as exposure, \
+             patch.object(p, 'record_inline_exposure', AsyncMock(return_value=True)) as exposure, \
              patch.object(menu_routes, '_record_menu_view', AsyncMock()), \
              patch.object(menu_routes, '_record_promotion_button_exposures', AsyncMock()):
             response = await menu_routes._menu_response(
@@ -58,6 +59,47 @@ class FoodInlineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('commerceCard', response['template']['outputs'][0])
         self.assertEqual(categories.await_count, 2)
         exposure.assert_awaited_once()
+
+    async def test_concurrent_daily_cap_winner_is_the_only_response_with_a_card(self):
+        from app.routers import cafeteria as menu_routes
+        from tests.test_menu_inline_card import MENU_DATA
+        req = KakaoRequest.model_validate({'userRequest': {
+            'utterance': '월요일상록회관', 'user': {'id': 'test'}}})
+        chosen = ('item', {
+            'title': '상품', 'price': 1000, 'image_url': 'https://example.com/item.jpg',
+            'url': 'https://toss.im/_m/test',
+        }, 'https://example.com/click', 'request-id')
+        with patch.object(menu_routes, '_pick_inline_product', AsyncMock(return_value=chosen)), \
+             patch.object(p, 'record_inline_exposure', AsyncMock(return_value=False)), \
+             patch.object(menu_routes, '_record_menu_view', AsyncMock()) as menu_view, \
+             patch.object(menu_routes, '_record_promotion_button_exposures', AsyncMock()):
+            response = await menu_routes._menu_response(
+                req, '월요일', dict(MENU_DATA, breakfast=[]), '상록회관', 'test')
+        self.assertFalse(any('commerceCard' in output for output in response['template']['outputs']))
+        self.assertFalse(menu_view.await_args.args[3])
+
+    async def test_menu_inline_card_is_skipped_after_daily_exposure(self):
+        from app.routers import cafeteria as menu_routes
+        with patch.object(menu_routes, '_inline_card_enabled', return_value=True), \
+             patch.object(p, 'has_inline_exposure_today', AsyncMock(return_value=True)) as cap, \
+             patch.object(p, 'get_inline_promotion_product', AsyncMock()) as select:
+            chosen = await menu_routes._pick_inline_product('test')
+        self.assertIsNone(chosen)
+        cap.assert_awaited_once_with('test')
+        select.assert_not_awaited()
+
+    async def test_menu_inline_card_is_eligible_before_daily_exposure(self):
+        from app.routers import cafeteria as menu_routes
+        product = {
+            'title': '상품', 'price': 1000, 'image_url': 'https://example.com/item.jpg',
+            'url': 'https://toss.im/_m/test',
+        }
+        with patch.object(menu_routes, '_inline_card_enabled', return_value=True), \
+             patch.object(p, 'has_inline_exposure_today', AsyncMock(return_value=False)), \
+             patch.object(p, 'get_inline_promotion_product', AsyncMock(return_value=('item', product))), \
+             patch.object(p, '_tracking_secret', return_value=b'test-only-key'):
+            chosen = await menu_routes._pick_inline_product('test')
+        self.assertEqual(chosen[:2], ('item', product))
 
     def test_today_deals_inline_card_has_today_deals_more_button(self):
         product = {'title': 'today', 'price': 1000, 'image_url': 'https://example.com/today',
