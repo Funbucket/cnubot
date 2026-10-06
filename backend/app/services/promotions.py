@@ -265,7 +265,7 @@ async def get_today_deal_products(
     record_exposure: bool = True,
     force_refresh: bool = False,
 ) -> list[tuple[str, dict]]:
-    """Return current Sharelink day-deal items as renderable commerce products."""
+    """Prefer day-deals; otherwise return clearly labeled saved discounts."""
     from app.services import product_cache
 
     now = datetime.now(KST)
@@ -286,13 +286,19 @@ async def get_today_deal_products(
             except (TypeError, ValueError):
                 pass
         current.append(item)
+    fallback = not current
+    if fallback:
+        from app.services import discount_fallback
+        current = discount_fallback.candidates()
     # Keep the full candidate pool until after exposure-based rotation.  Slicing
     # here would make the first page repeat forever even when more deals exist.
     recent_ids = await recommendations.recent_item_ids(user_id, hours=48, collection_id="today_deals")
     fresh = [item for item in current if int(item.get("tacaItemId", 0)) not in recent_ids]
     seen = [item for item in current if int(item.get("tacaItemId", 0)) in recent_ids]
     current = fresh + sorted(seen, key=lambda item: recent_ids[int(item.get("tacaItemId", 0))])
-    current = current[:limit]
+    if fallback:
+        current = discount_fallback.choose(current, recent_ids, limit=limit)
+    mode = "high_discount_fallback" if fallback else "today_deals"
 
     async def build(item: dict, position: int) -> tuple[str, dict] | None:
         try:
@@ -303,7 +309,7 @@ async def get_today_deal_products(
                 "title": item.get("displayName", "오늘 특가 상품"),
                 "button_label": promotion_settings.FIXED_PRODUCT_BUTTON_LABEL,
                 "quick_reply_label": promotion_label(item.get("displayName", "")),
-                "description": "오늘만 진행되는 토스 특가",
+                "description": "할인율 높은 추천 상품" if fallback else "오늘만 진행되는 토스 특가",
                 "original_price": item.get("originalPrice") or item.get("displayPrice", 0),
                 "price": item.get("displayPrice", 0),
                 "discount": max((item.get("originalPrice") or 0) - item.get("displayPrice", 0), 0),
@@ -314,10 +320,10 @@ async def get_today_deal_products(
                 "review_count": item.get("reviewCount"),
                 "taca_item_id": item_id,
                 "category_ids": item.get("categoryIds") or [],
-                "candidate_sources": ["today_deals"],
+                "candidate_sources": ["saved_discounts"] if fallback else ["today_deals"],
                 "deal_end_at": item.get("endAt"),
                 "collection_id": "today_deals",
-                "selection_mode": "today_deals",
+                "selection_mode": mode,
             })
             TOSS_SHOPPING_PRODUCTS[product_key] = product
             if record_exposure:
@@ -326,7 +332,7 @@ async def get_today_deal_products(
                         user_id, "today_deals", item_id, product["category_ids"],
                         product_key=product_key,
                         properties={"product_name": product["title"], "position": position,
-                                    "selection_mode": "today_deals", "collection_id": "today_deals",
+                                    "selection_mode": mode, "collection_id": "today_deals",
                                     "deal_end_at": item.get("endAt")},
                         request_id=request_id,
                     )
@@ -336,11 +342,23 @@ async def get_today_deal_products(
         except (KeyError, TypeError, ValueError, asyncio.TimeoutError, toss_sharelink.TossSharelinkError):
             return None
 
-    results = await asyncio.gather(
-        *(build(item, position) for position, item in enumerate(current, 1)),
-        return_exceptions=True,
-    )
-    return [result for result in results if isinstance(result, tuple)]
+    results = []
+    for item in current:
+        result = await build(item, len(results) + 1)
+        if result:
+            results.append(result)
+        if len(results) >= limit:
+            break
+    if not results and not fallback:
+        from app.services import discount_fallback
+        fallback = True
+        mode = "high_discount_fallback"
+        current = discount_fallback.choose(discount_fallback.candidates(), recent_ids, limit)
+        for item in current:
+            result = await build(item, len(results) + 1)
+            if result:
+                results.append(result)
+    return results
 
 
 async def _fetch_candidate_pool(collection_id: str | None = None) -> list[dict]:
@@ -874,7 +892,7 @@ async def _get_inline_today_deal_product(
         return None
     last_exposed = await recommendations.last_exposure_by_product(user_id, INLINE_CARD_SURFACE)
     key, product = _rotate_fixed_product(renderable, last_exposed)
-    product.update(collection_id="today_deals", selection_mode="today_deals")
+    product.update(collection_id="today_deals")
     return key, product
 
 

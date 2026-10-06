@@ -41,7 +41,7 @@ async def get_today_deals(req: KakaoRequest | None = Body(default=None)):
     )
     if not pairs:
         return JSONResponse({"version": "2.0", "template": {"outputs": [
-            {"simpleText": {"text": "현재 진행 중인 오늘 특가가 없습니다."}}
+            {"simpleText": {"text": "오늘 특가와 할인 추천 상품을 준비 중이에요. 잠시 후 다시 확인해주세요."}}
         ], "quickReplies": []}})
     click_urls = []
     for position, (product_key, product) in enumerate(pairs, 1):
@@ -54,7 +54,7 @@ async def get_today_deals(req: KakaoRequest | None = Body(default=None)):
             surface="today_deals", button_id="today_deals_product", button_label="특가 바로가기",
             position=position, request_id=request_id,
             product_snapshot={"title": product.get("title"), "button_label": "특가 바로가기",
-                              "selection_mode": "today_deals", "collection_id": "today_deals"},
+                              "selection_mode": product.get("selection_mode"), "collection_id": "today_deals"},
         )
         click_urls.append(f"{promotions.common.SERVER_URL}/promotions/toss-shopping/click?token={token}")
     return JSONResponse(promotions.create_toss_shopping_list_response(
@@ -191,7 +191,7 @@ async def track_toss_shopping_click(token: str = Query(..., min_length=20)):
                 "product_name": snapshot.get("title") or product.get("title"),
                 "category_name": ", ".join(product.get("category_names") or []),
                 "candidate_sources": product.get("candidate_sources") or [],
-                "selection_mode": "fixed" if product_key.startswith("fixed_") else "algorithm",
+                "selection_mode": snapshot.get("selection_mode") or ("fixed" if product_key.startswith("fixed_") else "algorithm"),
                 "product_button_label": snapshot.get("button_label") or product.get("button_label"),
                 "settings_revision": snapshot.get("settings_revision"),
                 "position": position,

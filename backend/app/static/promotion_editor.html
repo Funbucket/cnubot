@@ -70,8 +70,8 @@ async function loadBatchStatus(){
    const box=node('div');box.append(node('small','',label),node('strong','',value));$('batchMetrics').append(box);
   }
   $('batchCollections').replaceChildren();
-  const serving={snapshot:'저장된 후보로 자동 추천',fallback:'대체 등록 상품 사용',fixed:'고정 상품 모드',empty:'표시할 상품 없음'};
-  for(const c of d.collections){const box=node('div','batch-collection');box.append(node('strong','',c.label),node('span','badge',serving[c.serving]),node('p','hint','사용 가능한 저장 후보 '+c.available_count+'개 · 등록 상품 '+c.configured_count+'개'));$('batchCollections').append(box);}
+  const serving={discount_fallback:'할인율 높은 상품으로 대체 추천',snapshot:'저장된 후보로 자동 추천',fallback:'대체 등록 상품 사용',fixed:'고정 상품 모드',empty:'표시할 상품 없음'};
+  for(const c of d.collections){const box=node('div','batch-collection');box.append(node('strong','',c.label),node('span','badge',serving[c.serving]),node('p','hint','사용 가능한 저장 후보 '+c.available_count+'개 · 할인 대체 후보 '+(c.discount_fallback_count||0)+'개 · 등록 상품 '+c.configured_count+'개'));$('batchCollections').append(box);}
  }catch(e){$('batchNotice').textContent='상태 조회 실패: '+e.message+' 이전 표시가 있다면 최신 정보가 아닙니다.';$('batchNotice').className='error';}
  finally{refresh.disabled=false;}
 }

@@ -39,7 +39,8 @@ def product_description(product: dict, *, review_min_count: int = REVIEW_MIN_COU
     rating (``review_min_count``); they must not reorder the callouts.
     """
     return _fit_callouts(
-        [unit_price_suffix(product), gram_price_suffix(product),
+        [("할인율 높은 추천 상품" if product.get("selection_mode") == "high_discount_fallback" else ""),
+         unit_price_suffix(product), gram_price_suffix(product),
          review_suffix(product, review_min_count)],
         max_lines=max_lines,
     )
@@ -284,7 +285,10 @@ def create_toss_shopping_list_response(
     ]
     kakao_response.add_output_to_response(
         kakao_response.create_simple_text(
-            promotion_settings.FIXED_PROMOTION_INTRO if is_fixed else ALGORITHM_PROMOTION_INTRO
+            promotion_settings.FIXED_PROMOTION_INTRO if is_fixed else (
+                "오늘 특가 대신 할인율 높은 상품을 모았어요 🛍️\n" + ALGORITHM_PROMOTION_INTRO
+                if any(p.get("selection_mode") == "high_discount_fallback" for p in products)
+                else ALGORITHM_PROMOTION_INTRO)
         )
     )
     for start in range(0, len(cards), COMMERCE_CARDS_PER_ROW):

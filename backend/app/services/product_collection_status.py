@@ -42,15 +42,19 @@ def summary(now=None):
             if classified and not recommendations._is_student_excluded(dict(
                     item, _category_names=[name for p in classified["category_paths"] for name in p])):
                 counts[cid] += 1
+    from app.services.discount_fallback import candidates
+    discount_count = len(candidates(snapshot))
     collections = []
     for cid, label in (("today_deals", "오늘 특가"), ("food", "자취생 먹을거"), ("living", "자취생 꿀템")):
         configured = promotion_settings.read_collection(cid) if cid != "today_deals" else None
         fallback_count = sum(p.enabled for p in configured.products) if configured else 0
         mode = configured.mode if configured else "algorithm"
         serving = ("fixed" if mode == "fixed" else "snapshot" if counts[cid]
+                   else "discount_fallback" if cid == "today_deals" and discount_count
                    else "fallback" if fallback_count else "empty")
         collections.append({"id": cid, "label": label, "mode": mode, "serving": serving,
-                            "available_count": counts[cid], "configured_count": fallback_count})
+                            "available_count": counts[cid], "configured_count": fallback_count,
+                            "discount_fallback_count": discount_count if cid == "today_deals" else 0})
     return {"checked_at": now.isoformat(), "status": state.get("status", "not_started"),
             "last_attempt_at": state.get("started_at"), "last_success_at": snapshot.get("updated_at"),
             "next_run_at": next_run.isoformat(), "pending": pending, "blocked_today": blocked,
