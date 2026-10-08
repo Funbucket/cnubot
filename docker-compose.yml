@@ -62,5 +62,18 @@ services:
       - ./data:/data/menus
     restart: always
 
+  experiment-monitor:
+    build:
+      context: ./backend
+    entrypoint: ["python", "-m", "app.jobs.monitor_experiments"]
+    environment:
+      DATABASE_URL: postgresql://${BACKEND_POSTGRES_USER}:${BACKEND_POSTGRES_PASSWORD}@backend-postgres:5432/${BACKEND_POSTGRES_DB}
+    volumes:
+      - ./backend/app:/code/app/
+    depends_on:
+      backend-postgres:
+        condition: service_healthy
+    restart: always
+
 volumes:
   backend-postgres-db-volume:

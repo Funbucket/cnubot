@@ -158,8 +158,9 @@ async def enrollment(eid, action, reason, actor):
                 other = await conn.fetchval("SELECT id FROM lab_experiments WHERE status IN ('running','paused','observing') AND id<>$1",eid)
                 if other:
                     raise ValueError('동일 학식 슬롯에서 다른 실험이 진행 중입니다.')
-            if action=='resume' and datetime.now(UTC) >= d['started_at']+timedelta(days=28):
-                raise ValueError('28일 상한이 끝났습니다. 모집을 마감하세요.')
+            horizon = d['protocol'].get('aa_enrollment_days',7) if d['kind']=='aa' else 28
+            if action=='resume' and datetime.now(UTC) >= d['started_at']+timedelta(days=horizon):
+                raise ValueError('모집 상한이 끝났습니다. 모집을 마감하세요.')
             status = {'start':'running','pause':'paused','resume':'running','close':'observing'}[action]
             await conn.execute('''UPDATE lab_experiments SET status=$2,
                 started_at=CASE WHEN $3='start' THEN NOW() ELSE started_at END,
@@ -192,9 +193,11 @@ async def assign(user_id, place, request_id, route):
             existing = await conn.fetchrow('SELECT * FROM lab_assignments WHERE experiment_id=$1 AND user_id=$2',d['id'],user_id)
             p = d['protocol']
             total = await conn.fetchval('SELECT COUNT(*) FROM lab_assignments WHERE experiment_id=$1',d['id'])
-            if d['status'] in ('running','paused') and (total >= p['total_users'] or now >= d['started_at']+timedelta(days=28)):
+            horizon = p.get('aa_enrollment_days',7) if d['kind']=='aa' else 28
+            target_reached = d['kind']=='ab' and total >= p['total_users']
+            if d['status'] in ('running','paused') and (target_reached or now >= d['started_at']+timedelta(days=horizon)):
                 await conn.execute("UPDATE lab_experiments SET status='observing',enrollment_closed_at=NOW() WHERE id=$1",d['id'])
-                await audit(conn,d['id'],'system','close','표본 목표 또는 28일 상한 도달')
+                await audit(conn,d['id'],'system','close','고정 모집 목표 또는 기간 상한 도달')
                 d['status']='observing'
             if existing:
                 if now >= existing['assigned_at']+timedelta(hours=168):
@@ -217,7 +220,7 @@ async def assign(user_id, place, request_id, route):
                 await conn.execute('''INSERT INTO lab_assignments(experiment_id,user_id,variant,assigned_at,
                       pre_activity_days,first_place,eligibility_version) VALUES($1,$2,$3,$4,$5,$6,$7)''',
                       d['id'],user_id,variant,now,pre,place,p['eligibility_version'])
-                if total+1 >= p['total_users']:
+                if d['kind']=='ab' and total+1 >= p['total_users']:
                     await conn.execute("UPDATE lab_experiments SET status='observing',enrollment_closed_at=NOW() WHERE id=$1",d['id'])
                     await audit(conn,d['id'],'system','close','표본 목표 도달')
             await conn.execute('''INSERT INTO lab_requests(request_id,experiment_id,user_id,variant,route)
@@ -232,7 +235,8 @@ async def latest(eid):
         design = await get_design(eid,conn)
         run = await conn.fetchrow('SELECT * FROM lab_analysis_runs WHERE experiment_id=$1 ORDER BY id DESC LIMIT 1',eid)
         history = await conn.fetch('SELECT action,reason,details,created_at FROM lab_audit WHERE experiment_id=$1 ORDER BY id DESC LIMIT 50',eid)
-        return {'experiment':design,'run':decode(run) if run else None,'history':[decode(r) for r in history],
+        counts = await conn.fetch('SELECT variant,COUNT(*)::int AS n FROM lab_assignments WHERE experiment_id=$1 GROUP BY variant',eid)
+        return {'experiment':design,'live_assigned':{r['variant']:r['n'] for r in counts},'run':decode(run) if run else None,'history':[decode(r) for r in history],
                 'start_blockers':await start_blockers(design,conn) if design['status']=='draft' else []}
 
 
@@ -261,11 +265,12 @@ async def run_analysis(eid, payload, actor):
             if existing:
                 return decode(existing)
             p = d['protocol']
-            if d['status'] in ('running','paused') and datetime.now(UTC)>=d['started_at']+timedelta(days=28):
-                await conn.execute("UPDATE lab_experiments SET status='observing',enrollment_closed_at=$2 WHERE id=$1",eid,d['started_at']+timedelta(days=28))
+            horizon = p.get('aa_enrollment_days',7) if d['kind']=='aa' else 28
+            if d['status'] in ('running','paused') and datetime.now(UTC)>=d['started_at']+timedelta(days=horizon):
+                await conn.execute("UPDATE lab_experiments SET status='observing',enrollment_closed_at=$2 WHERE id=$1",eid,d['started_at']+timedelta(days=horizon))
                 d['status']='observing'
-                d['enrollment_closed_at']=d['started_at']+timedelta(days=28)
-                await audit(conn,eid,'system','close','28일 상한 도달')
+                d['enrollment_closed_at']=d['started_at']+timedelta(days=horizon)
+                await audit(conn,eid,'system','close','고정 모집 기간 상한 도달')
             counts = await conn.fetch('SELECT variant,COUNT(*)::int AS n FROM lab_assignments WHERE experiment_id=$1 GROUP BY variant',eid)
             assigned = {v:0 for v in ('A','B')}
             assigned.update({r['variant']:r['n'] for r in counts})
@@ -298,17 +303,21 @@ async def run_analysis(eid, payload, actor):
             sample_ok = sum(assigned.values())>=p['total_users']
             practical = bool(effect and effect['p_value']<0.05 and effect['delta']>=p['minimum_effect']
                              and effect['ci_low']>p['minimum_ci_lower'])
+            failures = (srm['status']=='fail' or any(r['errors'] for r in request_rows)
+                        or any(p.get('p95_limit_ms') and r['p95'] is not None and r['p95']>p['p95_limit_ms'] for r in request_rows)
+                        or p.get('policy_checksum')!=policy_checksum())
+            quality_status = 'pass' if quality else 'fail' if failures else 'pending'
             ready = final and d['status']!='stopped'
             outcome = ('operational_stop' if d['status']=='stopped' else 'quality_inconclusive' if final and not quality
-                       else 'interim' if not final else 'inconclusive' if not sample_ok
-                       else 'aa_complete' if d['kind']=='aa' else 'adoption_supported' if practical and safety and safety['passed']
+                       else 'interim' if not final else 'aa_complete' if d['kind']=='aa'
+                       else 'inconclusive' if not sample_ok else 'adoption_supported' if practical and safety and safety['passed']
                        else 'safety_unconfirmed' if not safety or not safety['passed'] else 'keep_or_followup')
             result = dict(assigned=assigned,mature=mature,clicks=clicks,effect=effect,safety=safety,srm=srm,
                           requests=[dict(r) for r in request_rows],bundles=bundles,bundle_completion=completion,
-                          quality_passed=quality,data_complete=payload.data_complete,operational_passed=operational,
+                          quality_passed=quality,quality_status=quality_status,data_complete=payload.data_complete,operational_passed=operational,
                           bundle_passed=bundle_ok,final=final,decision_ready=ready,sample_ok=sample_ok,
                           outcome=outcome,sql_hash=hashlib.sha256(COHORT_SQL.encode()).hexdigest(),
-                          next_action='최종 결정 기록' if ready else '데이터 품질 점검' if not quality else '모집·관찰 완료 대기')
+                          next_action='데이터 품질 문제 조사' if failures else '최종 결정 기록' if ready else '모집·관찰 완료 대기')
             run = await conn.fetchrow('''INSERT INTO lab_analysis_runs(experiment_id,idempotency_key,config_hash,
                analysis_version,watermark,result) VALUES($1,$2,$3,$4,$5,$6::jsonb) RETURNING *''',
                eid,payload.idempotency_key,d['config_hash'],lab_stats.ANALYSIS_VERSION,payload.watermark,json.dumps(result,default=str))

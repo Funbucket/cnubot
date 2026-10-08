@@ -188,6 +188,18 @@ class LabDatabaseTest(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(await recommendations.has_promotion_exposure_today('synthetic-qa','menu_inline_card'))
             self.assertEqual(await self.pool.fetchval('SELECT COUNT(*) FROM lab_assignments'),0)
 
+    async def test_aa_runs_for_seven_days_instead_of_ab_sample_cap(self):
+        await self.pool.execute("UPDATE lab_experiments SET protocol=jsonb_set(protocol,'{total_users}','100') WHERE id=$1",self.eid)
+        for i in range(100):
+            await self.pool.execute("""INSERT INTO lab_assignments(experiment_id,user_id,variant,pre_activity_days,first_place,eligibility_version)
+                      VALUES($1,$2,'A',0,'dorm','v1')""",self.eid,f'aa-synthetic-{i}')
+        self.assertIsNotNone(await lab.assign('aa-extra','dorm','extra','/cafeteria/menu/day'))
+        self.assertEqual((await lab.get_design(self.eid))['status'],'running')
+        await self.pool.execute("UPDATE lab_experiments SET started_at=NOW()-INTERVAL '8 days' WHERE id=$1",self.eid)
+        self.assertIsNone(await lab.assign('too-late','dorm','late','/cafeteria/menu/day'))
+        self.assertEqual((await lab.get_design(self.eid))['status'],'observing')
+
+
 
 class LabDeliveryTest(unittest.IsolatedAsyncioTestCase):
     async def test_b_without_candidates_keeps_assignment_and_uses_common_a(self):

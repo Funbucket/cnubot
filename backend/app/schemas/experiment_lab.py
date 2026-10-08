@@ -13,6 +13,7 @@ class Protocol(BaseModel):
     total_users: int = Field(default=2200, ge=100, le=100000)
     observation_hours: Literal[168] = 168
     max_enrollment_days: Literal[28] = 28
+    aa_enrollment_days: Literal[7] = 7
     collection_grace_hours: Literal[24] = 24
     alpha: Literal[0.05] = 0.05
     minimum_effect: float = Field(default=0.01, gt=0, lt=1)
