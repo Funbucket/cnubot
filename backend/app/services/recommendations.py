@@ -261,6 +261,60 @@ async def record_exposure_once_today(
     return True
 
 
+async def record_bundle_exposure(
+    user_id: str | None, surface: str, items: list[dict], request_id: str,
+    *, daily_cap: bool = True, lab_bundle: dict | None = None,
+) -> bool:
+    """Claim one daily slot and record every bundle item in one transaction."""
+    if not user_id or not items:
+        return False
+    try:
+        pool = get_pool()
+    except RuntimeError:
+        return False
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            if lab_bundle:
+                # Consistent experiment -> daily-cap lock order with assignment.
+                status = await conn.fetchval(
+                    "SELECT status FROM lab_experiments WHERE id=$1 FOR UPDATE", lab_bundle["experiment_id"])
+                if status not in {"running", "paused", "observing"}:
+                    return False
+            if daily_cap:
+                await conn.fetchval(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    f"promotion-daily-cap:{user_id}:{surface}",
+                )
+                if await conn.fetchval(
+                    """SELECT EXISTS (
+                        SELECT 1 FROM user_events
+                        WHERE user_id = $1 AND surface = $2 AND event_name = 'promotion_exposure'
+                          AND created_at >= date_trunc('day', NOW() AT TIME ZONE 'Asia/Seoul')
+                                            AT TIME ZONE 'Asia/Seoul'
+                    )""", user_id, surface,
+                ):
+                    return False
+            if lab_bundle:
+                await conn.execute("""INSERT INTO lab_bundles
+                    (bundle_id,request_id,experiment_id,user_id,planned_variant,rendered_policy,
+                     actual_card_count,fallback_reason,items)
+                    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)""",
+                    lab_bundle["bundle_id"], request_id, lab_bundle["experiment_id"], user_id,
+                    lab_bundle["planned_variant"], lab_bundle["rendered_policy"], len(items),
+                    lab_bundle.get("fallback_reason"), json.dumps(items))
+            for item in items:
+                await conn.execute(
+                    """INSERT INTO user_events
+                        (event_id, user_id, surface, taca_item_id, event_name,
+                         product_key, request_id, properties)
+                       VALUES ($1, $2, $3, $4, 'promotion_exposure', $5, $6, $7::jsonb)""",
+                    str(uuid.uuid4()), user_id, surface, item["taca_item_id"],
+                    item["product_key"], request_id,
+                    json.dumps({"category_ids": list(item["category_ids"]), **item["properties"]}),
+                )
+    return True
+
+
 async def record_category_click(
     user_id: str | None,
     category_ids: Sequence[int],

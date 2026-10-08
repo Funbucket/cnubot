@@ -16,6 +16,7 @@ lxml = "^5.2.2"
 requests = "^2.32.2"
 python-dotenv = "^1.0.1"
 asyncpg = "^0.29.0"
+scipy = "^1.14"
 
 [build-system]
 requires = ["poetry-core"]

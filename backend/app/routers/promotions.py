@@ -7,7 +7,7 @@ import logging
 import uuid
 import base64
 import json
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi import Query
 
@@ -160,7 +160,7 @@ def _promotion_entry_metadata(req: KakaoRequest | None) -> dict[str, str]:
 
 
 @router.get("/toss-shopping/click")
-async def track_toss_shopping_click(token: str = Query(..., min_length=20)):
+async def track_toss_shopping_click(token: str = Query(..., min_length=20), request: Request = None):
     decoded = promotions.read_tracking_token(token)
     if not decoded:
         return JSONResponse({"detail": "유효하지 않거나 만료된 링크입니다."}, status_code=400)
@@ -168,22 +168,25 @@ async def track_toss_shopping_click(token: str = Query(..., min_length=20)):
     # Read metadata only after signature and expiry validation above.
     payload = token.split(".", 1)[0]
     snapshot = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))).get("m", {})
+    agent = request.headers.get("user-agent", "").lower() if request else ''
+    is_bot = any(word in agent for word in ('bot','crawler','spider','facebookexternalhit','slackbot','preview'))
     try:
-        await recommendations.record_category_click(
-            user_id, category_ids, taca_item_id, surface, request_id
-        )
+        if not snapshot.get("is_preview") and not is_bot:
+            await recommendations.record_category_click(
+                user_id, category_ids, taca_item_id, surface, request_id
+            )
     except Exception:
         logger.exception("failed to record recommendation click")
     try:
         product = promotions.get_product(product_key)
-        await experiments.record_funnel_event(
-            user_id,
-            "commerce_card_click",
-            source=_source,
-            product_key=product_key,
-            taca_item_id=taca_item_id,
-            properties={
+        properties = {
                 "surface": surface,
+                "is_preview": bool(snapshot.get("is_preview")),
+                "preview_session_id": snapshot.get("preview_session_id"),
+                "source_experiment_id": snapshot.get("experiment_id"),
+                "source_variant": snapshot.get("planned_variant"),
+                "bundle_id": snapshot.get("bundle_id"),
+                "config_hash": snapshot.get("config_hash"),
                 "collection_id": snapshot.get("collection_id"),
                 "entry_source": _source,
                 "entry_button_id": button_id,
@@ -198,9 +201,16 @@ async def track_toss_shopping_click(token: str = Query(..., min_length=20)):
                 "card_position": position,
                 "row": (position - 1) // promotions.COMMERCE_CARDS_PER_ROW + 1 if position else None,
                 "column": (position - 1) % promotions.COMMERCE_CARDS_PER_ROW + 1 if position else None,
-            },
-            request_id=request_id,
-        )
+            }
+        properties['click_filter_version'] = 'signed-external-v1'
+        properties['filter_reason'] = 'known_preview_agent' if is_bot else None
+        await experiments.record_funnel_event(
+            user_id, 'commerce_card_click_raw', source=_source, product_key=product_key,
+            taca_item_id=taca_item_id, properties=properties, request_id=request_id)
+        if not is_bot:
+            await experiments.record_funnel_event(
+                user_id, 'commerce_card_click', source=_source, product_key=product_key,
+                taca_item_id=taca_item_id, properties=properties, request_id=request_id)
     except Exception:
         logger.exception("failed to record commerce card click")
     # 302 is handled more consistently than 307 by Kakao's in-app browser

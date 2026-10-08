@@ -1,9 +1,11 @@
 import os
 import logging
 import uuid
+import time
 
 from app.schemas.kakao_request import KakaoRequest
-from app.services import cafeteria, experiments, promotions
+from app.services import lab_telemetry
+from app.services import cafeteria, experiments, promotions, promotion_cards, promotion_preview, lab_delivery
 from app.utils import common
 from fastapi import APIRouter, Body, HTTPException
 from fastapi.concurrency import run_in_threadpool
@@ -12,7 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse
 SHOW_BREAKFAST_KEY = "show_breakfast"
 DISABLED_VALUES = {"0", "false", "off", "no"}
 
-router = APIRouter()
+router = APIRouter(route_class=lab_telemetry.ExperimentRoute)
 logger = logging.getLogger(__name__)
 
 
@@ -101,6 +103,7 @@ async def get_menu_by_day(req: KakaoRequest):
 
     menu_data = common.get_menu_by_day(data, kor_day)
     if not menu_data:
+        await _record_menu_view(req.userRequest.user.id if req.userRequest.user else None, place_key, kor_day, False)
         return cafeteria.create_no_menu_response(kor_day, place)
 
     response = await _menu_response(req, kor_day, menu_data, place, place_key)
@@ -124,14 +127,25 @@ async def _menu_response(
 ) -> dict:
     """Build a menu response, placing the inline product card when it fits."""
     user_id = req.userRequest.user.id if req.userRequest.user else None
+    received = time.monotonic()
+    qa_pending = not _wants_breakfast(req) and await lab_delivery.pending(user_id)
     menu_data_without_inline = menu_data
-    chosen = None if _wants_breakfast(req) else await _pick_inline_product(user_id)
+    preview = None
+    if not qa_pending and not _wants_breakfast(req) and promotion_preview.enabled(user_id):
+        preview = await _pick_preview_bundle(user_id)
+    chosen = (await _pick_inline_product(user_id, bypass_cap=True) if qa_pending
+              else None if _wants_breakfast(req) or preview else await _pick_inline_product(user_id))
     inline_product = {}
-    if chosen:
+    if preview:
+        pairs, click_urls, request_id = preview
+        inline_product = {"inline_product_output": promotion_cards.create_inline_bundle_output(
+            [product for _, product in pairs], click_urls)}
+    elif chosen:
         product_key, product, click_url, request_id = chosen
         inline_product = {
             "inline_product_output": promotions.create_inline_product_output(product, click_url),
         }
+    if chosen or preview:
         # 시간표의 "식단 보기"는 오늘 날짜 발화로 /menu/day를 타므로 요일로 판단한다.
         if place_key == "dorm" and kor_day == common.get_today_in_korean():
             menu_data, inline_product = await _replace_finished_breakfast(
@@ -140,16 +154,42 @@ async def _menu_response(
 
     response = cafeteria.create_menu_response(kor_day, menu_data, place, **inline_product)
 
-    placed = bool(chosen) and _inline_card_placed(response, inline_product)
+    delivery = None
+    if chosen and _inline_card_placed(response, inline_product):
+        try:
+            delivery = (await lab_delivery.consume(chosen, user_id) if qa_pending
+                        else await lab_delivery.select(chosen, user_id, place_key))
+            if delivery:
+                inline_product = {"inline_product_output": delivery["output"]}
+                response = cafeteria.create_menu_response(kor_day, menu_data, place, **inline_product)
+        except Exception:
+            logger.exception("failed to prepare experiment response")
+            # A preparation failure is retained in ITT and renders the known A candidate.
+    placed = bool(chosen or preview) and _inline_card_placed(response, inline_product)
     if placed:
-        placed = await promotions.record_inline_exposure(
-            user_id, product_key, product, request_id
-        )
+        if delivery:
+            try:
+                placed = await lab_delivery.record(delivery)
+            except Exception:
+                logger.exception("failed to record experiment bundle")
+                placed = False
+                await lab_delivery.finish(delivery["metadata"], False,
+                                          (time.monotonic()-received)*1000, True, "exposure_failed")
+        elif preview:
+            placed = await promotion_preview.record(
+                user_id, pairs, request_id, promotions.INLINE_CARD_SURFACE, daily_cap=True,
+            )
+        else:
+            placed = await promotions.record_inline_exposure(
+                user_id, product_key, product, request_id
+            )
         if not placed:
             # Another concurrent request may have claimed today's one exposure.
             response = cafeteria.create_menu_response(
                 kor_day, menu_data_without_inline, place
             )
+    if delivery:
+        await lab_delivery.finish(delivery["metadata"], placed, (time.monotonic()-received)*1000)
     await _record_menu_view(user_id, place_key, kor_day, placed)
     await _record_promotion_button_exposures(user_id, response)
     return response
@@ -206,8 +246,10 @@ async def _replace_finished_breakfast(
         "messageText": place,
         "extra": {SHOW_BREAKFAST_KEY: True},
     }
-    card = inline_product.get("inline_product_output", {}).get("commerceCard")
-    if card is not None:
+    output = inline_product.get("inline_product_output", {})
+    cards = ([output["commerceCard"]] if "commerceCard" in output
+             else output.get("carousel", {}).get("items", []))
+    for card in cards:
         card.setdefault("buttons", []).append(restore_button)
         card["buttonLayout"] = "vertical"
     return {**menu_data, "breakfast": []}, inline_product
@@ -231,17 +273,29 @@ def _inline_card_enabled(user_id: str | None) -> bool:
     return not allowed or user_id in allowed
 
 
-async def _pick_inline_product(user_id: str | None):
-    if not _inline_card_enabled(user_id):
+async def _pick_preview_bundle(user_id: str | None):
+    if not _inline_card_enabled(user_id) or not promotion_preview.enabled(user_id):
         return None
     try:
         if await promotions.has_inline_exposure_today(user_id):
+            return None
+        return await promotion_preview.pick(user_id, promotions.INLINE_CARD_SURFACE)
+    except Exception:
+        logger.exception("failed to pick private inline bundle")
+        return None
+
+
+async def _pick_inline_product(user_id: str | None, *, bypass_cap: bool = False):
+    if not _inline_card_enabled(user_id):
+        return None
+    try:
+        if not bypass_cap and await promotions.has_inline_exposure_today(user_id):
             return None
     except Exception:
         # 광고 빈도 확인에 실패하면 반복 노출보다 미노출을 선택한다.
         logger.exception("failed to check inline promotion daily cap")
         return None
-    request_id = str(uuid.uuid4())
+    request_id = lab_telemetry.request_id()
     try:
         chosen = await promotions.get_inline_promotion_product(user_id, request_id)
     except Exception:

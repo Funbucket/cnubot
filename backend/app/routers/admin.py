@@ -178,7 +178,7 @@ async def insights(
     return HTMLResponse(_insights_page(data), headers={"Cache-Control": "no-store"})
 
 
-@router.get("/experiments", response_class=HTMLResponse)
+@router.get("/experiments/legacy", response_class=HTMLResponse)
 async def experiments_home(_: str = Depends(require_admin)):
     rows = await experiments.list_experiments()
     analyses = await asyncio.gather(
@@ -192,7 +192,7 @@ async def experiments_home(_: str = Depends(require_admin)):
     return HTMLResponse(_page(cards, len(rows), show_form=False, show_list=True))
 
 
-@router.get("/experiments/new", response_class=HTMLResponse)
+@router.get("/experiments/legacy/new", response_class=HTMLResponse)
 async def new_experiment(_: str = Depends(require_admin)):
     return HTMLResponse(_page("", 0, show_form=True, show_list=False))
 
@@ -232,3 +232,123 @@ async def change_status(experiment_id: int, status: str, _: str = Depends(requir
 @router.get("/experiments/{experiment_id}/results")
 async def results(experiment_id: int, _: str = Depends(require_admin)):
     return await experiments.get_analysis(experiment_id)
+
+# Protocol-based experiments use dedicated, authenticated routes and snapshots.
+from app.services import experiment_lab, lab_delivery, lab_simulation
+from app.schemas.experiment_lab import (
+    DesignInput, EnrollmentInput, ActionInput, AnalysisInput, PreviewInput, DecisionInput,
+)
+
+
+def require_lab_action(x_experiment_admin: str = Header(default='')):
+    if x_experiment_admin != '1':
+        raise HTTPException(status_code=403, detail='실험실 화면에서 요청하세요.')
+
+
+@router.get('/api/experiments')
+async def lab_list(_: str = Depends(require_admin)):
+    return await experiment_lab.list_designs()
+
+
+@router.post('/api/experiments', dependencies=[Depends(require_lab_action)])
+async def lab_create(payload: DesignInput, actor: str = Depends(require_admin)):
+    return {'id': await experiment_lab.create(payload, actor)}
+
+
+@router.put('/api/experiments/{eid}', dependencies=[Depends(require_lab_action)])
+async def lab_edit(eid: int, payload: DesignInput, actor: str = Depends(require_admin)):
+    try:
+        await experiment_lab.update_draft(eid,payload,actor)
+    except ValueError as exc:
+        raise HTTPException(400,str(exc)) from exc
+    return {'ok':True}
+
+
+@router.get('/api/experiments/{eid}/results')
+async def lab_results(eid: int, _: str = Depends(require_admin)):
+    try:
+        return await experiment_lab.latest(eid)
+    except ValueError as exc:
+        raise HTTPException(404,str(exc)) from exc
+
+
+@router.get('/api/experiments/{eid}/diagnostics')
+async def lab_diagnostics(eid: int, _: str = Depends(require_admin)):
+    data=await lab_results(eid,_)
+    return {'run':data['run'],'start_blockers':data['start_blockers']}
+
+
+@router.post('/api/experiments/{eid}/enrollment', dependencies=[Depends(require_lab_action)])
+async def lab_enrollment(eid: int,payload: EnrollmentInput,actor: str = Depends(require_admin)):
+    try:
+        await experiment_lab.enrollment(eid,payload.action,payload.reason,actor)
+    except ValueError as exc:
+        raise HTTPException(400,str(exc)) from exc
+    return {'ok':True}
+
+
+@router.post('/api/experiments/{eid}/stop', dependencies=[Depends(require_lab_action)])
+async def lab_stop(eid: int,payload: ActionInput,actor: str = Depends(require_admin)):
+    try:
+        await experiment_lab.stop(eid,payload.reason,actor)
+    except ValueError as exc:
+        raise HTTPException(400,str(exc)) from exc
+    return {'ok':True}
+
+
+@router.post('/api/experiments/{eid}/analysis-runs', dependencies=[Depends(require_lab_action)])
+async def lab_analysis(eid: int,payload: AnalysisInput,actor: str = Depends(require_admin)):
+    try:
+        return await experiment_lab.run_analysis(eid,payload,actor)
+    except ValueError as exc:
+        raise HTTPException(400,str(exc)) from exc
+
+
+@router.post('/api/experiments/{eid}/simulation', dependencies=[Depends(require_lab_action)])
+async def lab_simulate(eid: int,actor: str = Depends(require_admin)):
+    try:
+        return await lab_simulation.save(eid,actor)
+    except ValueError as exc:
+        raise HTTPException(400,str(exc)) from exc
+
+
+@router.post('/api/experiments/{eid}/preview', dependencies=[Depends(require_lab_action)])
+async def lab_preview(eid: int,payload: PreviewInput,_: str = Depends(require_admin)):
+    try:
+        return await lab_delivery.preview(eid,payload.variant)
+    except ValueError as exc:
+        raise HTTPException(400,str(exc)) from exc
+
+
+@router.post('/api/experiments/{eid}/preview-override', dependencies=[Depends(require_lab_action)])
+async def lab_override(eid: int,payload: PreviewInput,actor: str = Depends(require_admin)):
+    try:
+        return await lab_delivery.reserve(eid,payload.variant,actor)
+    except ValueError as exc:
+        raise HTTPException(400,str(exc)) from exc
+
+
+@router.delete('/api/experiments/{eid}/preview-override', dependencies=[Depends(require_lab_action)])
+async def lab_cancel_override(eid: int,actor: str = Depends(require_admin)):
+    from app.database import get_pool
+    async with get_pool().acquire() as conn:
+        async with conn.transaction():
+            await conn.execute('DELETE FROM lab_preview_overrides WHERE experiment_id=$1 AND user_id=$2',eid,os.getenv('DEVELOPER_ID','').strip())
+            await experiment_lab.audit(conn,eid,actor,'preview_cancel','개발자 예약 취소')
+    return {'ok':True}
+
+
+@router.post('/api/experiments/{eid}/decision', dependencies=[Depends(require_lab_action)])
+async def lab_decision(eid: int,payload: DecisionInput,actor: str = Depends(require_admin)):
+    try:
+        await experiment_lab.decision(eid,payload,actor)
+    except ValueError as exc:
+        raise HTTPException(400,str(exc)) from exc
+    return {'ok':True}
+
+
+@router.get('/experiments', response_class=HTMLResponse)
+@router.get('/experiments/new', response_class=HTMLResponse)
+async def protocol_experiments_page(_: str = Depends(require_admin)):
+    return HTMLResponse((Path(__file__).parent.parent / 'static' / 'experiment_lab.html').read_text(),
+                        headers={'Cache-Control':'no-store'})

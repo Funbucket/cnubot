@@ -231,6 +231,20 @@ def create_inline_product_output(product: dict, click_url: str | None = None) ->
     return {"commerceCard": card}
 
 
+def create_inline_bundle_output(products: list[dict], click_urls: list[str]) -> dict:
+    """Keep a private three-product preview inside one Kakao output slot."""
+    labels = {"meal": "🍚 간편식", "snack": "🥤 간식·음료", "living": "🧻 생활용품"}
+    cards = []
+    for product, url in zip(products[:3], click_urls[:3]):
+        card = create_inline_product_output(product, url)["commerceCard"]
+        label = labels.get(product.get("preview_slot"), "💸 생활비 특가")
+        detail = product_description(product, review_min_count=INLINE_REVIEW_MIN_COUNT, max_lines=1)
+        card["description"] = (label + " · 제휴" + ("\n" + detail if detail else ""))[:COMMERCE_CARD_DESCRIPTION_LIMIT]
+        card["buttonLayout"] = "vertical"
+        cards.append(card)
+    return {"carousel": {"type": "commerceCard", "items": cards}}
+
+
 def _algorithm_commerce_card(product: dict, click_url: str | None, description: str) -> dict:
     """An algorithm-picked card always knows its discount, so always render it."""
     card = commerce_card(product, click_url, description=description, title=product["title"])

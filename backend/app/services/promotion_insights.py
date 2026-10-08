@@ -12,6 +12,9 @@ _PATH_EVENTS_CTE = """
                        CASE WHEN surface = 'menu_inline_card' THEN 'inline' ELSE 'entry' END AS path
                 FROM insights_scoped_events
                   WHERE (surface = 'menu_inline_card' OR funnel_stage IS NOT NULL)
+                  -- A three-product bundle is one opportunity for path/fatigue metrics.
+                  AND (event_name <> 'promotion_exposure' OR properties->>'bundle_id' IS NULL
+                       OR properties->>'position' = '1')
                   AND ($2::date IS NULL OR created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Seoul'))
                   AND ($3::date IS NULL OR created_at < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Asia/Seoul'))
                   AND (user_id IS NULL OR NOT (user_id = ANY($4::text[])))

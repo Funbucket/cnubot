@@ -14,6 +14,7 @@ class PromotionInsightsTest(unittest.IsolatedAsyncioTestCase):
         self.conn = await asyncpg.connect(os.environ["DATABASE_URL"])
         await self.conn.execute("""
             SET TIME ZONE 'UTC';
+            CREATE TEMP TABLE experiment_variants (experiment_id BIGINT, variant_key TEXT, config JSONB DEFAULT '{}');
             CREATE TEMP TABLE user_events (
                 user_id TEXT, event_name TEXT, created_at TIMESTAMPTZ,
                 properties JSONB DEFAULT '{}', source TEXT, surface TEXT,
@@ -98,6 +99,17 @@ class PromotionInsightsTest(unittest.IsolatedAsyncioTestCase):
         data = await experiments.get_promotion_insights(date(2026,9,10), date(2026,9,10))
         self.assertEqual(data["totals"]["entry_exposed_users"], 2)
         self.assertEqual([row["day"] for row in data["daily"]], [date(2026,9,10)])
+
+    async def test_bundle_counts_as_one_inline_opportunity(self):
+        for position in (1,2,3):
+            await self.conn.execute("""INSERT INTO pg_temp.user_events
+              (user_id,event_name,created_at,surface,properties) VALUES('synthetic-bundle-user',
+              'promotion_exposure','2026-09-10 10:00+09','menu_inline_card',$1::jsonb)""",
+              '{"bundle_id":"synthetic-bundle","position":'+str(position)+'}')
+        data=await experiments.get_promotion_insights(date(2026,9,10),date(2026,9,10))
+        row=next(r for r in data['paths'] if r['path']=='inline')
+        self.assertEqual(row['exposure_events'],1)
+
 
 
 class PathSummaryTest(unittest.TestCase):

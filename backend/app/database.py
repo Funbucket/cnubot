@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import asyncpg
 
@@ -236,3 +237,7 @@ async def init_database() -> None:
             DROP TABLE IF EXISTS cafeteria_favorites;
             """
         )
+
+    # Idempotent additive protocol schema; preserves legacy experiments and events.
+    async with pool.acquire() as conn:
+        await conn.execute((Path(__file__).parent / "migrations" / "001_experiment_lab.sql").read_text())
