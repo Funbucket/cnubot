@@ -39,3 +39,10 @@ A/A는 미완료 상태에서 운영상 중단됐다. 시작 사유·품질 검�
 위 경로는 구현 완료, 기존 카카오 등록을 사용한다. 다른 식당 발화는 [전체 등록표](kakao-message-routing.md)에 따르며 자동 매핑으로 가정하지 않는다. 상품의 `구성·가격 확인`은 webLink여서 messageText가 아니다. 학식·셔틀·학교혜택 최상위 메뉴는 독립으로 유지한다.
 
 통계 방법 참고: [Statsig의 검정력 계획](https://docs.statsig.com/experiments/power-analysis), [Microsoft의 표본 적격 조건과 진단](https://www.microsoft.com/en-us/research/articles/diagnosing-sample-ratio-mismatch-in-a-b-testing/), [카카오 스킬 5초 제한](https://kakaobusiness.gitbook.io/main/tool/chatbot/skill_guide/make_skill).
+
+## 실제 개시 기록
+
+- 실험 #2는 2026-10-13 02:43:52 KST에 공식 어드민 API로 `running` 상태로 시작했다. 별도 실험 키와 기존 A/A와 분리된 사용자 배정을 사용한다.
+- 고정 모집 상한은 2026-10-22 02:43:52 KST이며, 2,000명 도달 시 더 일찍 마감한다. 마지막 배정이 상한 시각에 발생하면 관찰·수집 완료 예정은 2026-10-24 02:43:52 KST다. 실제 최종 분석 시각은 데이터 확인 후 결정한다.
+- 시작 전 관리자 B 응답 미리보기에서 현재 스냅샷의 3개 카드가 모두 1만원 이하임을 확인했다. 변경 구성의 사용자 실기기 확인은 아직 받지 못했다. 개발자 QA 계정은 실험 모집단에서 제외된다.
+- 시작 직후 빈 표본에 대한 분석은 `interim`·`quality pending`으로 기록됐다. 배정·전환 결과가 아직 없으므로 효과를 표시하지 않는다.
