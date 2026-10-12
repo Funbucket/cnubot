@@ -87,7 +87,7 @@ class AnalysisInput(ActionInput):
 
 class PreviewInput(BaseModel):
     variant: Literal['A', 'B'] = 'B'
-    policy: Literal['student_bundle_v1', 'student_food_preview_v2'] = 'student_bundle_v1'
+    policy: Literal['student_bundle_v1', 'student_food_preview_v2', 'student_food_preview_v3'] = 'student_bundle_v1'
 
     @model_validator(mode='after')
     def validate_preview_policy(self):

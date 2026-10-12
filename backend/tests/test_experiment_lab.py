@@ -5,13 +5,18 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
-from app.schemas.experiment_lab import DesignInput, Protocol, AnalysisInput
+from app.schemas.experiment_lab import DesignInput, Protocol, AnalysisInput, PreviewInput
 from app.services import experiment_lab as lab, lab_stats, recommendations, lab_delivery
 
 UTC=timezone.utc
 
 
 class LabStatisticsTest(unittest.TestCase):
+    def test_revised_food_preview_only_allows_b(self):
+        self.assertEqual(PreviewInput(variant='B',policy='student_food_preview_v3').policy,'student_food_preview_v3')
+        with self.assertRaises(ValueError):
+            PreviewInput(variant='A',policy='student_food_preview_v3')
+
     def test_newcombe_matches_independent_statsmodels(self):
         from statsmodels.stats.proportion import confint_proportions_2indep
         for a,na,b,nb in [(8,1100,35,1100),(0,100,4,101),(0,100,0,100),(100,100,100,100),(1,3,0,4)]:
@@ -275,6 +280,30 @@ class LabDatabaseTest(unittest.IsolatedAsyncioTestCase):
             encoded=token.split('.')[0]
             payload=json.loads(base64.urlsafe_b64decode(encoded+'='*(-len(encoded)%4)))
             self.assertTrue(payload['m']['is_preview'])
+
+    async def test_revised_food_preview_is_private_and_reserved_for_a_day(self):
+        from unittest.mock import AsyncMock
+        product={'title':'Synthetic food','url':'https://example.com/product','price':5300,
+                 'image_url':'https://example.com/image.png','taca_item_id':5,'category_ids':[],
+                 'preview_slot':'snack','button_label':'구성·가격 확인',
+                 'preview_label':'⚡️ 자취생 특가 · 1만원 이하 먹거리'}
+        with patch.dict(os.environ,{'DEVELOPER_ID':'synthetic-qa','PROMOTION_TRACKING_SECRET':'test-only-secret'}), \
+             patch.object(lab_delivery,'student_pairs',new=AsyncMock(return_value=[('food',product)])) as pairs:
+            reserved=await lab_delivery.reserve(self.eid,'B','test','student_food_preview_v3')
+            self.assertEqual(reserved['expires_in_seconds'],86400)
+            self.assertFalse(await lab_delivery.pending('synthetic-other'))
+            expires=await self.pool.fetchval('SELECT expires_at FROM lab_preview_overrides WHERE user_id=$1','synthetic-qa')
+            self.assertGreater(expires,datetime.now(UTC)+timedelta(hours=23))
+            delivery=await lab_delivery.consume(('food',product,'unused','food-request'),'synthetic-qa')
+            pairs.assert_awaited_once_with('synthetic-qa','student_food_preview_v3')
+            self.assertEqual(delivery['metadata']['rendered_policy'],'student_food_preview_v3')
+            self.assertTrue(delivery['metadata']['is_preview'])
+            self.assertEqual(delivery['output']['carousel']['items'][0]['buttons'][0]['label'],'구성·가격 확인')
+            self.assertIn('1만원 이하',delivery['output']['carousel']['items'][0]['description'])
+            self.assertIsNone(await lab_delivery.consume(('food',product,'unused','repeat'),'synthetic-qa'))
+            self.assertTrue(await lab_delivery.record(delivery))
+            self.assertEqual(await self.pool.fetchval('SELECT COUNT(*) FROM lab_assignments'),0)
+            self.assertFalse(await recommendations.has_promotion_exposure_today('synthetic-qa','menu_inline_card'))
 
 
 class LabDeliveryTest(unittest.IsolatedAsyncioTestCase):

@@ -239,7 +239,10 @@ def create_inline_bundle_output(products: list[dict], click_urls: list[str]) -> 
         card = create_inline_product_output(product, url)["commerceCard"]
         label = product.get("preview_label") or labels.get(product.get("preview_slot"), "💸 생활비 특가")
         detail = product_description(product, review_min_count=INLINE_REVIEW_MIN_COUNT, max_lines=1)
-        card["description"] = (label + " · 제휴" + ("\n" + detail if detail else ""))[:COMMERCE_CARD_DESCRIPTION_LIMIT]
+        description = (label + " · 제휴")[:COMMERCE_CARD_DESCRIPTION_LIMIT]
+        if detail and len(description) + 1 + len(detail) <= COMMERCE_CARD_DESCRIPTION_LIMIT:
+            description += "\n" + detail
+        card["description"] = description
         card["buttonLayout"] = "vertical"
         cards.append(card)
     return {"carousel": {"type": "commerceCard", "items": cards}}

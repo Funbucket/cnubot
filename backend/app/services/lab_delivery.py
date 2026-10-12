@@ -15,7 +15,8 @@ from app.services import product_snapshot, promotion_preview, promotion_settings
 async def student_pairs(user_id, policy='student_bundle_v1'):
     snapshot = await asyncio.to_thread(product_snapshot.read)
     history = await recommendations.last_exposure_by_product(user_id, promotions.INLINE_CARD_SURFACE)
-    options = {'max_price':5000,'slots':('meal','snack')} if policy=='student_food_preview_v2' else {}
+    options = ({'max_price':5000,'slots':('meal','snack')} if policy=='student_food_preview_v2' else
+               {'max_price':10000,'slots':('meal','snack')} if policy=='student_food_preview_v3' else {})
     pairs = promotion_preview.select_products(snapshot,os.getenv('TOSS_PUBLISHER_ID','').strip(),history,**options)
     for _,product in pairs:
         product['snapshot_id'] = snapshot.get('updated_at')
@@ -23,6 +24,9 @@ async def student_pairs(user_id, policy='student_bundle_v1'):
         if policy=='student_food_preview_v2':
             product['button_label']='구성·가격 확인'
             product['preview_label']='🍚 5천원 이하 먹거리'
+        elif policy=='student_food_preview_v3':
+            product['button_label']='구성·가격 확인'
+            product['preview_label']='⚡️ 자취생 특가 · 1만원 이하 먹거리'
         product['settings_revision']=promotion_settings.read_settings().revision
     return pairs
 
@@ -41,7 +45,7 @@ def prepare(pairs,metadata):
             button_label='특가 바로가기',position=position,request_id=metadata['request_id'],product_snapshot=snapshot)
         urls.append(f'{promotions.common.SERVER_URL}/promotions/toss-shopping/click?token={token}')
     output = (promotion_cards.create_inline_bundle_output([p for _,p in pairs],urls)
-              if len(pairs)>1 or metadata.get('rendered_policy')=='student_food_preview_v2' else promotions.create_inline_product_output(pairs[0][1],urls[0]))
+              if len(pairs)>1 or metadata.get('rendered_policy') in ('student_food_preview_v2','student_food_preview_v3') else promotions.create_inline_product_output(pairs[0][1],urls[0]))
     return dict(pairs=pairs,output=output,metadata=metadata)
 
 
@@ -115,8 +119,9 @@ async def preview(eid,variant,policy='student_bundle_v1'):
     if not a:
         return {'response':None,'reason':'유효한 A 후보가 없습니다.','is_preview':True}
     pairs = await student_pairs(developer,policy) if variant=='B' else []
-    if variant=='B' and policy=='student_food_preview_v2' and not pairs:
-        return {'response':None,'reason':'5천원 이하 유효한 먹거리 후보가 없습니다.','is_preview':True}
+    if variant=='B' and policy in ('student_food_preview_v2','student_food_preview_v3') and not pairs:
+        limit='5천원' if policy=='student_food_preview_v2' else '1만원'
+        return {'response':None,'reason':f'{limit} 이하 유효한 먹거리 후보가 없습니다.','is_preview':True}
     pairs = pairs or [a]
     delivery = prepare(pairs,dict(user_id=developer,request_id=str(uuid.uuid4()),
                     experiment_id=eid,config_hash=d['config_hash'],planned_variant=variant,
@@ -134,11 +139,12 @@ async def reserve(eid,variant,actor,policy='student_bundle_v1'):
         async with conn.transaction():
             await lab.get_design(eid,conn)
             session = str(uuid.uuid4())
+            expires_in=86400 if policy=='student_food_preview_v3' else 600
             await conn.execute('''INSERT INTO lab_preview_overrides(user_id,experiment_id,session_id,variant,preview_policy,expires_at)
-                VALUES($1,$2,$3,$4,$5,NOW()+INTERVAL '10 minutes') ON CONFLICT(user_id) DO UPDATE
-                SET experiment_id=$2,session_id=$3,variant=$4,preview_policy=$5,expires_at=NOW()+INTERVAL '10 minutes',created_at=NOW()''',developer,eid,session,variant,policy)
+                VALUES($1,$2,$3,$4,$5,NOW()+($6 * INTERVAL '1 second')) ON CONFLICT(user_id) DO UPDATE
+                SET experiment_id=$2,session_id=$3,variant=$4,preview_policy=$5,expires_at=NOW()+($6 * INTERVAL '1 second'),created_at=NOW()''',developer,eid,session,variant,policy,expires_in)
             await lab.audit(conn,eid,actor,'preview_reserve','개발자 다음 적격 조회 1회',{'session_id':session,'variant':variant,'policy':policy})
-    return {'session_id':session,'expires_in_seconds':600}
+    return {'session_id':session,'expires_in_seconds':expires_in}
 
 
 async def pending(user_id):

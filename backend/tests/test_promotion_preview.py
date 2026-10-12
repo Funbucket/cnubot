@@ -193,6 +193,21 @@ class PreviewRouteTest(unittest.IsolatedAsyncioTestCase):
 
 
 class FoodPreviewSelectionTest(unittest.TestCase):
+    def test_revised_food_treatment_has_three_distinct_affordable_products(self):
+        data=snapshot()
+        data['categories']['success']['categories'].append({
+            'categoryId':40,'displayName':'식품','children':[{'categoryId':41,
+                'displayName':'음료','children':[{'categoryId':42,'displayName':'커피'}]}]})
+        data['items']['5']={**data['items']['2'],'tacaItemId':5,
+            'displayName':'커피 2개','categoryIds':[42],
+            'displayPrice':5300,'originalPrice':10600}
+        data['links']['5:test-publisher']='https://example.com/food-5'
+        pairs=preview.select_products(data,'test-publisher',{},max_price=10000,slots=('meal','snack'))
+        self.assertEqual(len(pairs),3)
+        self.assertEqual(sorted(p['price'] for _,p in pairs),[2500,3000,5300])
+        self.assertEqual(len({p['preview_family'] for _,p in pairs}),3)
+        self.assertTrue(all(p['collection_id']=='food' for _,p in pairs))
+
     def test_food_only_price_limit_and_real_card_labels(self):
         pairs=preview.select_products(snapshot(), 'test-publisher', {},max_price=5000,slots=('meal','snack'))
         self.assertTrue(pairs)
