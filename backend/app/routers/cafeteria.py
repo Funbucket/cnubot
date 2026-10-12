@@ -5,6 +5,8 @@ import time
 
 from app.schemas.kakao_request import KakaoRequest
 from app.services import lab_telemetry
+from app.services.dorm_menu import DormMenuUnavailable
+from app.scrapers.dorm import is_current_week_dorm_menu
 from app.services import cafeteria, experiments, promotions, promotion_cards, promotion_preview, lab_delivery
 from app.utils import common
 from fastapi import APIRouter, Body, HTTPException
@@ -61,7 +63,10 @@ async def get_today_menu(req: KakaoRequest):
     kor_day = common.get_kor_day(today_weekday)
 
     place_key = common.get_eng_place(place)
-    data = await common.load_data(str(common.get_menu_data_path(place_key)))
+    try:
+        data = await _load_menu_data(place_key)
+    except DormMenuUnavailable:
+        return _dorm_menu_pending_response(kor_day, place)
     menu_data = common.get_menu_by_day(data, kor_day)
     if not menu_data:
         raise HTTPException(status_code=404, detail="해당 요일에 메뉴가 없습니다.")
@@ -97,7 +102,9 @@ async def get_menu_by_day(req: KakaoRequest):
     place_key = common.get_eng_place(place)
 
     try:
-        data = await common.load_data(str(common.get_menu_data_path(place_key)))
+        data = await _load_menu_data(place_key)
+    except DormMenuUnavailable:
+        return _dorm_menu_pending_response(kor_day, place)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="데이터 파일을 찾을 수 없습니다.")
 
@@ -107,6 +114,28 @@ async def get_menu_by_day(req: KakaoRequest):
         return cafeteria.create_no_menu_response(kor_day, place)
 
     response = await _menu_response(req, kor_day, menu_data, place, place_key)
+    return JSONResponse(response)
+
+
+async def _load_menu_data(place_key: str) -> dict:
+    try:
+        data = await common.load_data(str(common.get_menu_data_path(place_key)))
+    except (FileNotFoundError, ValueError) as exc:
+        if place_key == "dorm":
+            raise DormMenuUnavailable("Dorm menu file is unavailable") from exc
+        raise
+    if place_key == "dorm" and not is_current_week_dorm_menu(
+        data, common.get_current_kr_time().date()
+    ):
+        raise DormMenuUnavailable("Dorm menu is stale or incomplete")
+    return data
+
+
+def _dorm_menu_pending_response(day: str, place: str) -> JSONResponse:
+    response = cafeteria.create_no_menu_response(day, place)
+    response["template"]["outputs"][0]["simpleText"]["text"] = (
+        "이번 주 기숙사 식단을 아직 확인하지 못했어요. 잠시 후 다시 조회해 주세요."
+    )
     return JSONResponse(response)
 
 

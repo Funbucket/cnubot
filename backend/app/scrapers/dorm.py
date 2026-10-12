@@ -1,6 +1,6 @@
 import json
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import requests
@@ -29,6 +29,11 @@ def scrape_dorm_menu(url: str) -> dict:
     soup = bs(response.content.decode("utf8", "replace"), "html.parser")
 
     data = {"place": "dorm", "date": _extract_date_range(soup), "menu": []}
+    date_header = soup.select_one(".diet_table_top strong")
+    if date_header:
+        dates = re.findall(r"\d{4}-\d{2}-\d{2}", date_header.text)
+        if len(dates) == 2:
+            data.update(date_start=dates[0], date_end=dates[1])
 
     for row in soup.select("table.default_view.diet_table tbody tr"):
         day_cell = row.select_one("td")
@@ -50,22 +55,61 @@ def scrape_dorm_menu(url: str) -> dict:
 def scrape_current_week_dorm_menu(
     url_template: str, today: date | None = None, pages: tuple[int, ...] = (1, 2)
 ) -> dict:
-    """Fetch candidate pages and keep the page whose range contains today.
+    """Fetch candidate pages until a complete current Monday–Sunday week is found.
 
     The dorm site changes which page number represents the current week as the
     schedule advances, so selecting a fixed page can silently save next week's
-    menu.  Fail closed when neither candidate contains today.
+    menu. Fail closed when no candidate contains a complete current week.
     """
     target = today or datetime.now(ZoneInfo("Asia/Seoul")).date()
-    candidates = [
-        scrape_dorm_menu(url_template.format(page=page)) for page in pages
-    ]
-    for candidate in candidates:
-        start, end = _parse_date_range(candidate.get("date", ""), target.year)
-        if start and end and start <= target <= end:
+    ranges = []
+    for page in pages:
+        try:
+            candidate = scrape_dorm_menu(url_template.format(page=page))
+        except (requests.RequestException, ValueError, IndexError):
+            ranges.append(f"page {page}: unavailable")
+            continue
+        ranges.append(candidate.get("date", "날짜 정보 없음"))
+        if is_current_week_dorm_menu(candidate, target):
             return candidate
-    ranges = ", ".join(candidate.get("date", "날짜 정보 없음") for candidate in candidates)
-    raise ValueError(f"Could not find dorm menu for {target.isoformat()} among: {ranges}")
+    raise ValueError(f"Could not find complete dorm menu for {target.isoformat()} among: {', '.join(ranges)}")
+
+
+def is_current_week_dorm_menu(data: dict, today: date | None = None) -> bool:
+    """Require this KST Monday–Sunday week and all seven parsed day rows."""
+    target = today or datetime.now(ZoneInfo("Asia/Seoul")).date()
+    monday = target - timedelta(days=target.weekday())
+    sunday = monday + timedelta(days=6)
+    if not isinstance(data, dict) or data.get("place") != "dorm":
+        return False
+    try:
+        if "date_start" in data or "date_end" in data:
+            start = date.fromisoformat(data["date_start"])
+            end = date.fromisoformat(data["date_end"])
+        else:
+            # Read existing files too, including a December–January week.
+            start, end = _parse_date_range(data.get("date", ""), monday.year)
+        if (start, end) != (monday, sunday):
+            return False
+        if data.get("date") != f"{monday:%m/%d} ~ {sunday:%m/%d}":
+            return False
+        rows = data["menu"]
+        if len(rows) != 7 or {row["day"] for row in rows} != set("월화수목금토일"):
+            return False
+        has_items = False
+        for row in rows:
+            for meal_time in ("breakfast", "lunch", "dinner"):
+                meals = row[meal_time]
+                if not isinstance(meals, list):
+                    return False
+                for meal in meals:
+                    items = meal["menu"]
+                    if not isinstance(items, list) or any(not isinstance(item, str) for item in items):
+                        return False
+                    has_items = has_items or any(item.strip() for item in items)
+        return has_items
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 def scrape_dorm_menu_json(url: str) -> str:

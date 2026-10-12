@@ -85,7 +85,13 @@ def main() -> None:
     data_dir = Path(args.data_dir)
     places = expand_places(args.places)
     for place in places:
-        path = save_menu(scrape_place(place), data_dir)
+        if place == "dorm":
+            from app.services.dorm_menu import ensure_current_menu
+
+            ensure_current_menu(data_dir, force=True)
+            path = data_dir / "dorm_menu.json"
+        else:
+            path = save_menu(scrape_place(place), data_dir)
         print(f"saved {place}: {path}")
     if "dorm" in places:
         print(f"saved dorm hours: {save_dorm_hours(data_dir)}")

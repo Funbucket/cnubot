@@ -49,6 +49,17 @@ services:
         condition: service_healthy
     restart: always
 
+  dorm-menu-monitor:
+    build:
+      context: ./backend
+    entrypoint: ["python", "-m", "app.jobs.monitor_dorm_menu"]
+    environment:
+      MENU_DATA_DIR: /data/menus
+    volumes:
+      - ./backend/app:/code/app/
+      - ./data:/data/menus
+    restart: always
+
   product-collector:
     build:
       context: ./backend

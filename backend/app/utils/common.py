@@ -83,6 +83,11 @@ async def get_operating_date_for_place(place: str) -> str:
     if place in {"dorm", "hall_2", "hall_3", "life_science", "sangrok"}:
         try:
             data = await load_data(str(get_menu_data_path(place)))
+            if place == "dorm":
+                from app.scrapers.dorm import is_current_week_dorm_menu
+
+                if not is_current_week_dorm_menu(data, get_current_kr_time().date()):
+                    return ""
             return data.get("date", "")
         except Exception:
             return ""

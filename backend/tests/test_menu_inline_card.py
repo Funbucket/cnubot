@@ -211,7 +211,7 @@ class MenuInlineCardResponseTest(unittest.TestCase):
 
 
 class MissingMenuRouteTest(unittest.IsolatedAsyncioTestCase):
-    async def test_missing_day_returns_notice_with_weekday_navigation(self):
+    async def test_incomplete_week_returns_pending_notice_with_weekday_navigation(self):
         request = KakaoRequest.model_validate({
             "userRequest": {
                 "utterance": "토요일기숙사",
@@ -221,11 +221,12 @@ class MissingMenuRouteTest(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(cafeteria_router.common, "load_data", mock.AsyncMock(
             return_value={"place": "dorm", "menu": []}
         )):
-            response = await cafeteria_router.get_menu_by_day(request)
+            import json
+            response = json.loads((await cafeteria_router.get_menu_by_day(request)).body)
 
         self.assertEqual(
             response["template"]["outputs"][0]["simpleText"]["text"],
-            "운영 중인 메뉴가 없어요 🥲",
+            "이번 주 기숙사 식단을 아직 확인하지 못했어요. 잠시 후 다시 조회해 주세요.",
         )
         self.assertEqual(
             response["template"]["quickReplies"][0]["messageText"],
