@@ -122,22 +122,38 @@ async def start_blockers(design,conn):
             if not p.get(field):
                 missing.append(label)
         if p.get('baseline_as_of'):
-            age = datetime.now(UTC)-datetime.fromisoformat(p['baseline_as_of'])
+            age = datetime.now(UTC)-datetime.fromisoformat(p['baseline_as_of'].replace('Z','+00:00'))
             if age < timedelta(0) or age > timedelta(days=14):
                 missing.append('최근 14일 안의 기준율 재검증')
-        aa_id = p.get('aa_experiment_id')
-        aa = await conn.fetchrow('SELECT * FROM lab_experiments WHERE id=$1',aa_id) if aa_id else None
-        run = await conn.fetchrow('SELECT * FROM lab_analysis_runs WHERE experiment_id=$1 ORDER BY id DESC LIMIT 1',aa_id) if aa else None
-        if not aa or aa['kind']!='aa' or aa['status'] not in ('ready','decided') or not run:
-            missing.append('완료된 별도 A/A 실험 및 분석')
-        elif not (decode(run)['result'].get('quality_passed') and aa['started_at'] and
-                  aa['enrollment_closed_at']-aa['started_at'] >= timedelta(days=7)):
-            missing.append('7일 A/A 진단 통과')
+        if p.get('purpose','confirmatory') != 'exploratory':
+            aa_id = p.get('aa_experiment_id')
+            aa = await conn.fetchrow('SELECT * FROM lab_experiments WHERE id=$1',aa_id) if aa_id else None
+            run = await conn.fetchrow('SELECT * FROM lab_analysis_runs WHERE experiment_id=$1 ORDER BY id DESC LIMIT 1',aa_id) if aa else None
+            if not aa or aa['kind']!='aa' or aa['status'] not in ('ready','decided') or not run:
+                missing.append('완료된 별도 A/A 실험 및 분석')
+            elif not (decode(run)['result'].get('quality_passed') and aa['started_at'] and
+                      aa['enrollment_closed_at']-aa['started_at'] >= timedelta(days=7)):
+                missing.append('7일 A/A 진단 통과')
+        elif not p.get('aa_waiver_reason') or not (p.get('enrollment_deadline') or p.get('exploratory_enrollment_days')):
+            missing.append('탐색 실험의 A/A 예외 근거 및 모집 마감')
+        if p.get('enrollment_deadline') and datetime.fromisoformat(p['enrollment_deadline'].replace('Z','+00:00')) <= datetime.now(UTC):
+            missing.append('미래의 탐색 모집 마감 시각')
         simulation = await conn.fetchval('''SELECT details FROM lab_audit
              WHERE experiment_id=$1 AND action='simulation' ORDER BY id DESC LIMIT 1''',design['id'])
         if not simulation or decode({'details':simulation})['details'].get('config_hash') != design['config_hash']:
             missing.append('현재 계획 hash의 검정력 시뮬레이션')
     return missing
+
+
+def enrollment_end(design):
+    p = design['protocol']
+    days = p.get('aa_enrollment_days',7) if design['kind']=='aa' else p.get('max_enrollment_days',28)
+    if p.get('purpose')=='exploratory' and p.get('exploratory_enrollment_days'):
+        days=p['exploratory_enrollment_days']
+    end = design['started_at'] + timedelta(days=days)
+    if p.get('enrollment_deadline'):
+        end = min(end,datetime.fromisoformat(p['enrollment_deadline'].replace('Z','+00:00')))
+    return end
 
 
 async def enrollment(eid, action, reason, actor):
@@ -158,8 +174,7 @@ async def enrollment(eid, action, reason, actor):
                 other = await conn.fetchval("SELECT id FROM lab_experiments WHERE status IN ('running','paused','observing') AND id<>$1",eid)
                 if other:
                     raise ValueError('동일 학식 슬롯에서 다른 실험이 진행 중입니다.')
-            horizon = d['protocol'].get('aa_enrollment_days',7) if d['kind']=='aa' else 28
-            if action=='resume' and datetime.now(UTC) >= d['started_at']+timedelta(days=horizon):
+            if action=='resume' and datetime.now(UTC) >= enrollment_end(d):
                 raise ValueError('모집 상한이 끝났습니다. 모집을 마감하세요.')
             status = {'start':'running','pause':'paused','resume':'running','close':'observing'}[action]
             await conn.execute('''UPDATE lab_experiments SET status=$2,
@@ -193,10 +208,9 @@ async def assign(user_id, place, request_id, route):
             existing = await conn.fetchrow('SELECT * FROM lab_assignments WHERE experiment_id=$1 AND user_id=$2',d['id'],user_id)
             p = d['protocol']
             total = await conn.fetchval('SELECT COUNT(*) FROM lab_assignments WHERE experiment_id=$1',d['id'])
-            horizon = p.get('aa_enrollment_days',7) if d['kind']=='aa' else 28
             target_reached = d['kind']=='ab' and total >= p['total_users']
-            if d['status'] in ('running','paused') and (target_reached or now >= d['started_at']+timedelta(days=horizon)):
-                await conn.execute("UPDATE lab_experiments SET status='observing',enrollment_closed_at=NOW() WHERE id=$1",d['id'])
+            if d['status'] in ('running','paused') and (target_reached or now >= enrollment_end(d)):
+                await conn.execute("UPDATE lab_experiments SET status='observing',enrollment_closed_at=$2 WHERE id=$1",d['id'],min(now,enrollment_end(d)))
                 await audit(conn,d['id'],'system','close','고정 모집 목표 또는 기간 상한 도달')
                 d['status']='observing'
             if existing:
@@ -265,11 +279,10 @@ async def run_analysis(eid, payload, actor):
             if existing:
                 return decode(existing)
             p = d['protocol']
-            horizon = p.get('aa_enrollment_days',7) if d['kind']=='aa' else 28
-            if d['status'] in ('running','paused') and datetime.now(UTC)>=d['started_at']+timedelta(days=horizon):
-                await conn.execute("UPDATE lab_experiments SET status='observing',enrollment_closed_at=$2 WHERE id=$1",eid,d['started_at']+timedelta(days=horizon))
+            if d['status'] in ('running','paused') and datetime.now(UTC)>=enrollment_end(d):
+                await conn.execute("UPDATE lab_experiments SET status='observing',enrollment_closed_at=$2 WHERE id=$1",eid,enrollment_end(d))
                 d['status']='observing'
-                d['enrollment_closed_at']=d['started_at']+timedelta(days=horizon)
+                d['enrollment_closed_at']=enrollment_end(d)
                 await audit(conn,eid,'system','close','고정 모집 기간 상한 도달')
             counts = await conn.fetch('SELECT variant,COUNT(*)::int AS n FROM lab_assignments WHERE experiment_id=$1 GROUP BY variant',eid)
             assigned = {v:0 for v in ('A','B')}
@@ -310,6 +323,7 @@ async def run_analysis(eid, payload, actor):
             ready = final and d['status']!='stopped'
             outcome = ('operational_stop' if d['status']=='stopped' else 'quality_inconclusive' if final and not quality
                        else 'interim' if not final else 'aa_complete' if d['kind']=='aa'
+                       else 'exploratory_complete' if p.get('purpose')=='exploratory'
                        else 'inconclusive' if not sample_ok else 'adoption_supported' if practical and safety and safety['passed']
                        else 'safety_unconfirmed' if not safety or not safety['passed'] else 'keep_or_followup')
             result = dict(assigned=assigned,mature=mature,clicks=clicks,effect=effect,safety=safety,srm=srm,
@@ -339,7 +353,7 @@ async def decision(eid,payload,actor):
                 raise ValueError('품질·관찰 완료를 먼저 확인하세요.')
             if not result['quality_passed'] and payload.choice not in ('inconclusive','followup'):
                 raise ValueError('품질 미결에서는 미결·후속 계획만 기록할 수 있습니다.')
-            if payload.choice=='adopt' and (d['kind']!='ab' or result['outcome']!='adoption_supported'):
+            if payload.choice=='adopt' and (decode(d)['protocol'].get('purpose')=='exploratory' or d['kind']!='ab' or result['outcome']!='adoption_supported'):
                 raise ValueError('표본·효과·안전성 채택 기준을 모두 통과해야 합니다.')
             await audit(conn,eid,actor,'decision',payload.reason,{'run_id':run['id'],'choice':payload.choice})
             await conn.execute("UPDATE lab_experiments SET status='decided' WHERE id=$1",eid)

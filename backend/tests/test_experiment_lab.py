@@ -201,6 +201,51 @@ class LabDatabaseTest(unittest.IsolatedAsyncioTestCase):
 
 
 
+    async def test_exploratory_deadline_and_adoption_restriction(self):
+        from app.schemas.experiment_lab import DecisionInput
+        now=datetime.now(UTC)
+        await lab.stop(self.eid,'synthetic transition','test')
+        p=Protocol(purpose='exploratory',enrollment_deadline=now+timedelta(days=2),
+            aa_waiver_reason='Owner requests a separately identified short exploratory run',
+            baseline_rate=.01,baseline_as_of=now,baseline_source='synthetic cohort',
+            p95_limit_ms=1000,minimum_bundle_completion=.8,
+            readiness_notes='synthetic verified',device_qa_notes='synthetic verified')
+        eid=await lab.create(DesignInput(name='Short test',hypothesis='Synthetic bundle policy',kind='ab',protocol=p),'test')
+        d=await lab.get_design(eid)
+        async with self.pool.acquire() as c:
+            await lab.audit(c,eid,'test','simulation','synthetic simulation',{'config_hash':d['config_hash']})
+        await lab.enrollment(eid,'start','synthetic start','test')
+        d=await lab.get_design(eid)
+        self.assertEqual(lab.enrollment_end(d),p.enrollment_deadline)
+        a=await lab.assign('synthetic-existing','dorm','existing-request','/cafeteria/menu/day')
+        self.assertEqual(a['kind'],'ab')
+        # Advancing the fixed deadline in the isolated fixture exercises overdue paths.
+        d['protocol']['enrollment_deadline']=(now-timedelta(hours=1)).isoformat()
+        await self.pool.execute('UPDATE lab_experiments SET protocol=$2::jsonb WHERE id=$1',eid,json.dumps(d['protocol']))
+        self.assertIsNone(await lab.assign('synthetic-new','dorm','new-request','/cafeteria/menu/day'))
+        self.assertIsNotNone(await lab.assign('synthetic-existing','dorm','repeat-request','/cafeteria/menu/day'))
+        self.assertEqual((await lab.get_design(eid))['status'],'observing')
+        await self.pool.execute("UPDATE lab_experiments SET status='running',enrollment_closed_at=NULL WHERE id=$1",eid)
+        run=await lab.run_analysis(eid,AnalysisInput(watermark=datetime.now(UTC),idempotency_key='deadline',reason='synthetic deadline'),'test')
+        self.assertEqual((await lab.get_design(eid))['enrollment_closed_at'],now-timedelta(hours=1))
+        self.assertFalse(run['result']['final'])
+        # Even a favorable final result cannot authorize rollout of an exploratory run.
+        await self.pool.execute("UPDATE lab_experiments SET status='ready' WHERE id=$1",eid)
+        await self.pool.execute("UPDATE lab_analysis_runs SET result=$2::jsonb WHERE id=$1",run['id'],json.dumps({'decision_ready':True,'quality_passed':True,'outcome':'adoption_supported'}))
+        with self.assertRaisesRegex(ValueError,'채택 기준'):
+            await lab.decision(eid,DecisionInput(run_id=run['id'],choice='adopt',reason='synthetic attempted adoption'),'test')
+
+    async def test_confirmatory_still_requires_completed_aa(self):
+        now=datetime.now(UTC)
+        eid=await lab.create(DesignInput(name='Formal test',hypothesis='Synthetic formal test',kind='ab',
+            protocol=Protocol(baseline_rate=.01,baseline_as_of=now,baseline_source='synthetic cohort',
+                p95_limit_ms=1000,minimum_bundle_completion=.8,readiness_notes='verified',device_qa_notes='verified')),'test')
+        d=await lab.get_design(eid)
+        async with self.pool.acquire() as c:
+            await lab.audit(c,eid,'test','simulation','synthetic simulation',{'config_hash':d['config_hash']})
+            self.assertIn('완료된 별도 A/A 실험 및 분석',await lab.start_blockers(d,c))
+
+
 class LabDeliveryTest(unittest.IsolatedAsyncioTestCase):
     async def test_b_without_candidates_keeps_assignment_and_uses_common_a(self):
         from unittest.mock import AsyncMock

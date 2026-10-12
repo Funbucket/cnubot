@@ -31,9 +31,24 @@ class Protocol(BaseModel):
     readiness_notes: str = ''
     device_qa_notes: str = ''
     aa_experiment_id: int | None = None
+    purpose: Literal['confirmatory', 'exploratory'] = 'confirmatory'
+    enrollment_deadline: datetime | None = None
+    exploratory_enrollment_days: int | None = Field(default=None, ge=1, le=28)
+    aa_waiver_reason: str = ''
 
     @model_validator(mode='after')
     def validate_effects(self):
+        if self.purpose == 'exploratory':
+            if not self.enrollment_deadline and not self.exploratory_enrollment_days:
+                raise ValueError('탐색 실험은 모집 기간 또는 마감 시각이 필요합니다.')
+            if self.enrollment_deadline and not self.enrollment_deadline.tzinfo:
+                raise ValueError('모집 마감 시각에 timezone을 포함하세요.')
+            if self.enrollment_deadline and self.exploratory_enrollment_days:
+                raise ValueError('탐색 모집 기간과 마감 시각 중 하나만 지정하세요.')
+            if len(self.aa_waiver_reason.strip()) < 10:
+                raise ValueError('미완료 A/A로 진행하는 탐색 실험의 근거를 기록하세요.')
+        elif self.enrollment_deadline or self.exploratory_enrollment_days or self.aa_waiver_reason:
+            raise ValueError('일정 단축 및 A/A 예외는 탐색 실험에만 허용합니다.')
         if self.minimum_ci_lower > self.minimum_effect or self.minimum_effect > self.target_effect:
             raise ValueError('효과 기준은 CI 하한 ≤ 관측 최소 효과 ≤ 목표 효과여야 합니다.')
         if self.baseline_rate is not None and self.baseline_rate + self.target_effect >= 1:

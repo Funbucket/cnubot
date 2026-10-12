@@ -63,6 +63,10 @@ async def get_today_menu(req: KakaoRequest):
     kor_day = common.get_kor_day(today_weekday)
 
     place_key = common.get_eng_place(place)
+    if place_key not in common.PLACE_KOREAN:
+        return {"version": "2.0", "template": {"outputs": [{"simpleText": {
+            "text": "식당 이름을 확인해 주세요. " + ", ".join(common.PLACE_KOREAN.values()) + " 중 하나를 입력해 주세요."
+        }}]}}
     try:
         data = await _load_menu_data(place_key)
     except DormMenuUnavailable:
@@ -100,6 +104,10 @@ async def get_menu_by_day(req: KakaoRequest):
     place = utterance[3:]  # 예: "기숙사"
 
     place_key = common.get_eng_place(place)
+    if place_key not in common.PLACE_KOREAN:
+        return {"version": "2.0", "template": {"outputs": [{"simpleText": {
+            "text": "식당 이름을 확인해 주세요. " + ", ".join(common.PLACE_KOREAN.values()) + " 중 하나를 입력해 주세요."
+        }}]}}
 
     try:
         data = await _load_menu_data(place_key)
