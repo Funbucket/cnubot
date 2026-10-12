@@ -246,6 +246,37 @@ class LabDatabaseTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn('완료된 별도 A/A 실험 및 분석',await lab.start_blockers(d,c))
 
 
+    async def test_food_preview_is_private_one_shot_and_signed_qa(self):
+        from unittest.mock import AsyncMock
+        product={'title':'Synthetic food','url':'https://example.com/product','price':3500,
+                 'image_url':'https://example.com/image.png','taca_item_id':1,'category_ids':[],
+                 'preview_slot':'meal','preview_label':'🍚 5천원 이하 먹거리'}
+        with patch.dict(os.environ,{'DEVELOPER_ID':'synthetic-qa','PROMOTION_TRACKING_SECRET':'test-only-secret'}), \
+             patch.object(lab_delivery,'student_pairs',new=AsyncMock(return_value=[('food',product)])) as pairs:
+            await lab_delivery.reserve(self.eid,'B','test','student_food_preview_v2')
+            self.assertFalse(await lab_delivery.pending('synthetic-other'))
+            self.assertTrue(await lab_delivery.pending('synthetic-qa'))
+            delivery=await lab_delivery.consume(('food',product,'unused','food-request'),'synthetic-qa')
+            pairs.assert_awaited_once_with('synthetic-qa','student_food_preview_v2')
+            self.assertTrue(delivery['metadata']['is_preview'])
+            self.assertEqual(delivery['metadata']['rendered_policy'],'student_food_preview_v2')
+            self.assertIsNone(await lab_delivery.consume(('food',product,'unused','repeat'),'synthetic-qa'))
+            self.assertTrue(await lab_delivery.record(delivery))
+            self.assertEqual(await self.pool.fetchval('SELECT COUNT(*) FROM lab_assignments'),0)
+            self.assertFalse(await recommendations.has_promotion_exposure_today('synthetic-qa','menu_inline_card'))
+            from app.services import promotions
+            card=delivery['output']['carousel']['items'][0]
+            self.assertIn('5천원 이하',card['description'])
+            url=card['buttons'][0]['webLinkUrl']
+            from urllib.parse import urlparse,parse_qs
+            token=parse_qs(urlparse(url).query)['token'][0]
+            self.assertIsNotNone(promotions.read_tracking_token(token))
+            import base64
+            encoded=token.split('.')[0]
+            payload=json.loads(base64.urlsafe_b64decode(encoded+'='*(-len(encoded)%4)))
+            self.assertTrue(payload['m']['is_preview'])
+
+
 class LabDeliveryTest(unittest.IsolatedAsyncioTestCase):
     async def test_b_without_candidates_keeps_assignment_and_uses_common_a(self):
         from unittest.mock import AsyncMock

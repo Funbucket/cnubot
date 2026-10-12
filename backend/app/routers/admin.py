@@ -315,7 +315,7 @@ async def lab_simulate(eid: int,actor: str = Depends(require_admin)):
 @router.post('/api/experiments/{eid}/preview', dependencies=[Depends(require_lab_action)])
 async def lab_preview(eid: int,payload: PreviewInput,_: str = Depends(require_admin)):
     try:
-        return await lab_delivery.preview(eid,payload.variant)
+        return await lab_delivery.preview(eid,payload.variant,payload.policy)
     except ValueError as exc:
         raise HTTPException(400,str(exc)) from exc
 
@@ -323,7 +323,7 @@ async def lab_preview(eid: int,payload: PreviewInput,_: str = Depends(require_ad
 @router.post('/api/experiments/{eid}/preview-override', dependencies=[Depends(require_lab_action)])
 async def lab_override(eid: int,payload: PreviewInput,actor: str = Depends(require_admin)):
     try:
-        return await lab_delivery.reserve(eid,payload.variant,actor)
+        return await lab_delivery.reserve(eid,payload.variant,actor,payload.policy)
     except ValueError as exc:
         raise HTTPException(400,str(exc)) from exc
 

@@ -46,3 +46,6 @@ CREATE TABLE IF NOT EXISTS lab_preview_overrides (
 );
 CREATE INDEX IF NOT EXISTS lab_requests_time ON lab_requests(experiment_id,received_at);
 CREATE INDEX IF NOT EXISTS lab_bundles_time ON lab_bundles(experiment_id,created_at);
+
+ALTER TABLE lab_preview_overrides ADD COLUMN IF NOT EXISTS preview_policy TEXT NOT NULL DEFAULT 'student_bundle_v1'
+ CHECK(preview_policy IN ('student_bundle_v1','student_food_preview_v2'));

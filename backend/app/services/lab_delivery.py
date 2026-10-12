@@ -12,13 +12,17 @@ from app.services import experiment_lab as lab
 from app.services import product_snapshot, promotion_preview, promotion_settings, promotions, recommendations, promotion_cards
 
 
-async def student_pairs(user_id):
+async def student_pairs(user_id, policy='student_bundle_v1'):
     snapshot = await asyncio.to_thread(product_snapshot.read)
     history = await recommendations.last_exposure_by_product(user_id, promotions.INLINE_CARD_SURFACE)
-    pairs = promotion_preview.select_products(snapshot,os.getenv('TOSS_PUBLISHER_ID','').strip(),history)
+    options = {'max_price':5000,'slots':('meal','snack')} if policy=='student_food_preview_v2' else {}
+    pairs = promotion_preview.select_products(snapshot,os.getenv('TOSS_PUBLISHER_ID','').strip(),history,**options)
     for _,product in pairs:
         product['snapshot_id'] = snapshot.get('updated_at')
-        product['selection_mode']='student_bundle_v1'
+        product['selection_mode']=policy
+        if policy=='student_food_preview_v2':
+            product['button_label']='구성·가격 확인'
+            product['preview_label']='🍚 5천원 이하 먹거리'
         product['settings_revision']=promotion_settings.read_settings().revision
     return pairs
 
@@ -37,7 +41,7 @@ def prepare(pairs,metadata):
             button_label='특가 바로가기',position=position,request_id=metadata['request_id'],product_snapshot=snapshot)
         urls.append(f'{promotions.common.SERVER_URL}/promotions/toss-shopping/click?token={token}')
     output = (promotion_cards.create_inline_bundle_output([p for _,p in pairs],urls)
-              if len(pairs)>1 else promotions.create_inline_product_output(pairs[0][1],urls[0]))
+              if len(pairs)>1 or metadata.get('rendered_policy')=='student_food_preview_v2' else promotions.create_inline_product_output(pairs[0][1],urls[0]))
     return dict(pairs=pairs,output=output,metadata=metadata)
 
 
@@ -102,7 +106,7 @@ async def finish(metadata,included,latency_ms,error=False,error_code=None):
         logging.getLogger(__name__).exception("failed to finalize experiment delivery")
 
 
-async def preview(eid,variant):
+async def preview(eid,variant,policy='student_bundle_v1'):
     developer = os.getenv('DEVELOPER_ID','').strip()
     if not developer:
         raise ValueError('비공개 환경 설정에 개발자 계정을 지정하세요.')
@@ -110,17 +114,19 @@ async def preview(eid,variant):
     a = await promotions.get_inline_promotion_product(developer,str(uuid.uuid4()))
     if not a:
         return {'response':None,'reason':'유효한 A 후보가 없습니다.','is_preview':True}
-    pairs = await student_pairs(developer) if variant=='B' else []
+    pairs = await student_pairs(developer,policy) if variant=='B' else []
+    if variant=='B' and policy=='student_food_preview_v2' and not pairs:
+        return {'response':None,'reason':'5천원 이하 유효한 먹거리 후보가 없습니다.','is_preview':True}
     pairs = pairs or [a]
     delivery = prepare(pairs,dict(user_id=developer,request_id=str(uuid.uuid4()),
                     experiment_id=eid,config_hash=d['config_hash'],planned_variant=variant,
-                    rendered_policy='student_bundle_v1' if variant=='B' and len(pairs)>1 else 'current_single',
+                    rendered_policy=policy if variant=='B' and pairs else 'current_single',
                     is_preview=True,preview_session_id=str(uuid.uuid4()),bundle_id=str(uuid.uuid4())))
     return {'response':{'version':'2.0','template':{'outputs':[delivery['output']]}},'is_preview':True,
             'scope':'학식 빈자리만 적용 · 직접 목록은 최대 6개 · 제휴 링크'}
 
 
-async def reserve(eid,variant,actor):
+async def reserve(eid,variant,actor,policy='student_bundle_v1'):
     developer = os.getenv('DEVELOPER_ID','').strip()
     if not developer:
         raise ValueError('비공개 환경 설정에 개발자 계정을 지정하세요.')
@@ -128,10 +134,10 @@ async def reserve(eid,variant,actor):
         async with conn.transaction():
             await lab.get_design(eid,conn)
             session = str(uuid.uuid4())
-            await conn.execute('''INSERT INTO lab_preview_overrides(user_id,experiment_id,session_id,variant,expires_at)
-                VALUES($1,$2,$3,$4,NOW()+INTERVAL '10 minutes') ON CONFLICT(user_id) DO UPDATE
-                SET experiment_id=$2,session_id=$3,variant=$4,expires_at=NOW()+INTERVAL '10 minutes',created_at=NOW()''',developer,eid,session,variant)
-            await lab.audit(conn,eid,actor,'preview_reserve','개발자 다음 적격 조회 1회',{'session_id':session,'variant':variant})
+            await conn.execute('''INSERT INTO lab_preview_overrides(user_id,experiment_id,session_id,variant,preview_policy,expires_at)
+                VALUES($1,$2,$3,$4,$5,NOW()+INTERVAL '10 minutes') ON CONFLICT(user_id) DO UPDATE
+                SET experiment_id=$2,session_id=$3,variant=$4,preview_policy=$5,expires_at=NOW()+INTERVAL '10 minutes',created_at=NOW()''',developer,eid,session,variant,policy)
+            await lab.audit(conn,eid,actor,'preview_reserve','개발자 다음 적격 조회 1회',{'session_id':session,'variant':variant,'policy':policy})
     return {'session_id':session,'expires_in_seconds':600}
 
 
@@ -153,8 +159,10 @@ async def consume(chosen,user_id):
                                 {'session_id':row['session_id'],'variant':row['variant']})
     if not row:
         return None
-    pairs = await student_pairs(user_id) if row['variant']=='B' else []
+    policy=row['preview_policy']
+    pairs = await student_pairs(user_id,policy) if row['variant']=='B' else []
+    rendered=policy if pairs else 'current_single'
     pairs = pairs or [(chosen[0],chosen[1])]
     return prepare(pairs,dict(user_id=user_id,request_id=chosen[3],experiment_id=row['experiment_id'],
                     is_preview=True,preview_session_id=row['session_id'],planned_variant=row['variant'],
-                    rendered_policy='qa',bundle_id=str(uuid.uuid4())))
+                    rendered_policy=rendered,bundle_id=str(uuid.uuid4())))

@@ -87,6 +87,13 @@ class AnalysisInput(ActionInput):
 
 class PreviewInput(BaseModel):
     variant: Literal['A', 'B'] = 'B'
+    policy: Literal['student_bundle_v1', 'student_food_preview_v2'] = 'student_bundle_v1'
+
+    @model_validator(mode='after')
+    def validate_preview_policy(self):
+        if self.variant == 'A' and self.policy != 'student_bundle_v1':
+            raise ValueError('새 먹거리 경험은 B 미리보기에서만 제공합니다.')
+        return self
 
 
 class DecisionInput(ActionInput):

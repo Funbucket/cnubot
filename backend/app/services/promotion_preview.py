@@ -59,7 +59,8 @@ def _student_sized(title: str, slot: str) -> bool:
     return True
 
 
-def select_products(snapshot: dict, publisher_id: str, last_exposed: dict) -> list[tuple[str, dict]]:
+def select_products(snapshot: dict, publisher_id: str, last_exposed: dict, *,
+                    max_price: int = MAX_PRICE, slots: tuple[str, ...] = ('meal', 'snack', 'living')) -> list[tuple[str, dict]]:
     """Select up to three distinct uses from one immutable stored snapshot."""
     tree = _category_tree(snapshot)
     candidates = []
@@ -68,7 +69,7 @@ def select_products(snapshot: dict, publisher_id: str, last_exposed: dict) -> li
             continue
         price = item.get("displayPrice") or 0
         original = item.get("originalPrice") or price
-        if price > MAX_PRICE or original <= 0:
+        if price > max_price or original <= 0:
             continue
         discount = min(int(item.get("discountRate") or 0), int(100 * max(0, original-price) / original))
         if discount < promotions.INLINE_CARD_MIN_DISCOUNT_RATE:
@@ -98,6 +99,8 @@ def select_products(snapshot: dict, publisher_id: str, last_exposed: dict) -> li
             slot, collection_id = "living", "living"
         else:
             continue
+        if slot not in slots:
+            continue
         if not _student_sized(item["displayName"], slot):
             continue
         key = f"preview_toss_item_{item_id}"
@@ -118,7 +121,7 @@ def select_products(snapshot: dict, publisher_id: str, last_exposed: dict) -> li
                 -(product.get("review_score") or 0), -product["discount_rate"], product["taca_item_id"])
     candidates.sort(key=rank)
     selected, families = [], set()
-    for slot in ("meal", "snack", "living"):
+    for slot in slots:
         match = next((p for p in candidates if p[1]["preview_slot"] == slot
                       and p[1]["preview_family"] not in families), None)
         if match:

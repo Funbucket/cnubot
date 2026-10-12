@@ -190,3 +190,19 @@ class PreviewRouteTest(unittest.IsolatedAsyncioTestCase):
         for card in inline["inline_product_output"]["carousel"]["items"]:
             self.assertEqual(len(card["buttons"]),3)
             self.assertTrue(card["buttons"][-1]["extra"]["show_breakfast"])
+
+
+class FoodPreviewSelectionTest(unittest.TestCase):
+    def test_food_only_price_limit_and_real_card_labels(self):
+        pairs=preview.select_products(snapshot(), 'test-publisher', {},max_price=5000,slots=('meal','snack'))
+        self.assertTrue(pairs)
+        self.assertTrue(all(p['preview_slot'] in ('meal','snack') and p['price']<=5000 for _,p in pairs))
+        self.assertNotIn('preview_toss_item_3',[k for k,_ in pairs])
+        data=snapshot()
+        data['items']['2']['displayPrice']=6000
+        data['items']['2']['originalPrice']=12000
+        self.assertNotIn('preview_toss_item_2',[k for k,_ in preview.select_products(data,'test-publisher',{},max_price=5000,slots=('meal','snack'))])
+        products=[p for _,p in pairs]
+        for p in products: p['preview_label']='🍚 5천원 이하 먹거리'
+        output=promotion_cards.create_inline_bundle_output(products,['https://example.com/click']*len(products))
+        self.assertTrue(all('5천원 이하' in c['description'] for c in output['carousel']['items']))
