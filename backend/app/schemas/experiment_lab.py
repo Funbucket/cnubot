@@ -6,12 +6,12 @@ from pydantic import BaseModel, Field, model_validator
 
 class Protocol(BaseModel):
     version: str = 'student-bundle-v1'
-    policy_version: Literal['student-bundle-v1'] = 'student-bundle-v1'
+    policy_version: Literal['student-bundle-v1', 'student-food-v2'] = 'student-bundle-v1'
     policy_checksum: str = ''
     eligibility_version: str = 'inline-common-v1'
     click_filter_version: Literal['signed-external-v1'] = 'signed-external-v1'
     total_users: int = Field(default=2200, ge=100, le=100000)
-    observation_hours: Literal[168] = 168
+    observation_hours: Literal[24, 168] = 168
     max_enrollment_days: Literal[28] = 28
     aa_enrollment_days: Literal[7] = 7
     collection_grace_hours: Literal[24] = 24
@@ -38,6 +38,10 @@ class Protocol(BaseModel):
 
     @model_validator(mode='after')
     def validate_effects(self):
+        if self.policy_version == 'student-food-v2' and self.version == 'student-bundle-v1':
+            self.version = 'student-food-v2'
+        if self.observation_hours == 24 and (self.purpose != 'exploratory' or self.policy_version != 'student-food-v2'):
+            raise ValueError('24시간 관찰은 먹거리 정책의 탐색 A/B에서만 사용합니다.')
         if self.purpose == 'exploratory':
             if not self.enrollment_deadline and not self.exploratory_enrollment_days:
                 raise ValueError('탐색 실험은 모집 기간 또는 마감 시각이 필요합니다.')
@@ -87,7 +91,8 @@ class AnalysisInput(ActionInput):
 
 class PreviewInput(BaseModel):
     variant: Literal['A', 'B'] = 'B'
-    policy: Literal['student_bundle_v1', 'student_food_preview_v2', 'student_food_preview_v3'] = 'student_bundle_v1'
+    policy: Literal['student_bundle_v1', 'student_food_preview_v2', 'student_food_preview_v3',
+                    'student_food_bundle_v2'] = 'student_bundle_v1'
 
     @model_validator(mode='after')
     def validate_preview_policy(self):

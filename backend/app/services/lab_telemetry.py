@@ -31,7 +31,8 @@ class ExperimentRoute(APIRoute):
                                SELECT $1,a.experiment_id,a.user_id,a.variant,$3 FROM lab_assignments a
                                JOIN lab_experiments e ON e.id=a.experiment_id
                                WHERE a.user_id=$2 AND e.status IN ('running','paused','observing')
-                               AND a.assigned_at+INTERVAL '168 hours'>NOW() ON CONFLICT DO NOTHING''',rid,user,request.url.path)
+                               AND a.assigned_at+((e.protocol->>'observation_hours')::int * INTERVAL '1 hour')>NOW()
+                               ON CONFLICT DO NOTHING''',rid,user,request.url.path)
                     except (RuntimeError,json.JSONDecodeError,AttributeError,TypeError):
                         pass
                     except Exception:

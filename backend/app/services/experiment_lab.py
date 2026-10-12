@@ -214,7 +214,7 @@ async def assign(user_id, place, request_id, route):
                 await audit(conn,d['id'],'system','close','고정 모집 목표 또는 기간 상한 도달')
                 d['status']='observing'
             if existing:
-                if now >= existing['assigned_at']+timedelta(hours=168):
+                if now >= existing['assigned_at']+timedelta(hours=p['observation_hours']):
                     return None
                 variant = existing['variant']
             else:
@@ -256,14 +256,14 @@ async def latest(eid):
 
 COHORT_SQL = '''SELECT a.variant,a.assigned_at,a.pre_activity_days,
   EXISTS(SELECT 1 FROM user_events e WHERE e.user_id=a.user_id AND e.event_name='commerce_card_click'
-    AND e.created_at>=a.assigned_at AND e.created_at<a.assigned_at+INTERVAL '168 hours'
+    AND e.created_at>=a.assigned_at AND e.created_at<a.assigned_at+($3 * INTERVAL '1 hour')
     AND e.created_at<=$2 AND COALESCE(e.properties->>'is_preview','false')!='true') AS clicked,
   (SELECT COUNT(DISTINCT (e.created_at AT TIME ZONE 'Asia/Seoul')::date) FROM user_events e
     WHERE e.user_id=a.user_id AND e.event_name='menu_view' AND e.created_at>=a.assigned_at
-    AND e.created_at<a.assigned_at+INTERVAL '168 hours' AND e.created_at<=$2
+    AND e.created_at<a.assigned_at+($3 * INTERVAL '1 hour') AND e.created_at<=$2
     AND COALESCE(e.properties->>'is_preview','false')!='true')::int AS activity_days
   FROM lab_assignments a WHERE a.experiment_id=$1
-  AND a.assigned_at+INTERVAL '168 hours'<=$2 ORDER BY a.assigned_at'''
+  AND a.assigned_at+($3 * INTERVAL '1 hour')<=$2 ORDER BY a.assigned_at'''
 
 
 async def run_analysis(eid, payload, actor):
@@ -287,7 +287,7 @@ async def run_analysis(eid, payload, actor):
             counts = await conn.fetch('SELECT variant,COUNT(*)::int AS n FROM lab_assignments WHERE experiment_id=$1 GROUP BY variant',eid)
             assigned = {v:0 for v in ('A','B')}
             assigned.update({r['variant']:r['n'] for r in counts})
-            rows = [dict(r) for r in await conn.fetch(COHORT_SQL,eid,payload.watermark)]
+            rows = [dict(r) for r in await conn.fetch(COHORT_SQL,eid,payload.watermark,p['observation_hours'])]
             mature = {v:sum(r['variant']==v for r in rows) for v in ('A','B')}
             clicks = {v:sum(r['variant']==v and r['clicked'] for r in rows) for v in ('A','B')}
             effect = lab_stats.click_effect(clicks['A'],mature['A'],clicks['B'],mature['B'])
@@ -311,8 +311,8 @@ async def run_analysis(eid, payload, actor):
                        and p.get('policy_checksum')==policy_checksum())
             last = await conn.fetchval('SELECT MAX(assigned_at) FROM lab_assignments WHERE experiment_id=$1',eid)
             final = bool(d['enrollment_closed_at'] and last and sum(mature.values())==sum(assigned.values())
-                         and payload.watermark>=last+timedelta(hours=168)
-                         and datetime.now(UTC)>=last+timedelta(hours=168+p['collection_grace_hours']))
+                         and payload.watermark>=last+timedelta(hours=p['observation_hours'])
+                         and datetime.now(UTC)>=last+timedelta(hours=p['observation_hours']+p['collection_grace_hours']))
             sample_ok = sum(assigned.values())>=p['total_users']
             practical = bool(effect and effect['p_value']<0.05 and effect['delta']>=p['minimum_effect']
                              and effect['ci_low']>p['minimum_ci_lower'])

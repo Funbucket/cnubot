@@ -56,6 +56,11 @@ class LabStatisticsTest(unittest.TestCase):
             self.assertTrue(lab.is_qa(None))
         p=Protocol().model_dump(mode='json')
         self.assertEqual(lab.canonical_hash(p),lab.canonical_hash(dict(reversed(list(p.items())))))
+        fast=Protocol(purpose='exploratory',policy_version='student-food-v2',observation_hours=24,
+            exploratory_enrollment_days=9,aa_waiver_reason='Synthetic short exploratory test')
+        self.assertEqual(fast.version,'student-food-v2')
+        with self.assertRaises(ValueError):
+            Protocol(observation_hours=24)
 
 
 @unittest.skipUnless(os.getenv('LAB_TEST_DATABASE_URL'), 'isolated PostgreSQL required')
@@ -133,7 +138,7 @@ class LabDatabaseTest(unittest.IsolatedAsyncioTestCase):
             await self.pool.execute('''INSERT INTO user_events(event_id,user_id,event_name,created_at,properties)
                       VALUES($1,$2,'commerce_card_click',$3,$4::jsonb)''',event,user,at,json.dumps(properties))
         # A has no exposure records: it remains in the denominator and its direct-list click counts.
-        rows=await self.pool.fetch(lab.COHORT_SQL,self.eid,now)
+        rows=await self.pool.fetch(lab.COHORT_SQL,self.eid,now,168)
         self.assertEqual(len(rows),2)
         self.assertTrue(next(r for r in rows if r['variant']=='A')['clicked'])
         self.assertFalse(next(r for r in rows if r['variant']=='B')['clicked'])
@@ -250,6 +255,34 @@ class LabDatabaseTest(unittest.IsolatedAsyncioTestCase):
             await lab.audit(c,eid,'test','simulation','synthetic simulation',{'config_hash':d['config_hash']})
             self.assertIn('완료된 별도 A/A 실험 및 분석',await lab.start_blockers(d,c))
 
+    async def test_fast_food_cohort_uses_24_hour_click_and_grace_window(self):
+        now=datetime.now(UTC)
+        await lab.stop(self.eid,'synthetic transition','test')
+        p=Protocol(purpose='exploratory',policy_version='student-food-v2',observation_hours=24,
+            exploratory_enrollment_days=9,aa_waiver_reason='Synthetic short exploratory test',
+            baseline_rate=.0035,baseline_as_of=now,baseline_source='synthetic mature cohort')
+        eid=await lab.create(DesignInput(name='Fast food',hypothesis='Synthetic food test',protocol=p),'test')
+        with patch.dict(os.environ,{'DEVELOPER_ID':'synthetic-qa'}):
+            await lab_delivery.reserve(eid,'B','test')
+            self.assertEqual(await self.pool.fetchval(
+                'SELECT preview_policy FROM lab_preview_overrides WHERE user_id=$1','synthetic-qa'),
+                'student_food_bundle_v2')
+        t0=now-timedelta(hours=49)
+        await self.pool.execute("UPDATE lab_experiments SET status='observing',started_at=$2,enrollment_closed_at=$2 WHERE id=$1",eid,t0)
+        for user,variant in [('synthetic-a','A'),('synthetic-b','B')]:
+            await self.pool.execute('''INSERT INTO lab_assignments(experiment_id,user_id,variant,assigned_at,
+                 pre_activity_days,first_place,eligibility_version) VALUES($1,$2,$3,$4,0,'dorm','inline-common-v1')''',
+                 eid,user,variant,t0)
+        for event_id,hours in [('inside',23),('outside',25)]:
+            await self.pool.execute('''INSERT INTO user_events(event_id,user_id,event_name,created_at)
+                VALUES($1,'synthetic-b','commerce_card_click',$2)''',event_id,t0+timedelta(hours=hours))
+        run=await lab.run_analysis(eid,AnalysisInput(watermark=now,idempotency_key='fast-final',
+                     data_complete=False,reason='synthetic 24 hour check'),'test')
+        self.assertEqual(run['result']['mature'],{'A':1,'B':1})
+        self.assertEqual(run['result']['clicks'],{'A':0,'B':1})
+        self.assertTrue(run['result']['final'])
+        self.assertEqual((await lab.get_design(eid))['status'],'ready')
+
 
     async def test_food_preview_is_private_one_shot_and_signed_qa(self):
         from unittest.mock import AsyncMock
@@ -307,6 +340,23 @@ class LabDatabaseTest(unittest.IsolatedAsyncioTestCase):
 
 
 class LabDeliveryTest(unittest.IsolatedAsyncioTestCase):
+    async def test_formal_food_b_uses_three_card_policy(self):
+        from unittest.mock import AsyncMock
+        product={'title':'Synthetic food','url':'https://example.com/product','price':5300,
+                 'image_url':'https://example.com/a.png','button_label':'구성·가격 확인',
+                 'preview_slot':'snack','preview_label':'⚡️ 자취생 특가 · 1만원 이하 먹거리'}
+        context={'experiment_id':2,'variant':'B','kind':'ab','policy_version':'student-food-v2',
+                 'config_hash':'synthetic','policy_checksum':lab.policy_checksum(),
+                 'request_id':'synthetic-request'}
+        with patch.object(lab,'assign',new=AsyncMock(return_value=context)), \
+             patch.object(lab_delivery,'student_pairs',new=AsyncMock(return_value=[('food',product)])) as pick, \
+             patch.dict(os.environ,{'PROMOTION_TRACKING_SECRET':'test-only-secret'}):
+            d=await lab_delivery.select(('synthetic-a',product,'old-url','synthetic-request'),'synthetic-user','dorm')
+        pick.assert_awaited_once_with('synthetic-user','student_food_bundle_v2')
+        self.assertEqual(d['metadata']['rendered_policy'],'student_food_bundle_v2')
+        self.assertEqual(d['metadata']['fallback_reason'],'insufficient_candidates')
+        self.assertEqual(d['output']['carousel']['items'][0]['buttons'][0]['label'],'구성·가격 확인')
+
     async def test_b_without_candidates_keeps_assignment_and_uses_common_a(self):
         from unittest.mock import AsyncMock
         product={'title':'Synthetic A','url':'https://example.com/product','price':1000,'image_url':'https://example.com/a.png'}
