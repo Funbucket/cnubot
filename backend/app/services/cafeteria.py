@@ -111,11 +111,12 @@ def create_schedule_response(meal_schedule: list[dict], promotion_product: dict 
         carousel = kakao_response.create_carousel(carousel_items)
         kakao_response.add_output_to_response(carousel)
 
-    kakao_response.add_quick_replies(
-        [promotions.create_today_deals_quick_reply(kakao_response)]
-        + [promotions.create_toss_promotion_quick_reply(kakao_response, promotion_product, collection_id)
-           for collection_id in ("food", "living")]
-    )
+    # Keep one shopping entry on the timetable; food led observed entry CTR.
+    kakao_response.add_quick_replies([
+        promotions.create_toss_promotion_quick_reply(
+            kakao_response, promotion_product, "food"
+        )
+    ])
     response = kakao_response.get_response()
     return response
 

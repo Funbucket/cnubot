@@ -4,13 +4,14 @@ from app.services import cafeteria
 
 
 class CafeteriaScheduleTest(unittest.TestCase):
-    def test_schedule_has_today_deals_before_food_and_living(self):
+    def test_schedule_keeps_only_food_quick_reply(self):
         response = cafeteria.create_schedule_response([])
         replies = response["template"]["quickReplies"]
         self.assertEqual([reply["label"] for reply in replies], [
-            "🔥 오늘 특가", "🍱 자취생 먹을거", "자취생 꿀템"
+            "🍱 자취생 먹을거"
         ])
-        self.assertEqual(replies[0]["messageText"], "오늘 특가")
+        self.assertEqual(replies[0]["messageText"], "자취생 먹을거 핫딜")
+        self.assertEqual(replies[0]["extra"]["button_id"], "toss_promotion_quick_reply_food")
 
     def test_dorm_schedule_has_crowding_button(self):
         schedule_data = [
