@@ -8,9 +8,10 @@ class CafeteriaScheduleTest(unittest.TestCase):
         response = cafeteria.create_schedule_response([])
         replies = response["template"]["quickReplies"]
         self.assertEqual([reply["label"] for reply in replies], [
-            "🍱 자취생 먹을거"
+            "자취생 특가"
         ])
         self.assertEqual(replies[0]["messageText"], "자취생 먹을거 핫딜")
+        self.assertEqual(replies[0]["extra"]["button_label"], "자취생 특가")
         self.assertEqual(replies[0]["extra"]["button_id"], "toss_promotion_quick_reply_food")
 
     def test_dorm_schedule_has_crowding_button(self):
