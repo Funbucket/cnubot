@@ -37,6 +37,10 @@ services:
       TOSS_PUBLISHER_ID: ${TOSS_PUBLISHER_ID}
       TOSS_LIVE_RECOMMENDATIONS: ${TOSS_LIVE_RECOMMENDATIONS:-false}
       MENU_DATA_DIR: /data/menus
+      RESTAURANTS_ENABLED: ${RESTAURANTS_ENABLED:-false}
+      RESTAURANTS_DATA_PATH: /data/menus/restaurants.json
+      RESTAURANTS_TRACKING_SECRET: ${RESTAURANTS_TRACKING_SECRET:-}
+      KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY:-}
       DATABASE_URL: postgresql://${BACKEND_POSTGRES_USER}:${BACKEND_POSTGRES_PASSWORD}@backend-postgres:5432/${BACKEND_POSTGRES_DB}
     ports:
       - "80:80"
@@ -55,6 +59,18 @@ services:
     entrypoint: ["python", "-m", "app.jobs.monitor_dorm_menu"]
     environment:
       MENU_DATA_DIR: /data/menus
+    volumes:
+      - ./backend/app:/code/app/
+      - ./data:/data/menus
+    restart: always
+
+  restaurant-collector:
+    build:
+      context: ./backend
+    entrypoint: ["python", "-m", "app.jobs.collect_restaurants"]
+    environment:
+      KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY:-}
+      RESTAURANTS_DATA_PATH: /data/menus/restaurants.json
     volumes:
       - ./backend/app:/code/app/
       - ./data:/data/menus

@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>학교 주변 맛집 관리</title>
+  <link rel="stylesheet" href="/admin/assets/admin_nav.css">
+  <style>
+    .toolbar,.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .panel{padding:20px;margin:16px 0}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+    label{display:flex;flex-direction:column;gap:5px}label.check{flex-direction:row;align-items:center}
+    .wide{grid-column:1/-1}fieldset{border:1px solid #e1e7e8;border-radius:8px;margin:14px 0;padding:14px}
+    legend{padding:0 8px}.meal{border-bottom:1px solid #e1e7e8;padding:12px 0}.meal:last-child{border:0}
+    #status{white-space:pre-wrap;overflow-wrap:anywhere}#preview{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+    .sample{white-space:pre-line;border-top:1px solid #e1e7e8;margin-top:10px;padding-top:10px}
+    input,select,textarea{width:100%}.check input{width:auto}.result{margin:10px 0;padding:12px;background:#f5f7f7;border-radius:8px}
+    @media(max-width:700px){.grid,#preview{grid-template-columns:1fr}}
+  </style>
+</head>
+<body class="admin-layout">
+<a class="skip" href="#main">본문으로 이동</a>
+<main id="main">
+  <div class="page-heading"><div><p class="eyebrow">CNUBOT</p><h1>학교 주변 맛집</h1><p class="muted">확인한 메뉴·가격으로 식당을 추천합니다.</p></div><a href="/admin">관리자 홈</a></div>
+  <div class="notice">메뉴 가격은 필수 주문을 포함한 총액으로 입력하세요. 세트는 식사 인원으로 나눕니다. 가격 확인 후 30일, 평점 확인 후 7일이 지나면 해당 정보는 추천 조건에서 제외됩니다.</div>
+  <div class="toolbar"><button id="save" type="button">목록 저장</button><button id="reload" class="secondary" type="button">다시 불러오기</button><button id="add" class="secondary" type="button">식당 추가</button><button id="inspect" class="secondary" type="button">추천 미리보기</button></div>
+  <p id="status" role="status" aria-live="polite">목록을 불러오는 중입니다.</p>
+  <section class="panel"><h2>카카오 장소 확인</h2><p class="muted">검색은 장소 확인용입니다. 검색 결과에는 메뉴 가격·별점이 없으며, 검색 응답 전체를 저장하지 않습니다.</p>
+    <div class="row"><label>검색어<input id="query" placeholder="궁동 식당 이름" maxlength="80"></label><button id="search" type="button" class="secondary">검색</button></div><div id="results"></div>
+  </section>
+  <section class="panel"><h2>별점 데이터</h2><label class="check"><input id="ratings" type="checkbox">허용된 카카오 별점 데이터를 사용합니다</label>
+    <label>데이터 이용 근거<textarea id="basis" maxlength="500" placeholder="데이터 제공 방식과 이용 허용 근거를 기록하세요. 인증정보는 입력하지 마세요."></textarea></label>
+    <p class="muted">자동 수집된 카카오맵 집계 평점이 있으면 필터를 사용할 수 있습니다. 직접 입력한 평점은 출처·평가 수·확인 시각을 함께 등록하세요.</p>
+  </section>
+  <form id="catalog"><div id="items"></div></form>
+  <section><h2>추천 미리보기</h2><p class="muted">미리보기는 실제 사용자 노출·클릭·탐색 이력에 기록되지 않습니다.</p><div id="preview"></div></section>
+</main>
+<script>
+'use strict';
+let revision=0, loaded=false, busy=false;
+const $=id=>document.getElementById(id);
+const dateNow=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Seoul'}).format(new Date());
+function element(tag,text,className){const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node;}
+function status(text){$('status').textContent=text;}
+function controls(){for(const id of ['save','add','inspect'])$(id).disabled=busy||!loaded;$('reload').disabled=busy;$('search').disabled=busy;}
+async function api(path,method='GET',data){
+  const response=await fetch('/admin/restaurants'+path,{method,credentials:'same-origin',headers:{'Content-Type':'application/json','X-Restaurants-Editor':'1'},body:data===undefined?undefined:JSON.stringify(data)});
+  let body;try{body=await response.json();}catch{throw new Error('응답을 확인하지 못했습니다.');}
+  if(!response.ok){const detail=body.detail;throw new Error(Array.isArray(detail)?detail.map(e=>e.loc.join('.')+': '+e.msg).join('\n'):detail||'요청에 실패했습니다.');}
+  return body;
+}
+async function work(fn){if(busy)return;busy=true;controls();try{await fn();}catch(e){status(e.message);}finally{busy=false;controls();}}
+function field(parent,title,name,value='',type='text',options){
+  const label=element('label',title);let input;
+  if(options){input=element('select');for(const option of options){const node=element('option',option);node.value=option;input.append(node);}}
+  else{input=element('input');input.type=type;}
+  input.dataset.field=name;
+  if(type==='checkbox'){input.checked=Boolean(value);label.className='check';}
+  else input.value=value??'';
+  label.append(input);parent.append(label);return input;
+}
+function val(parent,name){const node=parent.querySelector('[data-field="'+name+'"]');return node.type==='checkbox'?node.checked:node.value.trim();}
+function addMeal(parent,meal={}){
+  const row=element('div',undefined,'meal');row.dataset.sourceUpdatedOn=meal.source_updated_on||'';const grid=element('div',undefined,'grid');
+  field(grid,'메뉴 / 식사 구성','meal_name',meal.name).maxLength=35;
+  const price=field(grid,'총액 (원)','total_price',meal.total_price??'','number');price.min=1;price.max=1000000;
+  const diners=field(grid,'식사 인원','diners',meal.diners??1,'number');diners.min=1;diners.max=10;
+  field(grid,'메뉴·가격 확인일','checked_on',meal.checked_on??dateNow(),'date').max=dateNow();
+  field(grid,'확인 출처 (가게 제공 / 현장 메뉴판 등)','source',meal.source).maxLength=300;
+  const remove=element('button','메뉴 삭제','secondary');remove.type='button';remove.addEventListener('click',()=>row.remove());grid.append(remove);
+  row.append(grid);parent.append(row);
+}
+function addRestaurant(item={}){
+  const section=element('section',undefined,'panel restaurant');section.dataset.id=item.id||crypto.randomUUID();
+  const heading=element('div',undefined,'row');heading.append(element('h2',item.name||'새 식당'));
+  const remove=element('button','식당 삭제','secondary');remove.type='button';remove.addEventListener('click',()=>{if(window.confirm('이 식당을 목록에서 삭제할까요? 저장 전까지는 반영되지 않습니다.'))section.remove();});heading.append(remove);section.append(heading);
+  const grid=element('div',undefined,'grid');
+  field(grid,'식당명','name',item.name).maxLength=35;
+  field(grid,'지역','area',item.area||'궁동','text',['궁동','어은동','죽동']);
+  field(grid,'음식 종류','cuisine',item.cuisine).maxLength=10;
+  field(grid,'카카오맵 장소 링크','place_url',item.place_url,'url');
+  field(grid,'추천 이유 (확인한 사실)','reason',item.reason).maxLength=25;
+  field(grid,'지역·특징 확인 근거','evidence',item.evidence).maxLength=300;
+  field(grid,'추천에 공개','enabled',item.enabled??false,'checkbox');section.append(grid);
+  field(grid,'수집 결과로 자동 갱신','auto',item.origin==='kakao_public','checkbox');
+  const meals=element('fieldset');meals.append(element('legend','한 끼 메뉴'));const rows=element('div',undefined,'meals');
+  for(const meal of item.meals?.length?item.meals:[{}])addMeal(rows,meal);meals.append(rows);
+  const add=element('button','메뉴 추가','secondary');add.type='button';add.addEventListener('click',()=>addMeal(rows));meals.append(add);section.append(meals);
+  const rating=element('fieldset');rating.append(element('legend','카카오맵 평점 (이용 가능한 데이터가 있을 때)'));
+  field(rating,'평점 등록','has_rating',Boolean(item.rating),'checkbox');const ratingGrid=element('div',undefined,'grid');
+  const score=field(ratingGrid,'평점 (0~5)','score',item.rating?.score??'','number');score.min=0;score.max=5;score.step='0.1';
+  const count=field(ratingGrid,'평가 수','count',item.rating?.count??'','number');count.min=1;
+  let checked='';if(item.rating?.checked_at)checked=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(new Date(item.rating.checked_at)).replace(' ','T');
+  field(ratingGrid,'확인 시각 (한국 시간)','checked_at',checked,'datetime-local').step='1';rating.append(ratingGrid);section.append(rating);$('items').append(section);
+}
+function collect(){
+  const items=Array.from($('items').children).map(section=>{
+    const meals=Array.from(section.querySelector('.meals').children).map(row=>({name:val(row,'meal_name'),total_price:Number(val(row,'total_price')),diners:Number(val(row,'diners')),checked_on:val(row,'checked_on'),source:val(row,'source'),source_updated_on:row.dataset.sourceUpdatedOn||null}));
+    const rating=val(section,'has_rating')?{score:Number(val(section,'score')),count:Number(val(section,'count')),source:'kakao',checked_at:val(section,'checked_at')+'+09:00'}:null;
+    return {id:section.dataset.id,name:val(section,'name'),area:val(section,'area'),cuisine:val(section,'cuisine'),place_url:val(section,'place_url'),enabled:val(section,'enabled'),reason:val(section,'reason'),evidence:val(section,'evidence'),meals,rating,origin:val(section,'auto')?'kakao_public':'manual'};
+  });
+  return {schema_version:1,revision,ratings_enabled:$('ratings').checked,rating_usage_basis:$('basis').value.trim(),items};
+}
+function populate(data){revision=data.revision;$('ratings').checked=data.ratings_enabled;$('basis').value=data.rating_usage_basis;$('items').replaceChildren();for(const item of data.items)addRestaurant(item);loaded=true;}
+function showPreview(result){
+  $('preview').replaceChildren();for(const preview of result.previews){const panel=element('div',undefined,'panel');panel.append(element('h3',preview.area+' · '+preview.budget),element('p','추천 가능한 식당 '+preview.eligible+'곳'));
+    for(const output of preview.response.template.outputs){if(output.simpleText)panel.append(element('p',output.simpleText.text));for(const card of output.carousel?.items||[]){const sample=element('div',undefined,'sample');sample.append(element('strong',card.title),element('p',card.description));panel.append(sample);}}$('preview').append(panel);}
+  status('미리보기 완료 · 학식 진입 버튼 '+(result.entry_enabled?'활성':'비활성')+' · 별점 필터 '+(result.ratings_available?'사용 가능':'숨김'));
+}
+$('save').addEventListener('click',()=>work(async()=>{const result=await api('/catalog','PUT',collect());revision=result.revision;status('저장했습니다. '+result.items.length+'곳 · 버전 '+revision);}));
+$('reload').addEventListener('click',()=>{if(loaded&&!window.confirm('저장하지 않은 편집 내용을 버리고 다시 불러올까요?'))return;work(async()=>{populate(await api('/catalog'));status('목록을 불러왔습니다. '+$('items').children.length+'곳');});});
+$('add').addEventListener('click',()=>addRestaurant());
+$('inspect').addEventListener('click',()=>work(async()=>showPreview(await api('/preview','POST',collect()))));
+$('search').addEventListener('click',()=>work(async()=>{
+  const result=await api('/search','POST',{query:$('query').value.trim()});$('results').replaceChildren();
+  for(const item of result.items){const row=element('div',undefined,'result');row.append(element('strong',item.place_name),element('p',item.category_name+' · '+item.road_address_name));
+    const link=element('a','카카오맵에서 확인');if(/^https?:\/\/place\.map\.kakao\.com\/[0-9]+$/.test(item.place_url)){link.href=item.place_url;link.target='_blank';link.rel='noopener noreferrer';row.append(link);}
+    // Search does not prefill/persist an unverified restaurant. The operator verifies it first.
+    $('results').append(row);}
+  if(!result.items.length)$('results').append(element('p','검색 결과가 없습니다.'));status('장소 검색 완료. 메뉴·가격·특징을 직접 확인한 뒤 등록해주세요.');
+}));
+$('catalog').addEventListener('submit',event=>event.preventDefault());
+controls();work(async()=>{populate(await api('/catalog'));status('목록을 불러왔습니다. '+$('items').children.length+'곳');});
+</script>
+</body>
+</html>

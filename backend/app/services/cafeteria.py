@@ -1,5 +1,6 @@
 from app.scrapers import dorm
 from app.services import promotions
+from app.services import restaurant_catalog, restaurants
 from app.utils import common, kakao_json_response
 
 CUISINE_KOREAN = {
@@ -118,6 +119,8 @@ def create_schedule_response(meal_schedule: list[dict], promotion_product: dict 
     food_reply["label"] = "⚡️ 자취생 특가"
     food_reply["extra"]["button_label"] = food_reply["label"]
     kakao_response.add_quick_replies([food_reply])
+    if restaurant_catalog.entry_enabled():
+        kakao_response.add_quick_replies([restaurants.entry_reply()])
     response = kakao_response.get_response()
     return response
 
@@ -255,6 +258,8 @@ def _finish_menu_response(kakao_response, day: str, place: str, today_kor: str):
         )
         for weekday in common.DAYS_OF_WEEK_KOREAN
     ]
+    if restaurant_catalog.entry_enabled():
+        quick_replies.append(restaurants.entry_reply())
 
     response = kakao_response.add_quick_replies(quick_replies).get_response()
 

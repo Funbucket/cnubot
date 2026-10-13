@@ -27,6 +27,7 @@ docker compose exec -T backend python -m unittest discover -s tests
 - [코드 구조](docs/code-structure.md)
 - [카카오 메시지 등록](docs/kakao-message-routing.md)
 - [상품 배치 수집](docs/product-collection.md)
+- [학교 주변 맛집 등록·운영](docs/restaurants.md)
 
 ## 기술
 
