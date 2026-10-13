@@ -5,6 +5,7 @@ import hmac
 import json
 import logging
 import os
+import secrets
 import uuid
 from datetime import datetime, timedelta
 from urllib.parse import urlencode, urlsplit
@@ -14,6 +15,7 @@ from app.utils.kakao_json_response import KakaoJsonResponse as Response
 
 logger = logging.getLogger(__name__)
 HOME = "학교 주변 맛집"
+RANDOM = "주변맛집 랜덤"
 MORE = "주변맛집 다른곳"
 RATING_MENU = "주변맛집 별점"
 AREAS = {"주변맛집 궁동": "궁동", "주변맛집 어은동": "어은동", "주변맛집 죽동": "죽동"}
@@ -27,10 +29,12 @@ MEAL_CHOICES = {f"주변맛집 {area} {budget}": (area, budget)
                 for area in AREAS.values() for budget in BUDGETS}
 RATINGS = {"주변맛집 별점 전체": 0.0, "주변맛집 별점 3.5 이상": 3.5,
            "주변맛집 별점 4.0 이상": 4.0, "주변맛집 별점 4.5 이상": 4.5}
-ROUTE_MESSAGES = {"home": {HOME}, "area": set(AREAS), "budget": set(MEAL_CHOICES),
+ROUTE_MESSAGES = {"home": {HOME}, "random": {RANDOM}, "area": set(AREAS), "budget": set(MEAL_CHOICES),
                   "rating": {RATING_MENU, *RATINGS}, "more": {MORE}}
 STATE_TTL = timedelta(minutes=30)
 HISTORY_TTL = timedelta(days=7)
+MIN_SCORE = 3.0
+MIN_REVIEWS = 10
 
 
 def reply(label, text):
@@ -43,8 +47,9 @@ def entry_reply():
 
 def home_response(notice=""):
     response = Response().add_output_to_response(Response.create_simple_text(
-        (notice + "\n" if notice else "") + "🍽️ 학교 주변 맛집\n어디서 먹을까요?"))
-    response.add_quick_replies([reply("📍 " + area, message) for message, area in AREAS.items()])
+        (notice + "\n" if notice else "") + "🍽️ 학교 주변 맛집\n⭐ 3.0 이상 · 평가 10개 이상\n어디서 먹을까요?"))
+    response.add_quick_replies([reply("🎲 바로 추천", RANDOM)]
+                               + [reply("📍 " + area, message) for message, area in AREAS.items()])
     return response.get_response()
 
 
@@ -71,7 +76,8 @@ def prepare_state(previous, now):
                if isinstance(key, str) and (stamp := _time(value))
                and timedelta(0) <= now - stamp <= HISTORY_TTL} if isinstance(history, dict) else {}
     expiry = _time(previous.get("expires_at"))
-    valid = bool(expiry and expiry > now and previous.get("area") in (None, *AREAS.values())
+    valid = bool(expiry and expiry > now and previous.get("mode") in (None, "random")
+                 and previous.get("area") in (None, *AREAS.values())
                  and previous.get("budget") in (None, *BUDGETS)
                  and previous.get("min_rating") in tuple(RATINGS.values())
                  and isinstance(previous.get("seen"), list)
@@ -81,7 +87,7 @@ def prepare_state(previous, now):
         state = dict(previous)
         state["seen"] = list(previous["seen"])
     else:
-        state = {"area": None, "budget": None, "min_rating": 0.0, "seen": [],
+        state = {"mode": None, "area": None, "budget": None, "min_rating": 0.0, "seen": [],
                  "session_id": uuid.uuid4().hex}
     state["history"] = history
     state["expires_at"] = (now + STATE_TTL).isoformat()
@@ -97,9 +103,11 @@ def candidates(catalog, state, now):
     for item in catalog.items:
         if not item.enabled or item.area != state["area"]:
             continue
-        rating = catalog_store.fresh_rating(item, now)
+        rating = qualifying_rating(catalog, item, now)
+        if not rating:
+            continue
         if minimum and (not catalog.ratings_enabled or not catalog.rating_usage_basis
-                        or not rating or rating.score < minimum):
+                        or rating.score < minimum):
             continue
         meals = [meal for meal in catalog_store.fresh_meals(item, now)
                  if meal.per_person >= low and (high is None or meal.per_person < high)]
@@ -108,7 +116,25 @@ def candidates(catalog, state, now):
     return result
 
 
-def choose(rows, state, user_hash, now):
+def qualifying_rating(catalog, item, now):
+    if not catalog.ratings_enabled or not catalog.rating_usage_basis:
+        return None
+    rating = catalog_store.fresh_rating(item, now)
+    return rating if rating and rating.score >= MIN_SCORE and rating.count >= MIN_REVIEWS else None
+
+
+def random_candidates(catalog, now):
+    result = []
+    for item in catalog.items:
+        if not item.enabled or not qualifying_rating(catalog, item, now):
+            continue
+        meals = [meal for meal in catalog_store.fresh_meals(item, now) if meal.per_person < 20000]
+        if meals:
+            result.append((item, min(meals, key=lambda meal: (meal.per_person, meal.name))))
+    return result
+
+
+def choose(rows, state, user_hash, now, *, limit=3, randomize=False):
     seen = set(state["seen"])
     available = [row for row in rows if row[0].id not in seen]
     restarted = bool(rows and not available)
@@ -121,20 +147,20 @@ def choose(rows, state, user_hash, now):
     available.sort(key=lambda row: (
         row[0].id in history,
         _time(history.get(row[0].id)) or floor,
-        hashlib.sha256((salt + row[0].id).encode()).hexdigest(),
+        secrets.randbits(64) if randomize else hashlib.sha256((salt + row[0].id).encode()).hexdigest(),
     ))
     selected, cuisines = [], set()
     # Novelty takes precedence over cuisine variety, including across new sessions.
     for tier in ([row for row in available if row[0].id not in history],
                  [row for row in available if row[0].id in history]):
         for row in tier:
-            if len(selected) == 3:
+            if len(selected) == limit:
                 break
             if row[0].cuisine not in cuisines:
                 selected.append(row)
                 cuisines.add(row[0].cuisine)
         for row in tier:
-            if len(selected) == 3:
+            if len(selected) == limit:
                 break
             if row not in selected:
                 selected.append(row)
@@ -160,7 +186,8 @@ def map_link(item, state, user_hash, now):
     if not (_secret() and _base_url() and user_hash):
         return item.place_url
     payload = {"place_id": item.id, "user_hash": user_hash, "session_id": state["session_id"],
-               "area": state["area"], "budget": state["budget"], "min_rating": state["min_rating"],
+               "area": item.area if state.get("mode") == "random" else state["area"],
+               "budget": state["budget"], "min_rating": state["min_rating"], "mode": state.get("mode"),
                "exposed_at": now.isoformat(), "expires": int((now + HISTORY_TTL).timestamp()),
                "click_id": uuid.uuid4().hex}
     encoded = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
@@ -240,7 +267,7 @@ def render(catalog, state, selected, exhausted, restarted, user_hash, now, *, ca
         text += "\n아직 소개할 맛집이 없어요. 잠시 후 다시 찾아주세요."
     else:
         text += ("\n선택한 조건의 맛집이 없어요. 별점 기준을 바꾸거나 다시 골라보세요."
-                 if state["min_rating"] else "\n이 예산에 맞는 메뉴를 찾지 못했어요. 지역이나 예산을 바꿔보세요.")
+                 if state["min_rating"] else "\n이 조건에 맞는 식당을 찾지 못했어요. 지역이나 예산을 바꿔보세요.")
     response = Response().add_output_to_response(Response.create_simple_text(text))
     if selected:
         response.add_output_to_response(Response.create_carousel([
@@ -258,17 +285,49 @@ def render(catalog, state, selected, exhausted, restarted, user_hash, now, *, ca
     return response.get_response()
 
 
+def render_random(catalog, state, selected, restarted, user_hash, now, *, can_browse):
+    if selected:
+        item, meal = selected[0]
+        text = f"🎲 오늘은 여기 어때요?\n📍 {item.area} · 2만원 미만"
+        text += ("\n가격은 카카오맵 등록 기준이에요." if item.origin == "kakao_public"
+                 else "\n메뉴와 가격은 카드에서 확인하세요.")
+        if restarted:
+            text += "\n봤던 곳도 다시 골라봤어요."
+    else:
+        text = "🎲 지금 추천할 식당이 없어요.\n지역과 예산을 골라볼까요?"
+    response = Response().add_output_to_response(Response.create_simple_text(text))
+    if selected:
+        response.add_output_to_response(Response.create_carousel([
+            card(item, meal, catalog, state, user_hash if can_browse else "", now)]))
+    replies = [reply("🔄 다시 뽑기", RANDOM)] if selected and can_browse else []
+    replies.append(reply("⚙️ 조건 고르기", HOME))
+    response.add_quick_replies(replies)
+    return response.get_response()
+
+
 def transition(previous, utterance, catalog, user_hash, now, *, can_browse=True):
     state, valid = prepare_state(previous, now)
     if utterance == HOME:
-        state.update(area=None, budget=None, min_rating=0.0, seen=[], session_id=uuid.uuid4().hex)
+        state.update(mode=None, area=None, budget=None, min_rating=0.0, seen=[], session_id=uuid.uuid4().hex)
         return state, home_response(), None
+    if utterance == RANDOM:
+        refresh = valid and state.get("mode") == "random"
+        if not refresh:
+            state.update(mode="random", area=None, budget=None, min_rating=0.0, seen=[])
+        selected, _, restarted = choose(random_candidates(catalog, now), state, user_hash, now,
+                                        limit=1, randomize=True)
+        response = render_random(catalog, state, selected, restarted, user_hash, now, can_browse=can_browse)
+        event = {"mode": "random", "area": selected[0][0].area if selected else None,
+                 "budget": "2만원 미만", "min_rating": 0.0,
+                 "place_ids": [item.id for item, _ in selected], "count": len(selected),
+                 "revision": catalog.revision, "refresh": refresh}
+        return state, response, event
     if utterance in AREAS:
-        state.update(area=AREAS[utterance], budget=None, min_rating=0.0, seen=[])
+        state.update(mode=None, area=AREAS[utterance], budget=None, min_rating=0.0, seen=[])
         return state, budget_response(state["area"]), None
     if utterance in MEAL_CHOICES:
         area, budget = MEAL_CHOICES[utterance]
-        state.update(area=area, budget=budget, min_rating=0.0, seen=[])
+        state.update(mode=None, area=area, budget=budget, min_rating=0.0, seen=[])
     elif utterance in {MORE, RATING_MENU, *RATINGS}:
         if not can_browse or not valid or not state["area"] or not state["budget"]:
             notice = "다시 찾아볼까요? 지역부터 골라주세요."

@@ -18,6 +18,7 @@ from app.services import restaurant_catalog as store
 from app.utils.json_files import write_json_atomic
 
 AREAS = ("궁동", "어은동", "죽동")
+SEARCH_WORDS = ("음식점", "한식", "일식", "중식", "양식", "분식")
 PUBLIC_PANEL = "https://place.map.kakao.com/places/panel3/{place_id}"
 COLLECT_INTERVAL = timedelta(hours=6)
 REQUEST_DELAY = 0.5
@@ -53,21 +54,23 @@ def _get_json(session, url, **kwargs):
     return data
 
 
-def discover(session, area, key, pages=2):
+def discover(session, area, key, pages=3):
     places = []
-    for page in range(1, pages + 1):
-        data = _get_json(session, "https://dapi.kakao.com/v2/local/search/keyword.json",
-            headers={"Authorization": "KakaoAK " + key},
-            params={"query": f"대전 {area} 음식점", "category_group_code": "FD6", "size": 15, "page": page})
-        if not isinstance(data.get("documents"), list) or not isinstance(data.get("meta"), dict):
-            raise ValueError("Unexpected Local search response")
-        for place in data["documents"]:
-            if (isinstance(place, dict) and re.fullmatch(r"[0-9]+", str(place.get("id", "")))
-                    and f"대전 유성구 {area} " in str(place.get("address_name", ""))):
-                places.append(place)
-        if data["meta"].get("is_end"):
-            break
-        time.sleep(REQUEST_DELAY)
+    for word in SEARCH_WORDS:
+        page_limit = pages if word == "음식점" else min(pages, 2)
+        for page in range(1, page_limit + 1):
+            data = _get_json(session, "https://dapi.kakao.com/v2/local/search/keyword.json",
+                headers={"Authorization": "KakaoAK " + key},
+                params={"query": f"대전 {area} {word}", "category_group_code": "FD6", "size": 15, "page": page})
+            if not isinstance(data.get("documents"), list) or not isinstance(data.get("meta"), dict):
+                raise ValueError("Unexpected Local search response")
+            for place in data["documents"]:
+                if (isinstance(place, dict) and re.fullmatch(r"[0-9]+", str(place.get("id", "")))
+                        and f"대전 유성구 {area} " in str(place.get("address_name", ""))):
+                    places.append(place)
+            if data["meta"].get("is_end"):
+                break
+            time.sleep(REQUEST_DELAY)
     return list({place["id"]: place for place in places}.values())
 
 
@@ -83,7 +86,7 @@ def parse_public_place(place: dict, area: str, payload: dict, now: datetime) -> 
     """Whitelist only explicit prices, meal names and aggregate scores."""
     summary = payload.get("summary")
     menu = payload.get("menu")
-    if not isinstance(summary, dict) or not isinstance(menu, dict) or not isinstance(menu.get("menus"), dict):
+    if not isinstance(summary, dict):
         raise ValueError("Public place structure changed")
     if str(summary.get("confirm_id")) != str(place["id"]):
         raise ValueError("Place identity mismatch")
@@ -95,6 +98,12 @@ def parse_public_place(place: dict, area: str, payload: dict, now: datetime) -> 
     category = summary.get("category") or {}
     if not isinstance(category, dict) or category.get("name1") != "음식점":
         return None
+    # Some valid restaurant pages have no Kakao menu section. A delivery menu
+    # alone does not establish the in-store price used by this catalog.
+    if menu is None or (isinstance(menu, dict) and menu.get("menus") is None):
+        return None
+    if not isinstance(menu, dict) or not isinstance(menu.get("menus"), dict):
+        raise ValueError("Public place structure changed")
     cuisine = str(category.get("name2") or category.get("name") or "음식점")[:10]
     menus = menu["menus"]
     if not isinstance(menus.get("items", []), list):
@@ -163,8 +172,8 @@ def merge_results(current: Catalog, outcomes: dict[str, Restaurant | None], now:
         # A successfully read inactive/menu-less page removes only auto entries.
         # Failed page requests are absent from outcomes and preserve old entries.
     items.extend(item for place_id, item in outcomes.items() if item is not None and place_id not in handled)
-    if len(items) > 200:
-        items = items[:200]
+    if len(items) > 500:
+        items = items[:500]
     enable = current.ratings_enabled
     basis = current.rating_usage_basis
     if not basis and any(item.rating for item in items):
@@ -173,7 +182,7 @@ def merge_results(current: Catalog, outcomes: dict[str, Restaurant | None], now:
     return current.model_copy(update={"items": items, "ratings_enabled": enable, "rating_usage_basis": basis})
 
 
-def collect(pages=2):
+def collect(pages=3):
     key = os.getenv("KAKAO_REST_API_KEY", "")
     if not key:
         raise RuntimeError("Kakao Local key is missing")

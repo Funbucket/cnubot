@@ -22,6 +22,11 @@ async def home(req: KakaoRequest = Body(...)):
     return await respond("home", req)
 
 
+@router.post("/random")
+async def random(req: KakaoRequest = Body(...)):
+    return await respond("random", req)
+
+
 @router.post("/area")
 async def area(req: KakaoRequest = Body(...)):
     return await respond("area", req)
@@ -56,7 +61,7 @@ async def map_redirect(token: str = Query(..., max_length=3000)):
         from app.database import get_pool
         async with get_pool().acquire() as conn:
             await restaurants.record_event(conn, "map_click", payload["user_hash"], payload["session_id"],
-                {key: payload.get(key) for key in ("place_id", "area", "budget", "min_rating", "exposed_at")},
+                {key: payload.get(key) for key in ("place_id", "area", "budget", "min_rating", "mode", "exposed_at")},
                 event_id="click:" + payload["click_id"])
     except Exception:
         restaurants.logger.warning("Restaurant map analytics unavailable")

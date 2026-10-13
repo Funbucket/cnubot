@@ -37,8 +37,13 @@ def item(index=0, *, price=9000, diners=1, area="궁동", cuisine="한식", enab
                 "checked_on": (NOW - timedelta(days=age)).date(), "source": "가상 메뉴판"}], rating=rating)
 
 
-def rating(score=4.2, days=0):
-    return Rating(score=score, count=50, checked_at=NOW - timedelta(days=days))
+def rating(score=4.2, days=0, count=50):
+    return Rating(score=score, count=count, checked_at=NOW - timedelta(days=days))
+
+
+def qualified_catalog(items):
+    return Catalog(items=[entry if entry.rating else entry.model_copy(update={"rating": rating()})
+                          for entry in items], ratings_enabled=True, rating_usage_basis="테스트 이용 근거")
 
 
 def cards(response):
@@ -51,8 +56,8 @@ def messages(response):
 
 class CatalogTest(unittest.TestCase):
     def test_price_band_boundaries_and_shared_meal_total(self):
-        catalog = Catalog(items=[item(n, price=price) for n, price in enumerate([9999, 10000, 19999, 20000])]
-                          + [item(10, price=19999, diners=2)])
+        catalog = qualified_catalog([item(n, price=price) for n, price in enumerate([9999, 10000, 19999, 20000])]
+                                    + [item(10, price=19999, diners=2)])
         expected = {"1만원 미만": ["test-0"], "1만원대": ["test-1", "test-2", "test-10"], "2만원 이상": ["test-3"]}
         for budget, ids in expected.items():
             state, _, _ = service.transition(None, f"주변맛집 궁동 {budget}", catalog, "", NOW)
@@ -61,8 +66,8 @@ class CatalogTest(unittest.TestCase):
     def test_stale_future_hidden_and_wrong_region_are_excluded(self):
         future = item(5)
         future = future.model_copy(update={"meals": [future.meals[0].model_copy(update={"checked_on": (NOW + timedelta(days=1)).date()})]})
-        catalog = Catalog(items=[item(), item(1, age=30), item(2, age=31), item(3, enabled=False),
-                                 item(4, area="어은동"), future, item(6, area="죽동")])
+        catalog = qualified_catalog([item(), item(1, age=30), item(2, age=31), item(3, enabled=False),
+                                     item(4, area="어은동"), future, item(6, area="죽동")])
         state, _, _ = service.transition(None, "주변맛집 궁동 1만원 미만", catalog, "", NOW)
         self.assertEqual([row[0].id for row in service.candidates(catalog, state, NOW)], ["test-0", "test-1"])
 
@@ -117,10 +122,52 @@ class CatalogTest(unittest.TestCase):
 
 class BrowseTest(unittest.TestCase):
     def setUp(self):
-        self.catalog = Catalog(items=[item(n, cuisine=["한식", "일식", "중식"][n % 3]) for n in range(7)])
+        self.catalog = qualified_catalog([item(n, cuisine=["한식", "일식", "중식"][n % 3]) for n in range(7)])
+
+    def test_random_picks_one_under_20000_across_areas_without_immediate_repeat(self):
+        catalog = qualified_catalog([item(0, area="궁동", price=9999),
+                                 item(1, area="어은동", price=10000),
+                                 item(2, area="죽동", price=19999),
+                                 item(3, area="죽동", price=20000),
+                                 item(4, area="궁동", price=5000, age=31)])
+        state, home, _ = service.transition(None, service.HOME, catalog, "hash", NOW)
+        self.assertEqual(messages(home)[0], service.RANDOM)
+        seen = set()
+        for _ in range(3):
+            state, response, event = service.transition(state, service.RANDOM, catalog, "hash", NOW)
+            self.assertEqual(len(cards(response)), 1)
+            self.assertEqual(event["mode"], "random")
+            self.assertEqual(event["budget"], "2만원 미만")
+            self.assertIn(service.RANDOM, messages(response))
+            self.assertNotIn(event["place_ids"][0], seen)
+            seen.update(event["place_ids"])
+        self.assertEqual(seen, {"test-0", "test-1", "test-2"})
+        state, response, event = service.transition(state, service.RANDOM, catalog, "hash", NOW)
+        self.assertEqual(event["count"], 1)
+        self.assertIn("봤던 곳", response["template"]["outputs"][0]["simpleText"]["text"])
+        self.assertEqual(event["place_ids"][0], next(iter(state["seen"])))
+
+    def test_random_preserves_recent_history_when_switching_to_conditions(self):
+        catalog = qualified_catalog([item(n, price=9000) for n in range(6)])
+        state, _, first = service.transition(None, service.RANDOM, catalog, "hash", NOW)
+        state, home, _ = service.transition(state, service.HOME, catalog, "hash", NOW)
+        self.assertEqual(messages(home)[0], service.RANDOM)
+        state, _, result = service.transition(state, "주변맛집 궁동 1만원 미만", catalog, "hash", NOW)
+        self.assertNotIn(first["place_ids"][0], result["place_ids"])
+        self.assertIsNone(state["mode"])
+
+    def test_random_empty_and_state_unavailable_response(self):
+        catalog = qualified_catalog([item(0, price=20000), item(1, age=31)])
+        _, response, event = service.transition(None, service.RANDOM, catalog, "hash", NOW)
+        self.assertEqual(event["count"], 0)
+        self.assertEqual(cards(response), [])
+        self.assertNotIn(service.RANDOM, messages(response))
+        _, response, _ = service.transition(None, service.RANDOM, self.catalog, "", NOW, can_browse=False)
+        self.assertEqual(len(cards(response)), 1)
+        self.assertNotIn(service.RANDOM, messages(response))
 
     def test_jukdong_selection_is_isolated_and_direct_budget_needs_no_session(self):
-        catalog = Catalog(items=[item(0, area="어은동", price=12000), item(1, area="죽동", price=12000)])
+        catalog = qualified_catalog([item(0, area="어은동", price=12000), item(1, area="죽동", price=12000)])
         state, _, _ = service.transition(None, "주변맛집 어은동 1만원대", catalog, "hash", NOW)
         state, response, event = service.transition(state, "주변맛집 죽동 1만원대", catalog, "hash", NOW)
         self.assertEqual(state["area"], "죽동")
@@ -153,7 +200,7 @@ class BrowseTest(unittest.TestCase):
             self.assertFalse(first & set(next_event["place_ids"]))
 
     def test_unseen_places_take_priority_over_repeating_a_different_cuisine(self):
-        catalog = Catalog(items=[item(n) for n in range(3)] + [item(3, cuisine="일식")])
+        catalog = qualified_catalog([item(n) for n in range(3)] + [item(3, cuisine="일식")])
         state, _ = service.prepare_state(None, NOW)
         state.update(area="궁동", budget="1만원 미만", history={"test-3": NOW.isoformat()})
         _, _, event = service.transition(state, service.MORE, catalog, "hash", NOW)
@@ -175,12 +222,27 @@ class BrowseTest(unittest.TestCase):
         self.assertIn("주변맛집 별점 전체", messages(response))
 
     def test_unavailable_ratings_hidden_and_not_claimed_as_applied(self):
-        state, response, _ = service.transition(None, "주변맛집 궁동 1만원 미만", self.catalog, "hash", NOW)
+        unavailable = self.catalog.model_copy(update={"ratings_enabled": False})
+        state, response, _ = service.transition(None, "주변맛집 궁동 1만원 미만", unavailable, "hash", NOW)
         self.assertNotIn(service.RATING_MENU, messages(response))
-        state, response, event = service.transition(state, "주변맛집 별점 4.0 이상", self.catalog, "hash", NOW)
+        state, response, event = service.transition(state, "주변맛집 별점 4.0 이상", unavailable, "hash", NOW)
         self.assertEqual(state["min_rating"], 0)
         self.assertIsNone(event)
         self.assertIn("찾을 수 없어요", response["template"]["outputs"][0]["simpleText"]["text"])
+
+    def test_base_score_and_review_gate_applies_to_all_recommendation_paths(self):
+        catalog = Catalog(ratings_enabled=True, rating_usage_basis="테스트", items=[
+            item(0, rating=rating(2.9, count=50)), item(1, rating=rating(3.0, count=9)),
+            item(2, rating=rating(3.0, count=10)), item(3, rating=rating(4.8, days=8)),
+            item(4), item(5, rating=rating(5.0), enabled=False)])
+        state, response, event = service.transition(None, "주변맛집 궁동 1만원 미만", catalog, "hash", NOW)
+        self.assertEqual(event["place_ids"], ["test-2"])
+        self.assertEqual(len(cards(response)), 1)
+        _, _, random_event = service.transition(state, service.RANDOM, catalog, "hash", NOW)
+        self.assertEqual(random_event["place_ids"], ["test-2"])
+        disabled = catalog.model_copy(update={"ratings_enabled": False})
+        _, _, event = service.transition(None, "주변맛집 궁동 1만원 미만", disabled, "hash", NOW)
+        self.assertEqual(event["count"], 0)
 
     def test_expired_or_missing_state_restarts_and_direct_budget_survives_without_db(self):
         state, _, _ = service.transition(None, "주변맛집 궁동 1만원 미만", self.catalog, "hash", NOW)
@@ -188,7 +250,7 @@ class BrowseTest(unittest.TestCase):
             _, response, event = service.transition(previous, service.MORE, self.catalog, "hash", NOW + timedelta(minutes=31))
             self.assertIsNone(event)
             self.assertEqual(len(cards(response)), 0)
-            self.assertEqual(set(messages(response)), set(service.AREAS))
+            self.assertEqual(set(messages(response)), set(service.AREAS) | {service.RANDOM})
         _, response, _ = service.transition(None, "주변맛집 궁동 1만원 미만", self.catalog, "", NOW, can_browse=False)
         self.assertEqual(len(cards(response)), 3)
         self.assertNotIn(service.MORE, messages(response))
@@ -298,7 +360,7 @@ class DatabaseTest(unittest.IsolatedAsyncioTestCase):
     async def test_concurrent_refreshes_are_isolated_and_do_not_repeat(self):
         from app import database
         conn = Connection()
-        catalog = Catalog(items=[item(n) for n in range(12)])
+        catalog = qualified_catalog([item(n) for n in range(12)])
         with patch.object(database, "get_pool", return_value=Pool(conn)), patch.object(store, "safe_catalog", return_value=catalog), patch.object(store, "now_kst", return_value=NOW):
             await service.browse_response("주변맛집 궁동 1만원 미만", "test-user-a")
             await service.browse_response(service.HOME, "test-user-b")
@@ -311,14 +373,14 @@ class DatabaseTest(unittest.IsolatedAsyncioTestCase):
     async def test_analytics_failure_does_not_disable_browsing(self):
         from app import database
         conn = Connection(); conn.fail_events = True
-        with patch.object(database, "get_pool", return_value=Pool(conn)), patch.object(store, "safe_catalog", return_value=Catalog(items=[item()])), patch.object(store, "now_kst", return_value=NOW):
+        with patch.object(database, "get_pool", return_value=Pool(conn)), patch.object(store, "safe_catalog", return_value=qualified_catalog([item()])), patch.object(store, "now_kst", return_value=NOW):
             response = await service.browse_response("주변맛집 궁동 1만원 미만", "test-user")
         self.assertIn(service.MORE, messages(response))
         self.assertEqual(len(conn.states), 1)
 
     async def test_db_failure_returns_basic_recommendation_without_state_controls(self):
         from app import database
-        with patch.object(database, "get_pool", side_effect=RuntimeError), patch.object(store, "safe_catalog", return_value=Catalog(items=[item()])), patch.object(store, "now_kst", return_value=NOW):
+        with patch.object(database, "get_pool", side_effect=RuntimeError), patch.object(store, "safe_catalog", return_value=qualified_catalog([item()])), patch.object(store, "now_kst", return_value=NOW):
             response = await service.browse_response("주변맛집 궁동 1만원 미만", "test-user")
         self.assertEqual(len(cards(response)), 1)
         self.assertNotIn(service.MORE, messages(response))

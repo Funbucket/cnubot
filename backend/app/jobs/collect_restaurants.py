@@ -16,13 +16,17 @@ def due(now, status):
         # A newly introduced district must not wait for the old six-hour window.
         return True
     try:
-        last = datetime.fromisoformat(status.get("last_success_at", ""))
+        state = status.get("status")
+        if state == "running":
+            marker, interval = status.get("started_at"), timedelta(minutes=15)
+        elif state in {"failed", "partial"}:
+            marker, interval = (status.get("finished_at") or status.get("started_at")
+                                or status.get("last_success_at")), timedelta(minutes=30)
+        else:
+            marker, interval = status.get("last_success_at"), COLLECT_INTERVAL
+        last = datetime.fromisoformat(marker or "")
         if last.tzinfo is None:
             return True
-        interval = timedelta(minutes=30) if status.get("status") in {"failed", "partial"} else COLLECT_INTERVAL
-        if status.get("status") == "running":
-            last = datetime.fromisoformat(status["started_at"])
-            interval = timedelta(minutes=15)
         return now - last >= interval
     except (KeyError, TypeError, ValueError):
         return True
@@ -31,7 +35,7 @@ def due(now, status):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true")
-    parser.add_argument("--pages", type=int, default=2, choices=range(1, 4))
+    parser.add_argument("--pages", type=int, default=3, choices=range(1, 4))
     args = parser.parse_args()
     while True:
         if args.once or due(now_kst(), read_status()):

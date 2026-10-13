@@ -82,7 +82,7 @@ class Catalog(VerifiedModel):
     revision: int = Field(default=0, strict=True, ge=0)
     ratings_enabled: bool = False
     rating_usage_basis: str = Field(default="", max_length=500)
-    items: list[Restaurant] = Field(default_factory=list, max_length=200)
+    items: list[Restaurant] = Field(default_factory=list, max_length=500)
 
     @model_validator(mode="after")
     def unique_and_authorized(self):

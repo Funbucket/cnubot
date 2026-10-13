@@ -67,6 +67,16 @@ class CollectionTest(unittest.TestCase):
 
     def test_no_menu_or_closed_excluded_without_inventing_prices_or_ratings(self):
         self.assertIsNone(scraper.parse_public_place(PLACE, "어은동", payload(), NOW))
+        no_menu_section = payload()
+        no_menu_section.pop("menu")
+        self.assertIsNone(scraper.parse_public_place(PLACE, "어은동", no_menu_section, NOW))
+        delivery_only = payload()
+        delivery_only["menu"] = {"yogiyo_menus": {"items": [{"name": "우동", "price": 8000}]}}
+        self.assertIsNone(scraper.parse_public_place(PLACE, "어은동", delivery_only, NOW))
+        malformed_menu = payload()
+        malformed_menu["menu"] = {"menus": []}
+        with self.assertRaises(ValueError):
+            scraper.parse_public_place(PLACE, "어은동", malformed_menu, NOW)
         data = payload({"name": "우동", "price": 8000})
         data["summary"]["status"] = "N"
         self.assertIsNone(scraper.parse_public_place(PLACE, "어은동", data, NOW))
@@ -128,12 +138,28 @@ class CollectionTest(unittest.TestCase):
         self.assertEqual(get.call_args.kwargs["headers"], {"Authorization": "KakaoAK test-only"})
         self.assertTrue(get.call_args.args[1].startswith("https://dapi.kakao.com/"))
 
+    def test_discovery_searches_multiple_food_types_and_deduplicates_places(self):
+        def local_response(session, url, **kwargs):
+            word = kwargs["params"]["query"].split()[-1]
+            return {"meta": {"is_end": True}, "documents": [PLACE,
+                {**PLACE, "id": str(1000 + scraper.SEARCH_WORDS.index(word))}]}
+        with patch.object(scraper, "_get_json", side_effect=local_response) as get:
+            places = scraper.discover(object(), "어은동", "test-only")
+        self.assertEqual(len(places), len(scraper.SEARCH_WORDS) + 1)
+        self.assertEqual(get.call_count, len(scraper.SEARCH_WORDS))
+        self.assertEqual({call.kwargs["params"]["query"].split()[-1] for call in get.call_args_list},
+                         set(scraper.SEARCH_WORDS))
+
     def test_schedule_refreshes_six_hour_success_and_retries_partial_after_half_hour(self):
         success = {"status": "ok", "last_success_at": NOW.isoformat(),
                    "areas": {area: {"status": "ok"} for area in scraper.AREAS}}
         self.assertFalse(due(NOW + timedelta(hours=5), success))
         self.assertTrue(due(NOW + timedelta(hours=6), success))
         self.assertTrue(due(NOW + timedelta(minutes=30), {**success, "status": "partial"}))
+        failed = {**success, "status": "failed", "finished_at": NOW.isoformat(),
+                  "last_success_at": (NOW - timedelta(hours=7)).isoformat()}
+        self.assertFalse(due(NOW + timedelta(minutes=29), failed))
+        self.assertTrue(due(NOW + timedelta(minutes=30), failed))
         self.assertTrue(due(NOW, {}))
         self.assertTrue(due(NOW, {**success, "areas": {"궁동": {}, "어은동": {}}}))
 
