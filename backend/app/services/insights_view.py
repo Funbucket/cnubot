@@ -29,15 +29,21 @@ def render_insights(data):
     today = datetime.now(ZoneInfo('Asia/Seoul')).date()
     start, end = data.get('start_date'), data.get('end_date')
     period = f"{start or '수집 시작'} → {end or '현재'}"
-    presets = ''.join(f'<a class="preset{" selected" if start == today - timedelta(days=days-1) and end == today else ""}" href="?start_date={today-timedelta(days=days-1)}&amp;end_date={today}">{label}</a>' for days, label in [(1, '오늘'), (7, '7일'), (30, '30일')])
-    presets += f'<a class="preset{" selected" if not start and not end else ""}" href="?all_time=true">전체</a>'
+    presets = ''
+    for days, label in [(1, '오늘'), (7, '최근 7일'), (30, '최근 30일')]:
+        selected = start == today - timedelta(days=days-1) and end == today
+        current = 'aria-current="true"' if selected else ''
+        presets += f'<a class="preset{" selected" if selected else ""}" {current} href="?start_date={today-timedelta(days=days-1)}&amp;end_date={today}">{label}</a>'
+    current = 'aria-current="true"' if not start and not end else ''
+    presets += f'<a class="preset{" selected" if not start and not end else ""}" {current} href="?all_time=true">전체</a>'
     cards = []
     for label, p, metric, note in [
-        ('버튼 경유 · 목록 진입 사용자', entry, 'action_users', '버튼을 눌러 상품 목록으로 이동한 사용자 수'),
-        ('바로 노출 · 상품 클릭 사용자', inline, 'clicked_users', '학식 응답 안의 상품 카드를 클릭한 사용자 수'),
+        ('버튼 경유 · 목록 진입', entry, 'action_users', '버튼을 눌러 상품 목록으로 이동한 사용자'),
+        ('바로 노출 · 상품 클릭', inline, 'clicked_users', '학식 응답의 상품 카드를 클릭한 사용자'),
     ]:
         reach, clicked = p.get('reach_users', 0), p.get(metric, 0)
-        cards.append(f'<article class="metric"><span>{label}</span><strong>{clicked:,}<small>명</small></strong><p>접점 노출 {reach:,}명 <span class="pill">클릭률 {rate(clicked, reach)}</span></p><small>{note}</small></article>')
+        rate_label = '목록 진입률' if metric == 'action_users' else '상품 클릭률'
+        cards.append(f'<article class="metric"><span>{label}</span><strong>{clicked:,}<small>명</small></strong><p><span class="pill">{rate_label} {rate(clicked, reach)}</span><span class="metric-reach">노출 {reach:,}명</span></p><small>{note}</small></article>')
     products = data.get('products', [])
     active = sum(1 for p in products if p.get('clicked_users', 0))
     cards.append(f'<article class="metric"><span>클릭이 발생한 상품 수</span><strong>{active:,}<small>개</small></strong><p>관측된 상품 {len(products):,}개 중</p><small>사용자 수가 아니라 클릭이 발생한 서로 다른 상품 수입니다.</small></article>')
@@ -70,13 +76,15 @@ def render_insights(data):
     for index, p in enumerate(sorted(products, key=lambda p: p.get('clicked_users', 0), reverse=True), 1):
         name = p.get('product_name') or p['product_key']
         exposed, clicked = p.get('exposed_users', 0), p.get('clicked_users', 0)
-        product_rows.append(f'<tr data-product data-name="{esc(name)} {esc(p.get("category_name"))} {esc(p["product_key"])}" data-clicks="{clicked}" data-reach="{exposed}" data-rate="{clicked/exposed if exposed else -1}"><td><span class="rank">{index:02}</span><div><b>{esc(name)}</b><small>{esc(p.get("category_name") or "카테고리 미상")}</small><details class="product-id"><summary>상품 ID</summary><code>{esc(p["product_key"])}</code></details></div></td><td>{exposed:,}</td><td><b>{clicked:,}</b></td><td>{rate(clicked, exposed)}</td><td>{p.get("click_events", 0):,}</td></tr>')
+        product_rows.append(f'<tr data-product data-name="{esc(name)} {esc(p.get("category_name"))} {esc(p["product_key"])}" data-clicks="{clicked}" data-reach="{exposed}" data-rate="{clicked/exposed if exposed else -1}"><td><div class="product-cell"><span class="rank">{index:02}</span><div><b>{esc(name)}</b><small>{esc(p.get("category_name") or "카테고리 미상")}</small><details class="product-id"><summary>상품 ID</summary><code>{esc(p["product_key"])}</code></details></div></div></td><td>{exposed:,}</td><td><b>{clicked:,}</b></td><td>{rate(clicked, exposed)}</td><td>{p.get("click_events", 0):,}</td></tr>')
     product_table = table(['상품', '노출 사용자', '클릭 사용자 ↓', '클릭률', '클릭 횟수'], product_rows, attributes='id="products-table"')
     daily = sorted(data.get('daily', []), key=lambda r: str(r['day']))
     peak = max([r['clicked_users'] for r in daily] + [1])
-    chart = ''.join(f'<div class="chart-day" tabindex="0" aria-label="{esc(r["day"])}: 클릭 {r["clicked_users"]:,}명"><div class="chart-tip">{esc(r["day"])}<br>클릭 {r["clicked_users"]:,}명</div><div class="chart-bar" style="height:{max(2, r["clicked_users"]/peak*100):.1f}%;opacity:{1 if r["clicked_users"] else .2}"></div><small>{str(r["day"])[5:]}</small></div>' for r in daily)
+    chart = ''.join(f'<div class="chart-day" tabindex="0" aria-label="{esc(r["day"])}: 클릭 {r["clicked_users"]:,}명"><div class="chart-tip">{esc(r["day"])}<br>클릭 {r["clicked_users"]:,}명</div><div class="chart-bar" style="height:{r["clicked_users"]/peak*100:.1f}%"></div><small>{str(r["day"])[5:]}</small></div>' for r in daily)
+    if daily:
+        chart = f'<div class="chart-axis" aria-hidden="true"><span>{peak:,}명</span><span>{peak / 2:g}</span><span>0</span></div><div class="chart-plot">{chart}</div>'
     if not daily:
-        chart = '<p class="empty">아직 일별 클릭 데이터가 없습니다.</p>'
+        chart = '<div class="chart-empty"><b>일별 클릭 기록이 없습니다</b><p>기간을 넓혀 확인하거나, 클릭 기록이 수집된 뒤 다시 조회해 주세요.</p><a class="text-link" href="?all_time=true">전체 기간 보기 →</a></div>'
     daily_table = table(['날짜 (KST)', '노출 사용자', '클릭 사용자', '클릭 횟수'], [row(esc(r['day']), f'{r["exposed_users"]:,}', f'{r["clicked_users"]:,}', f'{r["click_events"]:,}') for r in reversed(daily)])
     messages = table(['버튼 문구 / 위치', '버튼 노출 사용자', '버튼 클릭 사용자', '버튼 클릭률', '상품 클릭 사용자'], [row(f'<b>{esc(r["label"])}</b><small>{esc(r.get("source"))}</small>', f'{r["exposed_users"]:,}', f'{r["entry_users"]:,}', rate(r['entry_users'], r['exposed_users']), f'{r["card_clicked_users"]:,}') for r in data.get('entry_labels', [])])
     positions = table(['카드 위치', '노출 사용자', '클릭 사용자', '클릭률'], [row(f'{r["row"]}행 {r["column"]}열', f'{r["exposed_users"]:,}', f'{r["clicked_users"]:,}', rate(r['clicked_users'], r['exposed_users'])) for r in data.get('positions', [])])
