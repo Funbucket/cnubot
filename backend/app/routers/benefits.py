@@ -11,14 +11,18 @@ def _utterance(req: KakaoRequest | None) -> str:
     return (req.userRequest.utterance if req else "").strip()
 
 
+def _user_id(req: KakaoRequest) -> str | None:
+    return req.userRequest.user.id if req.userRequest.user else None
+
+
 @router.post("/home")
 async def home(req: KakaoRequest = Body(...)):
-    return JSONResponse(benefits.list_response("학교혜택 최신"))
+    return JSONResponse(await benefits.browse_response("학교혜택 최신", _user_id(req), show_intro=True))
 
 
 @router.post("/list")
 async def list_benefits(req: KakaoRequest = Body(...)):
-    return JSONResponse(benefits.list_response(_utterance(req)))
+    return JSONResponse(await benefits.browse_response(_utterance(req), _user_id(req)))
 
 
 @router.post("/detail")
@@ -28,5 +32,4 @@ async def detail(req: KakaoRequest = Body(...)):
 
 @router.post("/page")
 async def page(req: KakaoRequest = Body(...)):
-    # 고정 messageText 매핑의 첫 버전은 다음 페이지를 최신 목록으로 반환한다.
-    return JSONResponse(benefits.list_response("학교혜택 최신", page=1))
+    return JSONResponse(await benefits.browse_response(_utterance(req), _user_id(req)))

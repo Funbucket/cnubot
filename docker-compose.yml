@@ -37,6 +37,7 @@ services:
       TOSS_PUBLISHER_ID: ${TOSS_PUBLISHER_ID}
       TOSS_LIVE_RECOMMENDATIONS: ${TOSS_LIVE_RECOMMENDATIONS:-false}
       MENU_DATA_DIR: /data/menus
+      BENEFITS_DATA_PATH: /data/menus/benefits.json
       RESTAURANTS_ENABLED: ${RESTAURANTS_ENABLED:-false}
       RESTAURANTS_DATA_PATH: /data/menus/restaurants.json
       RESTAURANTS_TRACKING_SECRET: ${RESTAURANTS_TRACKING_SECRET:-}
@@ -59,6 +60,17 @@ services:
     entrypoint: ["python", "-m", "app.jobs.monitor_dorm_menu"]
     environment:
       MENU_DATA_DIR: /data/menus
+    volumes:
+      - ./backend/app:/code/app/
+      - ./data:/data/menus
+    restart: always
+
+  benefits-collector:
+    build:
+      context: ./backend
+    entrypoint: ["python", "-m", "app.jobs.collect_benefits"]
+    environment:
+      BENEFITS_DATA_PATH: /data/menus/benefits.json
     volumes:
       - ./backend/app:/code/app/
       - ./data:/data/menus

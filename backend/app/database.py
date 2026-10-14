@@ -33,6 +33,15 @@ async def init_database() -> None:
     pool = get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
+            """CREATE TABLE IF NOT EXISTS benefits_browse_states (
+                user_hash TEXT PRIMARY KEY,
+                state JSONB NOT NULL,
+                expires_at TIMESTAMPTZ NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_benefits_browse_expiry
+                ON benefits_browse_states(expires_at);"""
+        )
+        await conn.execute(
             """
             CREATE TABLE IF NOT EXISTS experiments (
                 id BIGSERIAL PRIMARY KEY,
