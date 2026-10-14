@@ -17,7 +17,7 @@ ACTIVE = ('running','paused','observing')
 
 def decode(row):
     item = dict(row)
-    for key in ('protocol','result','details'):
+    for key in ('protocol','result','details','quality_review'):
         if isinstance(item.get(key),str):
             item[key] = json.loads(item[key])
     return item
@@ -75,7 +75,10 @@ async def list_designs():
         rows = await conn.fetch('''SELECT e.id,e.experiment_key,e.name,e.hypothesis,e.kind,e.protocol,
            e.config_hash,e.status,e.started_at,e.enrollment_closed_at,e.stopped_at,e.created_at,
            (SELECT COUNT(*) FROM lab_assignments a WHERE a.experiment_id=e.id) AS assigned_users,
-           (SELECT result FROM lab_analysis_runs r WHERE r.experiment_id=e.id ORDER BY id DESC LIMIT 1) AS result
+           (SELECT result FROM lab_analysis_runs r WHERE r.experiment_id=e.id ORDER BY id DESC LIMIT 1) AS result,
+           (SELECT jsonb_build_object('created_at',a.created_at,'reason',a.reason,'details',a.details)
+            FROM lab_audit a WHERE a.experiment_id=e.id AND a.action='basic_quality_approval'
+            ORDER BY a.id DESC LIMIT 1) AS quality_review
            FROM lab_experiments e ORDER BY id DESC''')
     return [decode(r) for r in rows]
 
@@ -194,6 +197,42 @@ async def stop(eid, reason, actor):
             await audit(conn,eid,actor,'stop',reason,{'affected_assignments':count})
 
 
+async def recover_policy_integrity_stop(eid, reason, actor):
+    """Explicit incident recovery; keep frozen policy, assignment clocks and errors."""
+    async with get_pool().acquire() as conn:
+        async with conn.transaction():
+            await conn.execute('SELECT pg_advisory_xact_lock(846201)')
+            raw = await conn.fetchrow('SELECT * FROM lab_experiments WHERE id=$1 FOR UPDATE', eid)
+            if not raw:
+                raise ValueError('실험을 찾을 수 없습니다.')
+            d = decode(raw)
+            if d['status'] != 'stopped' or d['protocol'].get('purpose') != 'exploratory':
+                raise ValueError('운영상 중단된 탐색 실험만 이 복구를 사용할 수 있습니다.')
+            if d['protocol'].get('policy_checksum') != policy_checksum():
+                raise ValueError('고정 정책과 현재 코드가 일치해야 복구할 수 있습니다.')
+            if d['config_hash'] != canonical_hash(d['protocol']):
+                raise ValueError('고정 실험 계획이 변경되었습니다.')
+            if datetime.now(UTC) >= enrollment_end(d):
+                raise ValueError('원래 모집 기간이 끝났습니다.')
+            other = await conn.fetchval(
+                "SELECT id FROM lab_experiments WHERE status IN ('running','paused','observing') AND id<>$1", eid)
+            if other:
+                raise ValueError('동일 학식 슬롯에서 다른 실험이 진행 중입니다.')
+            latest_stop = await conn.fetchrow(
+                "SELECT actor,reason FROM lab_audit WHERE experiment_id=$1 AND action='stop' ORDER BY id DESC LIMIT 1", eid)
+            if not latest_stop or latest_stop['actor'] != 'system' or not latest_stop['reason'].startswith('고정 운영 경보:'):
+                raise ValueError('자동 운영 경보로 중단된 실험만 이 복구를 사용할 수 있습니다.')
+            count = await conn.fetchval('SELECT COUNT(*) FROM lab_assignments WHERE experiment_id=$1', eid)
+            if count >= d['protocol']['total_users']:
+                raise ValueError('원래 모집 목표에 이미 도달했습니다.')
+            await conn.execute("UPDATE lab_experiments SET status='running',stopped_at=NULL,enrollment_closed_at=NULL WHERE id=$1", eid)
+            await audit(conn,eid,actor,'recover',reason,{
+                'before': 'stopped', 'after': 'running', 'interrupted_at': d['stopped_at'].isoformat(),
+                'recovered_at': datetime.now(UTC).isoformat(), 'preserved_assignments': count,
+                'interpretation': '중단 구간과 오류를 보존; 확대 적용 근거로 사용 불가',
+            })
+
+
 async def assign(user_id, place, request_id, route):
     """Called only after A is valid and its output demonstrably fits; before B selection."""
     if is_qa(user_id):
@@ -249,8 +288,12 @@ async def latest(eid):
         design = await get_design(eid,conn)
         run = await conn.fetchrow('SELECT * FROM lab_analysis_runs WHERE experiment_id=$1 ORDER BY id DESC LIMIT 1',eid)
         history = await conn.fetch('SELECT action,reason,details,created_at FROM lab_audit WHERE experiment_id=$1 ORDER BY id DESC LIMIT 50',eid)
+        review = await conn.fetchval("""SELECT jsonb_build_object('created_at',created_at,'reason',reason,'details',details)
+            FROM lab_audit WHERE experiment_id=$1 AND action='basic_quality_approval'
+            ORDER BY id DESC LIMIT 1""",eid)
         counts = await conn.fetch('SELECT variant,COUNT(*)::int AS n FROM lab_assignments WHERE experiment_id=$1 GROUP BY variant',eid)
-        return {'experiment':design,'live_assigned':{r['variant']:r['n'] for r in counts},'run':decode(run) if run else None,'history':[decode(r) for r in history],
+        return {'experiment':design,'quality_review':decode({'quality_review':review})['quality_review'],
+                'live_assigned':{r['variant']:r['n'] for r in counts},'run':decode(run) if run else None,'history':[decode(r) for r in history],
                 'start_blockers':await start_blockers(design,conn) if design['status']=='draft' else []}
 
 
@@ -279,6 +322,9 @@ async def run_analysis(eid, payload, actor):
             if existing:
                 return decode(existing)
             p = d['protocol']
+            recoveries = [dict(r) for r in await conn.fetch(
+                "SELECT created_at,details FROM lab_audit WHERE experiment_id=$1 AND action='recover' AND created_at<=$2 ORDER BY created_at",
+                eid, payload.watermark)]
             if d['status'] in ('running','paused') and datetime.now(UTC)>=enrollment_end(d):
                 await conn.execute("UPDATE lab_experiments SET status='observing',enrollment_closed_at=$2 WHERE id=$1",eid,enrollment_end(d))
                 d['status']='observing'
@@ -308,7 +354,7 @@ async def run_analysis(eid, payload, actor):
             # Any failed request requires review; do not label absent error counts healthy.
             operational = operational and all(r['errors']==0 for r in request_rows)
             quality = (payload.data_complete and srm['status']=='pass' and operational and bundle_ok
-                       and p.get('policy_checksum')==policy_checksum())
+                       and p.get('policy_checksum')==policy_checksum() and not recoveries)
             last = await conn.fetchval('SELECT MAX(assigned_at) FROM lab_assignments WHERE experiment_id=$1',eid)
             final = bool(d['enrollment_closed_at'] and last and sum(mature.values())==sum(assigned.values())
                          and payload.watermark>=last+timedelta(hours=p['observation_hours'])
@@ -316,7 +362,7 @@ async def run_analysis(eid, payload, actor):
             sample_ok = sum(assigned.values())>=p['total_users']
             practical = bool(effect and effect['p_value']<0.05 and effect['delta']>=p['minimum_effect']
                              and effect['ci_low']>p['minimum_ci_lower'])
-            failures = (srm['status']=='fail' or any(r['errors'] for r in request_rows)
+            failures = (bool(recoveries) or srm['status']=='fail' or any(r['errors'] for r in request_rows)
                         or any(p.get('p95_limit_ms') and r['p95'] is not None and r['p95']>p['p95_limit_ms'] for r in request_rows)
                         or p.get('policy_checksum')!=policy_checksum())
             quality_status = 'pass' if quality else 'fail' if failures else 'pending'
@@ -327,11 +373,12 @@ async def run_analysis(eid, payload, actor):
                        else 'inconclusive' if not sample_ok else 'adoption_supported' if practical and safety and safety['passed']
                        else 'safety_unconfirmed' if not safety or not safety['passed'] else 'keep_or_followup')
             result = dict(assigned=assigned,mature=mature,clicks=clicks,effect=effect,safety=safety,srm=srm,
+                          operational_recoveries=recoveries,
                           requests=[dict(r) for r in request_rows],bundles=bundles,bundle_completion=completion,
                           quality_passed=quality,quality_status=quality_status,data_complete=payload.data_complete,operational_passed=operational,
                           bundle_passed=bundle_ok,final=final,decision_ready=ready,sample_ok=sample_ok,
                           outcome=outcome,sql_hash=hashlib.sha256(COHORT_SQL.encode()).hexdigest(),
-                          next_action='데이터 품질 문제 조사' if failures else '최종 결정 기록' if ready else '모집·관찰 완료 대기')
+                          next_action='중단·복구 구간 확인 · 결과 참고용' if recoveries else '데이터 품질 문제 조사' if failures else '최종 결정 기록' if ready else '모집·관찰 완료 대기')
             run = await conn.fetchrow('''INSERT INTO lab_analysis_runs(experiment_id,idempotency_key,config_hash,
                analysis_version,watermark,result) VALUES($1,$2,$3,$4,$5,$6::jsonb) RETURNING *''',
                eid,payload.idempotency_key,d['config_hash'],lab_stats.ANALYSIS_VERSION,payload.watermark,json.dumps(result,default=str))

@@ -250,6 +250,59 @@ async def lab_list(_: str = Depends(require_admin)):
     return await experiment_lab.list_designs()
 
 
+@router.get('/api/button-experiments')
+async def button_experiment_list(_: str = Depends(require_admin)):
+    rows = [row for row in await experiments.list_experiments()
+            if row['primary_metric'] == 'menu_button_entry_ctr']
+    analyses = await asyncio.gather(
+        *(experiments.get_analysis(row['id']) for row in rows), return_exceptions=True)
+    items = []
+    for row, analysis in zip(rows, analyses):
+        item = {key: row.get(key) for key in (
+            'id', 'name', 'status', 'started_at', 'ended_at', 'hypothesis',
+            'analysis_plan', 'baseline_rate', 'mde', 'alpha', 'power', 'min_sample_size')}
+        item['variants'] = [{key: variant[key] for key in ('variant_key', 'label', 'weight')}
+                            for variant in row['variants']]
+        from app.services.menu_button_experiment import VARIANTS
+        for variant in item['variants']:
+            variant['experience'] = VARIANTS.get(variant['variant_key'], {})
+        item['analysis'] = None if isinstance(analysis, Exception) else {
+            key: analysis.get(key) for key in (
+                'variants', 'assigned_users', 'min_sample_size_per_variant', 'srm', 'quality')}
+        items.append(item)
+    from fastapi.responses import JSONResponse
+    from fastapi.encoders import jsonable_encoder
+    return JSONResponse(jsonable_encoder(items), headers={'Cache-Control': 'no-store'})
+
+
+@router.get('/api/button-experiments/{eid}')
+async def button_experiment_detail(eid: int, actor: str = Depends(require_admin)):
+    response = await button_experiment_list(actor)
+    import json
+    for item in json.loads(response.body):
+        if item['id'] == eid:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(item, headers={'Cache-Control': 'no-store'})
+    raise HTTPException(404, '버튼 실험을 찾을 수 없습니다.')
+
+
+@router.post('/api/button-experiments/{eid}/{status}', dependencies=[Depends(require_lab_action)])
+async def button_experiment_status(eid: int, status: str, _: str = Depends(require_admin)):
+    if status not in {'running', 'paused', 'completed'}:
+        raise HTTPException(400, '지원하지 않는 상태입니다.')
+    rows = await experiments.list_experiments()
+    row = next((r for r in rows if r['id'] == eid and r['primary_metric'] == 'menu_button_entry_ctr'), None)
+    if not row:
+        raise HTTPException(404, '버튼 실험을 찾을 수 없습니다.')
+    if row['status'] == 'completed':
+        raise HTTPException(400, '완료된 실험은 다시 변경할 수 없습니다.')
+    try:
+        await experiments.set_experiment_status(eid, status)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {'ok': True}
+
+
 @router.post('/api/experiments', dependencies=[Depends(require_lab_action)])
 async def lab_create(payload: DesignInput, actor: str = Depends(require_admin)):
     return {'id': await experiment_lab.create(payload, actor)}

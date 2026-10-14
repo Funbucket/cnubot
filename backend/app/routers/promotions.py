@@ -1,6 +1,7 @@
 from app.services import promotions
 from app.services import recommendations
 from app.services import experiments
+from app.services import menu_button_experiment
 from app.services import promotion_settings
 from app.schemas.kakao_request import KakaoRequest
 import logging
@@ -25,6 +26,7 @@ async def get_toss_shopping_promotion(req: KakaoRequest | None = Body(default=No
 async def get_today_deals(req: KakaoRequest | None = Body(default=None)):
     user_id = req.userRequest.user.id if req and req.userRequest.user else None
     entry = _promotion_entry_metadata(req)
+    await menu_button_experiment.record_click(user_id, entry, "today_deals")
     request_id = str(uuid.uuid4())
     try:
         await experiments.record_funnel_event(
@@ -72,6 +74,7 @@ async def get_collection_promotion(collection_id: str, req: KakaoRequest | None 
 async def _get_collection_promotion(req: KakaoRequest | None, collection_id: str | None):
     user_id = req.userRequest.user.id if req and req.userRequest.user else None
     entry = _promotion_entry_metadata(req)
+    await menu_button_experiment.record_click(user_id, entry, collection_id)
     source = entry["source"]
     request_id = str(uuid.uuid4())
     try:

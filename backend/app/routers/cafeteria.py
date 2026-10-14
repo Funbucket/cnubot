@@ -5,6 +5,7 @@ import time
 
 from app.schemas.kakao_request import KakaoRequest
 from app.services import lab_telemetry
+from app.services import menu_button_experiment
 from app.services.dorm_menu import DormMenuUnavailable
 from app.scrapers.dorm import is_current_week_dorm_menu
 from app.services import cafeteria, experiments, promotions, promotion_cards, promotion_preview, lab_delivery
@@ -228,6 +229,7 @@ async def _menu_response(
     if delivery:
         await lab_delivery.finish(delivery["metadata"], placed, (time.monotonic()-received)*1000)
     await _record_menu_view(user_id, place_key, kor_day, placed)
+    await menu_button_experiment.apply(user_id, response)
     await _record_promotion_button_exposures(user_id, response)
     return response
 

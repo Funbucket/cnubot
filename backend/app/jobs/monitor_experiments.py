@@ -5,12 +5,16 @@ from datetime import datetime, timezone
 
 from app.database import connect_database, close_database
 from app.schemas.experiment_lab import AnalysisInput
-from app.services import experiment_lab
+from app.services import experiment_lab, experiments
 
 logger = logging.getLogger(__name__)
 
 
 async def refresh():
+    try:
+        await experiments.complete_due_timeboxes()
+    except Exception:
+        logger.exception('Button experiment deadline check failed')
     designs = await experiment_lab.list_designs()
     now = datetime.now(timezone.utc)
     bucket = int(now.timestamp()) // 900

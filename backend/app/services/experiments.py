@@ -13,6 +13,7 @@ from app.services.promotion_insights import (
 from app.database import get_pool
 from app.services.experiment_stats import minimum_sample_size
 from app.services.experiment_stats import compare_proportions
+from app.services.lab_stats import click_effect
 
 
 async def get_active_variant(experiment_key: str, user_id: str | None) -> dict[str, Any] | None:
@@ -22,7 +23,9 @@ async def get_active_variant(experiment_key: str, user_id: str | None) -> dict[s
     pool = get_pool()
     async with pool.acquire() as conn:
         experiment = await conn.fetchrow(
-            "SELECT id, status FROM experiments WHERE experiment_key = $1",
+            """SELECT id, status FROM experiments WHERE experiment_key = $1
+               AND (analysis_plan->>'mode' IS DISTINCT FROM 'exploratory_timebox'
+                    OR NOW() < (analysis_plan->>'deadline')::timestamptz)""",
             experiment_key,
         )
         if not experiment or experiment["status"] != "running":
@@ -94,7 +97,9 @@ async def record_event(
     pool = get_pool()
     async with pool.acquire() as conn:
         experiment = await conn.fetchrow(
-            "SELECT id FROM experiments WHERE experiment_key = $1",
+            """SELECT id FROM experiments WHERE experiment_key = $1
+               AND (analysis_plan->>'mode' IS DISTINCT FROM 'exploratory_timebox'
+                    OR (status='running' AND NOW() < (analysis_plan->>'deadline')::timestamptz))""",
             experiment_key,
         )
 
@@ -187,7 +192,19 @@ def _choose_variant(experiment_key: str, user_id: str, variants) -> str:
     return variants[-1]["variant_key"]
 
 
+async def complete_due_timeboxes():
+    """Close only explicitly timeboxed menu tests; never change lab experiments."""
+    await get_pool().execute("""
+        UPDATE experiments SET status='completed',
+            ended_at=(analysis_plan->>'deadline')::timestamptz
+        WHERE primary_metric='menu_button_entry_ctr' AND status IN ('running','paused')
+          AND analysis_plan->>'mode'='exploratory_timebox'
+          AND (analysis_plan->>'deadline')::timestamptz <= NOW()
+    """)
+
+
 async def list_experiments() -> list[dict[str, Any]]:
+    await complete_due_timeboxes()
     pool = get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
@@ -206,6 +223,8 @@ async def list_experiments() -> list[dict[str, Any]]:
             item = dict(row)
             if isinstance(item.get("variants"), str):
                 item["variants"] = json.loads(item["variants"])
+            if isinstance(item.get("analysis_plan"), str):
+                item["analysis_plan"] = json.loads(item["analysis_plan"])
             result.append(item)
         return result
 
@@ -265,9 +284,15 @@ def generate_experiment_key(name: str) -> str:
 
 
 async def set_experiment_status(experiment_id: int, status: str) -> None:
+    await complete_due_timeboxes()
     pool = get_pool()
     async with pool.acquire() as conn:
         if status == "running":
+            expired = await conn.fetchval("""SELECT analysis_plan->>'mode'='exploratory_timebox'
+                AND (analysis_plan->>'deadline')::timestamptz <= NOW()
+                FROM experiments WHERE id=$1""", experiment_id)
+            if expired:
+                raise ValueError("마감된 탐색 실험은 재개할 수 없습니다.")
             min_sample = await conn.fetchval(
                 "SELECT min_sample_size FROM experiments WHERE id = $1",
                 experiment_id,
@@ -332,6 +357,26 @@ async def get_analysis(experiment_id: int) -> dict[str, Any]:
             """,
             experiment_id,
         )
+        if experiment["primary_metric"] == "menu_button_entry_ctr":
+            rows = await conn.fetch(
+                """
+                SELECT v.variant_key, v.label AS product_key,
+                       COUNT(DISTINCT e.user_id) FILTER (
+                           WHERE e.event_name='menu_button_exposure') AS exposed_users,
+                       COUNT(DISTINCT e.user_id) FILTER (
+                           WHERE e.event_name='menu_button_click' AND EXISTS (
+                               SELECT 1 FROM user_events x
+                               WHERE x.experiment_id=e.experiment_id AND x.user_id=e.user_id
+                                 AND x.variant_key=e.variant_key AND x.event_name='menu_button_exposure'
+                                 AND x.created_at<=e.created_at
+                                 AND x.properties->>'collection_id'=e.properties->>'collection_id'
+                                 AND x.properties->>'label'=e.properties->>'label'
+                           )) AS clicked_users
+                FROM experiment_variants v LEFT JOIN user_events e
+                  ON e.experiment_id=v.experiment_id AND e.variant_key=v.variant_key
+                WHERE v.experiment_id=$1 GROUP BY v.variant_key,v.label ORDER BY v.variant_key
+                """, experiment_id,
+            )
         variants = [dict(row) for row in rows]
         control = next((row for row in variants if row["variant_key"] == "control"), None)
         for row in variants:
@@ -341,7 +386,8 @@ async def get_analysis(experiment_id: int) -> dict[str, Any]:
                 else 0
             )
             if control and row["variant_key"] != "control":
-                row["comparison"] = compare_proportions(
+                compare = click_effect if experiment["primary_metric"] == "menu_button_entry_ctr" else compare_proportions
+                row["comparison"] = compare(
                     control["clicked_users"], control["exposed_users"],
                     row["clicked_users"], row["exposed_users"],
                 )
@@ -423,6 +469,10 @@ async def refresh_rollup(experiment_id: int, conn=None) -> None:
 
 
 def _quality_summary(experiment, variants, srm) -> dict[str, Any]:
+    plan = experiment.get("analysis_plan") or {}
+    if isinstance(plan, str):
+        plan = json.loads(plan)
+    exploratory = plan.get("mode") == "exploratory_timebox"
     min_sample = experiment["min_sample_size"]
     sample_ok = bool(min_sample) and all(
         row["exposed_users"] >= min_sample for row in variants
@@ -435,7 +485,10 @@ def _quality_summary(experiment, variants, srm) -> dict[str, Any]:
         "sample_size_ok": sample_ok and bool(variants),
         "srm_ok": srm["status"] in {"pass", "insufficient_data"},
         "significant": significant,
-        "decision_ready": sample_ok and srm["status"] == "pass" and significant,
+        "decision_ready": not exploratory and sample_ok and srm["status"] == "pass" and significant,
+        "exploratory": exploratory,
+        "planned_total_users": plan.get("planned_total_users"),
+        "deadline": plan.get("deadline"),
         "alpha": experiment["alpha"],
         "power": experiment["power"],
     }

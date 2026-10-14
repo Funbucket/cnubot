@@ -1,0 +1,6 @@
+interface:
+  display_name: "cnubot 실험 설계 검토"
+  short_description: "실제 적격 유입과 클릭 데이터로 모집 가능성·검정력·동시 실행 검토"
+  default_prompt: "$cnubot-experiment-review 스킬로 기존 데이터를 확인하고 실행 가능한 실험을 설계해 주세요."
+policy:
+  allow_implicit_invocation: true

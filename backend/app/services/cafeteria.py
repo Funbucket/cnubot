@@ -1,5 +1,6 @@
 from app.scrapers import dorm
 from app.services import promotions
+from app.services import menu_button_experiment
 from app.services import restaurant_catalog, restaurants
 from app.utils import common, kakao_json_response
 
@@ -215,15 +216,7 @@ def create_menu_response(
         lunch_rows = rows_by_meal["lunch"]
         if lunch_rows:
             lunch_rows[0][0]["buttons"].append(
-                promotions.create_toss_promotion_button(
-                    promotion_product,
-                    promotion_click_url,
-                    label=(
-                        promotions.TOSS_DORM_MENU_BUTTON_LABEL
-                        if common.get_eng_place(place) == "dorm"
-                        else promotions.TOSS_LIVING_MENU_BUTTON_LABEL
-                    ),
-                )
+                menu_button_experiment.create_button()
             )
             lunch_rows[0][0]["buttonLayout"] = "vertical"
 

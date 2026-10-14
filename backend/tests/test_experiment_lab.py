@@ -65,6 +65,54 @@ class LabStatisticsTest(unittest.TestCase):
 
 @unittest.skipUnless(os.getenv('LAB_TEST_DATABASE_URL'), 'isolated PostgreSQL required')
 class LabDatabaseTest(unittest.IsolatedAsyncioTestCase):
+    async def test_basic_quality_approval_preserves_stop_and_does_not_satisfy_formal_gate(self):
+        await lab.assign('synthetic-review-user','dorm','review-request','/cafeteria/menu/day')
+        await lab.stop(self.eid,'synthetic stop for limited review','test')
+        run=await lab.run_analysis(self.eid,AnalysisInput(watermark=datetime.now(UTC),
+            idempotency_key='limited-review',data_complete=False,reason='synthetic quality review'),'test')
+        before=dict(await self.pool.fetchrow('SELECT * FROM lab_experiments WHERE id=$1',self.eid))
+        async with self.pool.acquire() as conn:
+            await lab.audit(conn,self.eid,'test','basic_quality_approval','synthetic limited approval',
+                {'scope':'basic_instrumentation','formal_pass':False,'reviewed_run_id':run['id'],
+                 'accepted':['배정 균형'],'pending':['관찰·수집 완전성']})
+        detail=await lab.latest(self.eid)
+        self.assertEqual(detail['quality_review']['details']['scope'],'basic_instrumentation')
+        self.assertFalse(detail['quality_review']['details']['formal_pass'])
+        self.assertFalse(detail['run']['result']['quality_passed'])
+        self.assertFalse(detail['run']['result']['decision_ready'])
+        self.assertEqual(before,dict(await self.pool.fetchrow('SELECT * FROM lab_experiments WHERE id=$1',self.eid)))
+        listing=await lab.list_designs()
+        self.assertEqual(listing[0]['quality_review'],detail['quality_review'])
+        candidate={**detail['experiment'],'kind':'ab','status':'draft',
+            'protocol':{**detail['experiment']['protocol'],'purpose':'confirmatory','aa_experiment_id':self.eid}}
+        async with self.pool.acquire() as conn:
+            blockers=await lab.start_blockers(candidate,conn)
+        self.assertIn('완료된 별도 A/A 실험 및 분석',blockers)
+
+    async def test_integrity_recovery_preserves_plan_assignments_and_marks_interruption(self):
+        original = await lab.assign('synthetic-user', 'dorm', 'before', '/cafeteria/menu/day')
+        d = await lab.get_design(self.eid, self.pool)
+        p = d['protocol']
+        p.update(purpose='exploratory',exploratory_enrollment_days=9,observation_hours=24)
+        await self.pool.execute("UPDATE lab_experiments SET kind='ab',protocol=$2::jsonb,config_hash=$3 WHERE id=$1",
+                                self.eid,json.dumps(p),lab.canonical_hash(p))
+        before = dict(await self.pool.fetchrow('SELECT started_at,salt,protocol,config_hash FROM lab_experiments WHERE id=$1',self.eid))
+        assignment = dict(await self.pool.fetchrow('SELECT * FROM lab_assignments WHERE experiment_id=$1',self.eid))
+        await lab.stop(self.eid,'고정 운영 경보: synthetic integrity error','system')
+        with patch.object(lab,'policy_checksum',return_value='changed-policy'):
+            with self.assertRaises(ValueError):
+                await lab.recover_policy_integrity_stop(self.eid,'synthetic recovery','test')
+        await lab.recover_policy_integrity_stop(self.eid,'synthetic restored policy recovery','test')
+        after = dict(await self.pool.fetchrow('SELECT started_at,salt,protocol,config_hash FROM lab_experiments WHERE id=$1',self.eid))
+        self.assertEqual(before,after)
+        self.assertEqual(assignment,dict(await self.pool.fetchrow('SELECT * FROM lab_assignments WHERE experiment_id=$1',self.eid)))
+        self.assertEqual((await lab.assign('synthetic-user','dorm','after','/cafeteria/menu/day'))['variant'],original['variant'])
+        run=await lab.run_analysis(self.eid,AnalysisInput(watermark=datetime.now(UTC),
+            idempotency_key='recovered',data_complete=True,reason='synthetic review'),'test')
+        self.assertEqual(len(run['result']['operational_recoveries']),1)
+        self.assertFalse(run['result']['quality_passed'])
+        self.assertEqual(run['result']['quality_status'],'fail')
+
     async def asyncSetUp(self):
         import asyncpg
         import uuid
