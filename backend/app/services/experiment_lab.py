@@ -17,7 +17,7 @@ ACTIVE = ('running','paused','observing')
 
 def decode(row):
     item = dict(row)
-    for key in ('protocol','result','details','quality_review'):
+    for key in ('protocol','result','details','quality_review','followup_schedule'):
         if isinstance(item.get(key),str):
             item[key] = json.loads(item[key])
     return item
@@ -78,7 +78,10 @@ async def list_designs():
            (SELECT result FROM lab_analysis_runs r WHERE r.experiment_id=e.id ORDER BY id DESC LIMIT 1) AS result,
            (SELECT jsonb_build_object('created_at',a.created_at,'reason',a.reason,'details',a.details)
             FROM lab_audit a WHERE a.experiment_id=e.id AND a.action='basic_quality_approval'
-            ORDER BY a.id DESC LIMIT 1) AS quality_review
+            ORDER BY a.id DESC LIMIT 1) AS quality_review,
+           (SELECT jsonb_build_object('created_at',a.created_at,'reason',a.reason,'details',a.details)
+            FROM lab_audit a WHERE a.experiment_id=e.id AND a.action='schedule_followup'
+            ORDER BY a.id DESC LIMIT 1) AS followup_schedule
            FROM lab_experiments e ORDER BY id DESC''')
     return [decode(r) for r in rows]
 
@@ -291,8 +294,16 @@ async def latest(eid):
         review = await conn.fetchval("""SELECT jsonb_build_object('created_at',created_at,'reason',reason,'details',details)
             FROM lab_audit WHERE experiment_id=$1 AND action='basic_quality_approval'
             ORDER BY id DESC LIMIT 1""",eid)
+        simulation = await conn.fetchrow("""SELECT details,created_at FROM lab_audit
+            WHERE experiment_id=$1 AND action='simulation' AND details->>'config_hash'=$2
+            ORDER BY id DESC LIMIT 1""",eid,design['config_hash'])
+        schedule = await conn.fetchval("""SELECT jsonb_build_object('created_at',created_at,'reason',reason,'details',details)
+            FROM lab_audit WHERE experiment_id=$1 AND action='schedule_followup'
+            ORDER BY id DESC LIMIT 1""",eid)
         counts = await conn.fetch('SELECT variant,COUNT(*)::int AS n FROM lab_assignments WHERE experiment_id=$1 GROUP BY variant',eid)
         return {'experiment':design,'quality_review':decode({'quality_review':review})['quality_review'],
+                'sample_simulation':decode(simulation) if simulation else None,
+                'followup_schedule':decode({'followup_schedule':schedule})['followup_schedule'],
                 'live_assigned':{r['variant']:r['n'] for r in counts},'run':decode(run) if run else None,'history':[decode(r) for r in history],
                 'start_blockers':await start_blockers(design,conn) if design['status']=='draft' else []}
 

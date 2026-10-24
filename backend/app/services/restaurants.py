@@ -400,6 +400,12 @@ async def browse_response(utterance, user_id):
                 # Analytics failure must not roll back a working browsing session.
                 try:
                     async with conn.transaction():
+                        action = next((kind for kind, messages in ROUTE_MESSAGES.items() if utterance in messages), None)
+                        if action:
+                            await record_event(conn, "browse", user_hash, state["session_id"], {
+                                "action": action, "area": state.get("area"), "budget": state.get("budget"),
+                                "min_rating": state.get("min_rating"), "mode": state.get("mode"),
+                            })
                         if utterance == HOME:
                             await record_event(conn, "entry", user_hash, state["session_id"], {})
                         if event is not None:

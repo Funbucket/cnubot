@@ -1,0 +1,6 @@
+.env*
+!.env.example
+tests/
+scripts/
+README.md
+*.tsbuildinfo

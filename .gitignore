@@ -3,3 +3,6 @@
 __pycache__
 data/
 logs/
+
+.vercel/
+node_modules/

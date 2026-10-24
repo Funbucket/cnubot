@@ -71,7 +71,7 @@ def _get_sync(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]
 
 
 def _get_live_sync(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-    """External access reserved for the scheduled collector."""
+    """External access for the scheduled collector and admin revenue reads."""
     response = requests.get(
         f"https://sharelink.toss.im{path}",
         params=params,

@@ -65,6 +65,22 @@ class LabStatisticsTest(unittest.TestCase):
 
 @unittest.skipUnless(os.getenv('LAB_TEST_DATABASE_URL'), 'isolated PostgreSQL required')
 class LabDatabaseTest(unittest.IsolatedAsyncioTestCase):
+    async def test_sample_simulation_uses_frozen_plan_even_after_many_newer_audits(self):
+        d=await lab.get_design(self.eid,self.pool)
+        before=dict(await self.pool.fetchrow('SELECT * FROM lab_experiments WHERE id=$1',self.eid))
+        async with self.pool.acquire() as conn:
+            await lab.audit(conn,self.eid,'test','simulation','synthetic matching plan',
+                {'config_hash':d['config_hash'],'total_users':2000,'baseline':.0035,'scenarios':[]})
+            for i in range(51):
+                await lab.audit(conn,self.eid,'test','analysis','synthetic newer monitor entry',{})
+            await lab.audit(conn,self.eid,'test','simulation','synthetic different plan',
+                {'config_hash':'different-plan','total_users':9999,'scenarios':[]})
+        detail=await lab.latest(self.eid)
+        self.assertEqual(len(detail['history']),50)
+        self.assertEqual(detail['sample_simulation']['details']['config_hash'],d['config_hash'])
+        self.assertEqual(detail['sample_simulation']['details']['total_users'],2000)
+        self.assertEqual(before,dict(await self.pool.fetchrow('SELECT * FROM lab_experiments WHERE id=$1',self.eid)))
+
     async def test_basic_quality_approval_preserves_stop_and_does_not_satisfy_formal_gate(self):
         await lab.assign('synthetic-review-user','dorm','review-request','/cafeteria/menu/day')
         await lab.stop(self.eid,'synthetic stop for limited review','test')
@@ -443,7 +459,7 @@ class LabAdminApiTest(unittest.IsolatedAsyncioTestCase):
         import httpx
         from unittest.mock import AsyncMock
         from app.app import app
-        with patch.dict(os.environ,{'ADMIN_USERNAME':'synthetic-admin','ADMIN_PASSWORD':'test-only-password'}), \
+        with patch.dict(os.environ,{'ADMIN_USERNAME':'synthetic-admin','ADMIN_PASSWORD':'test-only-password','ADMIN_WEB_ORIGIN':'https://admin.example.com'}), \
              patch.object(lab,'create',new=AsyncMock(return_value=123)) as create:
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://example.test') as client:
                 self.assertEqual((await client.get('/admin/api/experiments')).status_code,401)
@@ -456,4 +472,6 @@ class LabAdminApiTest(unittest.IsolatedAsyncioTestCase):
                 invalid={**body,'protocol':{'baseline_rate':.99,'target_effect':.025}}
                 self.assertEqual((await client.post('/admin/api/experiments',json=invalid,auth=auth,
                      headers={'X-Experiment-Admin':'1'})).status_code,422)
-                self.assertEqual((await client.get('/admin/experiments',auth=auth)).status_code,200)
+                response = await client.get('/admin/experiments',auth=auth)
+                self.assertEqual(response.status_code,303)
+                self.assertEqual(response.headers['location'],'https://admin.example.com/admin/experiments')

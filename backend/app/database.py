@@ -251,3 +251,5 @@ async def init_database() -> None:
     async with pool.acquire() as conn:
         await conn.execute((Path(__file__).parent / "migrations" / "001_experiment_lab.sql").read_text())
         await conn.execute((Path(__file__).parent / "migrations" / "002_restaurants.sql").read_text())
+        await conn.execute((Path(__file__).parent / "migrations" / "003_fortune.sql").read_text())
+        await conn.execute((Path(__file__).parent / "migrations" / "005_restaurant_browse_events.sql").read_text())

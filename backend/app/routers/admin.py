@@ -2,42 +2,18 @@ import asyncio
 import os
 import secrets
 import time
-from datetime import date, datetime
-from typing import Any
-from zoneinfo import ZoneInfo
-from pathlib import Path
 
 from app.services import experiments
 from app.services import llm
 from app.services import toss_sharelink
 from app.services import promotion_settings
-from fastapi import APIRouter, Depends, HTTPException, Query, Header
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi import APIRouter, Depends, HTTPException, Header
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from app.schemas.admin import VariantInput, ExperimentInput, SuggestInput, ShareTextInput
 
-from app.services.admin_views import (
-    _experiment_card,
-    _recommendations_page,
-    _insights_page,
-    _legacy_insights_page,
-    _percent,
-    _insight_path_rows,
-    _insight_guardrail_rows,
-    _insight_fatigue_rows,
-    _insight_path_funnels,
-    _insight_label,
-    _insight_sources,
-    _insight_entry_label,
-    _insight_entry_button_label,
-    _insight_surfaces,
-    _page,
-)
 
 router = APIRouter()
 security = HTTPBasic()
-_insights_cache: dict[tuple[date | None, date | None], tuple[float, dict[str, Any]]] = {}
-_INSIGHTS_CACHE_SECONDS = 300
 
 
 def require_admin(credentials: HTTPBasicCredentials = Depends(security)) -> str:
@@ -55,27 +31,12 @@ def require_admin(credentials: HTTPBasicCredentials = Depends(security)) -> str:
     return credentials.username
 
 
-@router.get("", response_class=HTMLResponse)
-async def admin_home(_: str = Depends(require_admin)):
-    return RedirectResponse("/admin/recommendations", status_code=303)
 
 
-@router.get("/recommendations", response_class=HTMLResponse)
-async def recommendations(_: str = Depends(require_admin)):
-    return HTMLResponse((Path(__file__).parent.parent / "static" / "promotion_editor.html").read_text(),
-                        headers={"Cache-Control": "no-store"})
 
 
-@router.get("/events", response_class=HTMLResponse)
-async def event_collection(_: str = Depends(require_admin)):
-    path = Path(__file__).parent.parent / "static" / "events.html"
-    return HTMLResponse(path.read_text(), headers={"Cache-Control": "no-store"})
 
 
-@router.get("/assets/admin_nav.css", response_class=PlainTextResponse, include_in_schema=False)
-async def admin_navigation_css():
-    path = Path(__file__).parent.parent / "static" / "admin_nav.css"
-    return PlainTextResponse(path.read_text(), media_type="text/css", headers={"Cache-Control": "no-cache"})
 
 
 def require_editor(x_promotion_editor: str = Header(default="")):
@@ -155,46 +116,12 @@ async def recommendation_diagnostic(collection_id: str = "food", _: str = Depend
     }, headers={"Cache-Control": "no-store"})
 
 
-@router.get("/insight", response_class=HTMLResponse, include_in_schema=False)
-@router.get("/insights", response_class=HTMLResponse)
-async def insights(
-    start_date: date | None = Query(default=None),
-    end_date: date | None = Query(default=None),
-    all_time: bool = Query(default=False),
-    _: str = Depends(require_admin),
-):
-    if not all_time and start_date is None and end_date is None:
-        end_date = datetime.now(ZoneInfo("Asia/Seoul")).date()
-        start_date = end_date
-    if start_date and end_date and start_date > end_date:
-        raise HTTPException(status_code=400, detail="시작일은 종료일보다 늦을 수 없습니다.")
-    cache_key = (start_date, end_date)
-    cached = _insights_cache.get(cache_key)
-    if cached and time.monotonic() - cached[0] < _INSIGHTS_CACHE_SECONDS:
-        data = cached[1]
-    else:
-        data = await experiments.get_promotion_insights(start_date, end_date)
-        _insights_cache[cache_key] = (time.monotonic(), data)
-    return HTMLResponse(_insights_page(data), headers={"Cache-Control": "no-store"})
 
 
-@router.get("/experiments/legacy", response_class=HTMLResponse)
-async def experiments_home(_: str = Depends(require_admin)):
-    rows = await experiments.list_experiments()
-    analyses = await asyncio.gather(
-        *(experiments.get_analysis(row["id"]) for row in rows),
-        return_exceptions=True,
-    )
-    for row, analysis in zip(rows, analyses):
-        if not isinstance(analysis, Exception):
-            row["live_analysis"] = analysis
-    cards = "".join(_experiment_card(row) for row in rows)
-    return HTMLResponse(_page(cards, len(rows), show_form=False, show_list=True))
 
 
-@router.get("/experiments/legacy/new", response_class=HTMLResponse)
-async def new_experiment(_: str = Depends(require_admin)):
-    return HTMLResponse(_page("", 0, show_form=True, show_list=False))
+
+
 
 
 @router.post("/experiments")
@@ -398,10 +325,3 @@ async def lab_decision(eid: int,payload: DecisionInput,actor: str = Depends(requ
     except ValueError as exc:
         raise HTTPException(400,str(exc)) from exc
     return {'ok':True}
-
-
-@router.get('/experiments', response_class=HTMLResponse)
-@router.get('/experiments/new', response_class=HTMLResponse)
-async def protocol_experiments_page(_: str = Depends(require_admin)):
-    return HTMLResponse((Path(__file__).parent.parent / 'static' / 'experiment_lab.html').read_text(),
-                        headers={'Cache-Control':'no-store'})

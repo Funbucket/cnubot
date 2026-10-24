@@ -110,6 +110,32 @@ class PromotionInsightsTest(unittest.IsolatedAsyncioTestCase):
         row=next(r for r in data['paths'] if r['path']=='inline')
         self.assertEqual(row['exposure_events'],1)
 
+    async def test_inline_actions_belong_to_latest_exposure_and_count_once(self):
+        for when,name in [('09:59','commerce_card_click'),('10:00','promotion_exposure'),
+                          ('10:04','commerce_card_click'),('10:05','promotion_exposure'),
+                          ('10:05','commerce_card_click'),('10:06','commerce_card_click')]:
+            await self.conn.execute("""INSERT INTO pg_temp.user_events(user_id,event_name,created_at,surface)
+                VALUES('synthetic-window',$1,$2::text::timestamptz,'menu_inline_card')""",name,'2026-09-10 '+when+'+09')
+        data=await experiments.get_promotion_insights(date(2026,9,10),date(2026,9,10))
+        rows=[r for r in data['fatigue'] if r['path']=='inline']
+        self.assertEqual([(r['nth'],r['impressions'],r['actions']) for r in rows],[(1,1,1),(2,1,1)])
+
+    async def test_historical_period_d1_reads_following_day_without_displaying_it(self):
+        await self.event('synthetic-return','menu_view','2026-09-10 10:00+09')
+        await self.event('synthetic-return','menu_view','2026-09-11 10:00+09')
+        data=await experiments.get_promotion_insights(date(2026,9,10),date(2026,9,10))
+        self.assertEqual(len(data['guardrails']),1)
+        self.assertEqual(data['guardrails'][0]['returned_users'],1)
+        self.assertTrue(data['guardrails'][0]['return_rate_measurable'])
+
+    async def test_qa_events_are_excluded_from_all_promotion_panels(self):
+        await self.conn.execute("""INSERT INTO pg_temp.user_events(user_id,event_name,created_at,surface)
+            VALUES('synthetic-excluded','promotion_exposure','2026-09-10 10:00+09','menu_inline_card')""")
+        with patch.dict(os.environ,{'EXPERIMENT_QA_IDS':'synthetic-excluded'}):
+            data=await experiments.get_promotion_insights(date(2026,9,10),date(2026,9,10))
+        self.assertEqual(data['paths'],[])
+        self.assertEqual(data['products'],[])
+
 
 
 class PathSummaryTest(unittest.TestCase):

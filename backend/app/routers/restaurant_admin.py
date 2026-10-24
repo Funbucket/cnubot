@@ -1,8 +1,7 @@
 import asyncio
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import JSONResponse
 
 from app.routers.admin import require_admin
 from app.schemas.restaurants import Catalog, PlaceSearch
@@ -14,12 +13,6 @@ router = APIRouter(dependencies=[Depends(require_admin)])
 def require_editor(x_restaurants_editor: str = Header(default="")):
     if x_restaurants_editor != "1":
         raise HTTPException(status_code=403, detail="맛집 관리 화면에서 요청해주세요.")
-
-
-@router.get("")
-async def editor():
-    page = Path(__file__).resolve().parents[1] / "static" / "restaurant_editor.html"
-    return HTMLResponse(page.read_text(encoding="utf-8"), headers={"Cache-Control": "no-store"})
 
 
 @router.get("/catalog")

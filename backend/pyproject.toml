@@ -17,6 +17,7 @@ requests = "^2.32.2"
 python-dotenv = "^1.0.1"
 asyncpg = "^0.29.0"
 scipy = "^1.14"
+cryptography = ">=44,<47"
 
 [build-system]
 requires = ["poetry-core"]

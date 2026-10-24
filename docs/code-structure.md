@@ -7,7 +7,9 @@
 | HTTP | `backend/app/routers/` | 요청 인증·검증, 서비스 호출, HTTP 응답 |
 | 요청 모델 | `backend/app/schemas/` | 외부 입력 구조와 검증 조건 |
 | 도메인 서비스 | `backend/app/services/` | 학식·셔틀·상품 선택과 업무 규칙 |
-| 관리자 화면 | `services/admin_views.py`, `services/insights_view.py` | 데이터로 HTML 생성 |
+| 관리자 화면 | `apps/insights/app/`, `apps/insights/templates/admin/` | Next.js 화면·관리 폼·탐색, FastAPI HTML 의존 없음 |
+| 관리자 API 연결 | `apps/insights/lib/admin-bridge.ts`, `routers/admin_bridge.py` | 허용된 JSON 관리 API의 인증·암호화 전달 |
+| 이전 관리자 주소 | `routers/admin_pages.py` | 인증 후 고정된 새 웹 주소로 연결 |
 | 상품 카드 | `services/promotion_cards.py` | 상품 데이터로 Kakao 응답 생성 |
 | 인사이트 집계 | `services/promotion_insights.py` | 기간 필터, SQL, 경로·재방문 집계 |
 | 셔틀 일정 | `services/shuttle_calendar.py` | 휴일·방학·다음 운행일 판단 |
@@ -20,7 +22,7 @@
 - 라우터에는 화면 템플릿이나 데이터 수집 구현을 추가하지 않는다.
 - 카드 출력 변경은 `promotion_cards.py`에서 처리한다. 상품 선택·회전·추적은 `promotions.py`에서 처리한다.
 - `experiments.get_promotion_insights()`는 기존 호출을 유지하는 진입점이며, 데이터베이스 풀을 집계 모듈에 전달한다. SQL 수정은 집계 모듈에서 한다.
-- 기존 모듈에서 가져오던 렌더러와 헬퍼는 재노출해 기존 호출부를 유지한다. 신규 호출은 역할에 맞는 모듈을 사용한다.
+- 기존 데이터·운영 API의 호출 호환성을 유지한다. 화면은 Next.js에서 소유하며 제거한 FastAPI HTML 렌더러를 재노출하지 않는다.
 - 원자적 JSON 저장은 메뉴 데이터 저장에 사용한다. 다른 파일 저장 방식으로 확대할 때는 파일 생성·권한·오류 처리 요구를 별도로 확인한다.
 - API 경로·요청 모델·Kakao 응답 내용·집계 SQL 변경은 리팩토링과 구분해서 검증한다.
 

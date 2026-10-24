@@ -28,6 +28,8 @@ docker compose exec -T backend python -m unittest discover -s tests
 
 ## 문서
 
+- [Next.js 인사이트·관리자 화면 개발 및 Vercel 배포](apps/insights/README.md)
+- [인사이트 집계 정의](docs/insights-dashboard.md)
 - [코드 구조](docs/code-structure.md)
 - [카카오 메시지 등록](docs/kakao-message-routing.md)
 - [상품 배치 수집](docs/product-collection.md)
@@ -36,4 +38,4 @@ docker compose exec -T backend python -m unittest discover -s tests
 
 ## 기술
 
-FastAPI · Uvicorn · PostgreSQL · Docker Compose
+FastAPI · Uvicorn · PostgreSQL · Docker Compose · Next.js · React · TypeScript

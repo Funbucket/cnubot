@@ -111,11 +111,13 @@ def _status_buttons(route: str):
     return buttons
 
 
-def create_nearby_shuttles_response(data):
+def create_nearby_shuttles_response(data, *, analytics=None):
     current_kst = common.get_current_kr_time()
     today = current_kst.date()
     calendar = data.get("academic_calendar", {})
     reason = _non_operation_reason(calendar, today)
+    if analytics is not None:
+        analytics.update(status="closed" if reason else "unknown", reason=reason, routes=[])
     first_departure = _first_departure(data)
     if reason:
         next_date = _next_service_date(calendar, today)
@@ -142,6 +144,13 @@ def create_nearby_shuttles_response(data):
         route: calculate_bus_times(times, current_kst)
         for route, times in all_route_times.items()
     }
+    if analytics is not None:
+        analytics.update(
+            status="ended" if all(state["status"] == "ended" for state in result.values())
+                else "operating" if any(state["status"] == "operating" for state in result.values())
+                else "before_first",
+            routes=[{"route": route, "status": state["status"]} for route, state in result.items()],
+        )
 
     kakao_response = kakao_json_response.KakaoJsonResponse()
 

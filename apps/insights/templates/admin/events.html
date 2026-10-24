@@ -4,7 +4,7 @@
 </style><link rel="stylesheet" href="/admin/assets/admin_nav.css"></head><body class="admin-unified admin-events">
 <header class="admin-topbar"><a class="admin-brand" href="/admin"><span class="admin-brand-mark">C</span>CNU ADMIN</a><nav class="admin-nav" aria-label="관리자 메뉴"><a href="/admin/recommendations">상품·버튼 관리</a><a href="/admin/insights">인사이트</a><a href="/admin/experiments">실험실</a><a href="/admin/events" aria-current="page">이벤트 수집</a></nav></header>
 <main><header class="admin-page-heading"><span class="eyebrow">USER EVENT COLLECTION</span><h1>사용자 이벤트 수집</h1><p class="muted">어디서 수집하고, 어떻게 연결하며, 어떤 형태로 저장하는지 확인합니다.</p></header>
-<p class="note">현재 코드 기준의 설계 안내입니다. 아래 JSON은 가상 데이터이며 실시간 로그가 아닙니다. 저장소는 PostgreSQL의 <code>user_events</code> 테이블이고, 이벤트별 추가 정보는 <code>properties JSONB</code>에 저장됩니다.</p>
+<p class="note">현재 코드 기준의 설계 안내입니다. 아래 JSON은 가상 데이터이며 실시간 로그가 아닙니다. 저장소는 PostgreSQL의 <code>user_events</code> 및 맛집 전용 <code>restaurant_events</code> 테이블이고, 이벤트별 추가 정보는 <code>properties JSONB</code>에 저장됩니다.</p>
 <section><h2>수집 흐름</h2><div class="flow"><div class="step"><b>01 · 요청</b><h3>카카오 스킬 호출</h3><p>사용자 ID와 버튼 extra를 읽습니다. 학식 조회·기획전 진입 요청이 출발점입니다.</p></div><div class="step"><b>02 · 응답 생성</b><h3>조회·노출 기록</h3><p>메뉴 조회, 진입 버튼, 상품 카드 노출을 서버에서 기록합니다.</p></div><div class="step"><b>03 · 구매 버튼</b><h3>추적 링크 경유</h3><p>서명·만료 검증 → 클릭 저장 → 외부 상품 페이지로 302 이동합니다.</p></div><div class="step"><b>04 · 저장·활용</b><h3>user_events</h3><p>인사이트·실험 분석에 사용하고, 카테고리 클릭은 개인화 선호도에도 반영합니다.</p></div></div></section>
 <section><h2>현재 수집하는 주요 이벤트</h2><div class="table-wrap"><table><thead><tr><th>이벤트</th><th>기록 시점</th><th>해석</th></tr></thead><tbody>
 <tr><td><code>menu_view</code></td><td>학식 조회 처리</td><td>식당·날짜·인라인 상품 카드 포함 여부</td></tr>
@@ -14,6 +14,14 @@
 <tr><td><code>commerce_card_click</code></td><td>유효한 추적 링크 접근</td><td>상품·버튼 문구·카드 위치·유입 경로</td></tr>
 <tr><td><code>recommendation_click</code></td><td>같은 클릭의 추천 서비스 처리</td><td>상품 ID가 있을 때 추가 기록. 카테고리 선호도 갱신에 사용</td></tr>
 </tbody></table></div><p class="muted">한 번의 구매 버튼 클릭에 commerce_card_click과 recommendation_click이 함께 생길 수 있습니다. 두 이벤트를 더하면 클릭 수가 중복됩니다.</p></section>
+<section><h2>오늘의 운세 이벤트</h2><p>운세도 같은 <code>user_events</code>와 카카오 <code>user_id</code>를 사용합니다. <code>fortune_entered</code> · <code>fortune_profile_form_opened</code> · <code>fortune_profile_saved</code> · <code>fortune_profile_updated</code> · <code>fortune_requested</code> · <code>fortune_response_created</code> · <code>fortune_failed</code> · <code>fortune_delete_requested</code> · <code>fortune_profile_deleted</code>를 기록합니다.</p><p>출생 정보·분석 결과는 전용 테이블에 암호화해 저장하고 이벤트에는 프로필·결과 ID로 연결합니다. 저장·수정·삭제 이벤트는 데이터 변경과 같은 트랜잭션에서 기록합니다. 운세 응답 생성은 실제 읽음이 아닙니다. 삭제하면 연결된 운세 이벤트도 제거하며 사용자·요청 ID가 없는 삭제 완료 건수만 남깁니다.</p><a href="/admin/insights#fortune">운세 지표 확인 →</a></section>
+<section><h2>맛집·셔틀 이벤트</h2><div class="table-wrap"><table><thead><tr><th>저장소 / 이벤트</th><th>기록 시점</th><th>추가 정보</th></tr></thead><tbody>
+<tr><td><code>restaurant_events / browse</code></td><td>유효한 맛집 발화 처리</td><td>진입·지역·예산·별점·랜덤·다른 곳 행동과 현재 조건. 입력 원문은 저장하지 않습니다.</td></tr>
+<tr><td><code>restaurant_events / entry</code></td><td>맛집 첫 화면 응답</td><td>세션 시작. browse와 함께 생길 수 있어 두 이벤트를 합쳐 조회 횟수로 쓰지 않습니다.</td></tr>
+<tr><td><code>restaurant_events / recommendation</code></td><td>맛집 추천 응답 생성</td><td>지역·예산·별점·식당 ID·결과 개수·재추천 여부. 빈 결과도 포함합니다.</td></tr>
+<tr><td><code>restaurant_events / map_click</code></td><td>유효한 지도 추적 링크 열기</td><td>식당·세션·노출 당시 조건. 같은 링크 재접근은 중복 제거합니다.</td></tr>
+<tr><td><code>user_events / shuttle_view</code></td><td>셔틀 응답 생성 후</td><td>운행 중·첫차 전·종료·휴무 상태, 휴무 사유, 노선별 상태. 사용자 식별자가 없어도 횟수는 기록합니다.</td></tr>
+</tbody></table></div><p>맛집 식별자는 기존 SHA-256 user_hash를 유지하고 개발자·QA 제외 목록도 같은 방식으로 해시해 적용합니다. 셔틀은 기존 user_id 기준입니다. 수집 오류가 사용자 응답을 막지 않으며, 누락 이벤트의 재전송은 보장하지 않습니다. 조회·지도 열기는 실제 방문·탑승이 아닙니다. 셔틀 외부 링크 클릭은 수집하지 않습니다.</p><p>기존 맛집 기록도 집계하지만 browse와 셔틀은 새 계측 배포 이후부터 수집됩니다. 별도 맛집·셔틀 스킬이나 발화 등록은 추가하지 않습니다.</p><p><a href="/admin/insights#restaurants">맛집 인사이트 →</a> · <a href="/admin/insights#shuttle">셔틀 인사이트 →</a></p></section>
 <section><h2>저장되는 JSON 형태</h2><p class="muted">DB 행을 JSON으로 표현한 예시입니다. 모든 이벤트가 모든 필드를 채우지는 않으며, properties는 경로에 따라 달라집니다.</p><div class="controls"><label>이벤트 선택<br><select id="event-select"></select></label><button id="copy" type="button">JSON 복사</button><span id="status" role="status"></span></div><pre id="json" tabindex="0" aria-label="이벤트 JSON 예시"></pre></section>
 <section><h2>필드와 연결 방식</h2><div class="table-wrap"><table><thead><tr><th>필드</th><th>의미와 현재 동작</th></tr></thead><tbody>
 <tr><td><code>id / event_id / schema_version</code></td><td>DB 순번 / 이벤트 UUID / 기본 버전 1. event_id에는 부분 UNIQUE 인덱스가 있습니다.</td></tr>
